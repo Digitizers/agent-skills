@@ -20,6 +20,15 @@ Claude develops, Codex reviews, Claude fixes — **in a loop** — the human rev
 
 Converged = Codex's latest review is against **current HEAD** *and* raises no new actionable finding at any blocking severity (P0/P1/P2). Do **not** declare convergence off a single comment surface — a PR clean on `/reviews` can still carry an un-triaged finding on the inline or issue surface.
 
+**Codex posts its outcome on different surfaces depending on the result — poll BOTH or you will misread the loop:**
+
+| Outcome | Where it lands | API |
+|---|---|---|
+| **Has findings** | a PR **review** + inline **review-comments** | `pulls/N/reviews` + `pulls/N/comments` |
+| **Clean** ("Didn't find any major issues") | a top-level **issue comment** — *no* review object, *no* `commit_id`, *no* inline comment | `issues/N/comments` |
+
+A clean pass emits **only** an issue comment. If your poll watches `pulls/N/reviews` for a HEAD-matching `commit_id`, a clean PR reads as **"never reviewed" forever** — you'll re-trigger endlessly and wrongly conclude Codex is down/rate-capped. **Convergence check = an `issues/N/comments` Codex comment matching `/didn.t find any major issues/i` on/after your last push, OR a `reviews` entry at HEAD with no new blocking finding.** Never gate convergence on the `/reviews` surface alone.
+
 ## Rules that keep it correct
 
 - **Verify vs HEAD first.** A finding whose commit is a *strict ancestor* of HEAD is **stale** (a later commit already fixed it) — read the code at HEAD, confirm the fix, do **not** re-fix (re-fixing churns the PR and restarts the loop). A finding on HEAD is **current** — triage it. If it's on HEAD but wrong, it's a **false positive** — verify, 👎, leave it. Only a *real finding on HEAD* re-enters the fix loop. (ancestor check + queries → REFERENCE.md)
