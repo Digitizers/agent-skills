@@ -17,20 +17,25 @@ frontmatter `description` to decide when to load it) and optional
 
 ## Install
 
-Clone once, then symlink the skills you want into your agent's skills directory
-(the symlink pattern keeps the repo the single source of truth):
+**On any machine — clone once, then run the installer:**
 
 ```bash
 git clone https://github.com/Digitizers/agent-skills.git ~/Documents/GitHub/agent-skills
-
-# Claude Code (user-level skills):
-ln -s ~/Documents/GitHub/agent-skills/codex-review-loop ~/.claude/skills/codex-review-loop
-
-# OpenClaw (adjust to your skills path):
-ln -s ~/Documents/GitHub/agent-skills/codex-review-loop ~/.agents/skills/codex-review-loop
+cd ~/Documents/GitHub/agent-skills && ./install.sh
 ```
 
-On a new machine, `git clone` + re-create the symlinks and every skill is back.
+`install.sh` symlinks every skill folder into `~/.claude/skills/` (Claude Code).
+It's idempotent and safe — it replaces a stale symlink and skips any real
+directory of the same name, so it never clobbers unrelated skills. Pass a
+different target for other agents:
+
+```bash
+./install.sh ~/.agents/skills     # OpenClaw, or any custom skills path
+```
+
+The symlink pattern keeps this repo the single source of truth — edit a skill
+here, and every machine's agent picks it up. On a new machine: `git clone` +
+`./install.sh` and every skill is back.
 
 ## Adding a skill
 
