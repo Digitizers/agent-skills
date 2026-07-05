@@ -9,13 +9,17 @@ description: Safely run a one-off write, backfill, or data-mutating script again
 
 ## The protocol
 
-1. **Pull the connection safely.** `vercel env pull /tmp/op.env --environment=production -y` (or your platform's equivalent) into a **temp file**.
+1. **Pull the connection into a private temp file.** Create it with `mktemp` — never a predictable path like `/tmp/op.env`, which can collide with a concurrent run or be a planted symlink on a shared runner — and arm a cleanup trap **up front** so the creds file is removed on every exit path:
+   ```bash
+   ENVFILE=$(mktemp); trap 'rm -f "$ENVFILE"' EXIT
+   vercel env pull "$ENVFILE" --environment=production -y   # or your platform's equivalent
+   ```
    - **Neon + Vercel gotcha:** `DATABASE_URL` / `DIRECT_DATABASE_URL` are often marked *Sensitive*, so `vercel env pull` returns them **empty** — the run then has no connection. Use `DATABASE_URL_UNPOOLED` (Neon's direct, non-sensitive URL), which pulls fine, and map it into `DATABASE_URL` for the command. Don't un-mark the sensitive vars (that widens exposure).
 2. **Dry-run first.** If the script has `--dry-run`, run it and **read the exact rows/output that WOULD be written**. No dry-run flag? Preview with a rolled-back transaction or a `SELECT` that shows the effect. Confirm the target (table / batch / id range) is in the expected **pre-state** — e.g. the batch count is `0` before you insert.
 3. **Get explicit human authorization for the real write.** State precisely: what operation, **how many rows**, which table, which env. Approval of a dry-run is **not** approval of the write — ask again for the live run.
 4. **Execute.** Capture stdout to a file if it *is* the deliverable (e.g. a codes CSV). Keep the command identical to the dry-run minus the flag.
 5. **Verify post-state with a read.** Row count == intended, and key invariants hold (uniqueness, flags set correctly, `redeemedBy IS NULL`, etc.). A write you didn't verify isn't done.
-6. **Clean up.** `rm` the temp env file — it holds prod credentials. Remove it **even on failure** (trap/`finally`).
+6. **Clean up.** The `EXIT` trap from step 1 removes the temp creds file on every exit path — including failure. If you didn't arm one, `rm -f "$ENVFILE"` now. Never leave a prod-credentials file on disk.
 
 ## Rules
 
