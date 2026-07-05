@@ -33,10 +33,17 @@ A clean pass emits **only** an issue comment. If your poll watches `pulls/N/revi
 
 - **Verify vs HEAD first.** A finding whose commit is a *strict ancestor* of HEAD is **stale** (a later commit already fixed it) — read the code at HEAD, confirm the fix, do **not** re-fix (re-fixing churns the PR and restarts the loop). A finding on HEAD is **current** — triage it. If it's on HEAD but wrong, it's a **false positive** — verify, 👎, leave it. Only a *real finding on HEAD* re-enters the fix loop. (ancestor check + queries → REFERENCE.md)
 - **Tell stale from new by id + line.** `line: null` or a re-anchored (unchanged) comment id = outdated/already-handled. A **new** comment id on the latest commit = a new finding.
-- **Every fix ships a regression test** — encode the failure mode so a later round can't silently re-break it. This is what stops the loop oscillating.
+- **Every code fix ships a regression test** — encode the failure mode so a later round can't silently re-break it. This is what stops the loop oscillating. *Test where applicable:* doc / copy / config-flag fixes have no unit test — for those the next Codex pass **is** the check, so don't invent a meaningless test to satisfy the rule.
 - **Stay inside the project's constraints.** Match its language/runtime version matrix, lint rules, framework, and conventions. A "fix" that breaks the CI matrix (e.g. a newer-language builtin on an older runtime) is itself a new finding — check the CI config before writing the fix.
 - **Surface owner decisions; don't guess.** A finding whose fix is a product / design / security / API tradeoff goes to the human, not an autonomous guess.
 - **Fixes get their own commit, naming the round**, e.g. `fix(auth): register category before abilities (Codex round-3 P1)` — keeps the loop auditable.
+
+## Reviewer failure modes
+
+The reviewer is not an oracle — two failure modes will mislead the loop if you trust its latest word blindly:
+
+- **Codex contradicts its own earlier verdict (flip-flop).** It can flag a value one round, and the *next* round flag the fix you just made — sometimes reversing itself outright (e.g. "change 1 → 5", then "change 5 → 1"). **A reversal is not automatically correct.** Re-verify against the code at HEAD, not Codex's newest claim; if the current value is what the code actually enforces, it's a false positive — 👎 with a one-line rationale and hold. Do **not** ping-pong the value to appease successive reviews.
+- **Transient errors are not verdicts.** `Codex Review: Something went wrong. Try again later…` (and similar) means the review **didn't run** — it is neither "clean" nor a finding. Re-trigger with `@codex review`; never count it toward convergence, and don't conclude Codex is down after one. Your convergence match must require the actual clean-verdict text, so a transient message can't be mistaken for either outcome.
 
 ## Polling cadence
 
