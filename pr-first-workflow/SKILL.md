@@ -9,12 +9,12 @@ description: Default to a branch + pull request for every change — code AND do
 
 ## The loop
 
-1. **Start from a clean main.** `git checkout main && git pull` before branching — never branch off stale or dirty state.
+1. **Start from a clean default branch.** Check out the repo's **default branch** — usually `main`, but may be `master` / `trunk` / `develop`; `git symbolic-ref --short refs/remotes/origin/HEAD` reveals it — and `git pull` before branching. Never branch off stale or dirty state. (Substitute your repo's default branch wherever this skill says `main`.)
 2. **Branch per logical change.** `type/scope-slug` (e.g. `fix/redeem-stacking`, `docs/roadmap-ph-idea`). One logical change per branch — don't bundle unrelated edits.
 3. **Commit** with a clear message; **push** the branch.
 4. **Open the PR** with a body saying what + why. Hand it to **codex-review-loop** (or your reviewer) to drive to green.
 5. **Merge** once reviewed (squash keeps main linear), **delete the branch**.
-6. **Return to main:** `git checkout main && git pull`. Don't leave the local checkout on a merged branch.
+6. **Return to the default branch:** check it out and `git pull`. Don't leave the local checkout on a merged branch.
 
 ## When a change may skip the PR
 
@@ -43,5 +43,5 @@ Only on an **explicit** human "commit direct" for that change. Otherwise:
 | "I'll just commit this to main quickly" | Branch first. Direct-to-main needs an explicit go-ahead. |
 | "It's only docs, no PR needed" | Docs ride a PR by default too — it's the review path and revert point. |
 | "I'll put the fix and the refactor in one PR" | Split them. One logical change per PR. |
-| "I'm on the merged branch, I'll branch from here" | Check out main + pull first — never branch off stale/merged state. |
+| "I'm on the merged branch, I'll branch from here" | Check out the default branch + pull first — never branch off stale/merged state. |
 | "I'll stash to switch branches" | Commit to your branch instead; stray stashes resurface as conflicts. |
