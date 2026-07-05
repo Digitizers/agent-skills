@@ -14,6 +14,8 @@ frontmatter `description` to decide when to load it) and optional
 | Skill | What it does |
 |---|---|
 | [`codex-review-loop`](codex-review-loop/) | Drive a PR to convergence through the Codex AI reviewer — build → PR → `@codex review` → verify each finding against HEAD → fix the real ones with regression tests → re-trigger until clean → human reviews last. |
+| [`pr-first-workflow`](pr-first-workflow/) | Default to a branch + PR for every change (code and docs); branch → commit → PR → review → merge → return to the default branch; direct-to-main only on an explicit OK. Pairs with `codex-review-loop`. |
+| [`safe-prod-db-write`](safe-prod-db-write/) | Run one-off writes/backfills against a production DB safely — pull the connection into an `mktemp` file, dry-run, get explicit human authorization, execute, verify counts/invariants, clean up. |
 
 ## Install
 
