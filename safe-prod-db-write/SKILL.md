@@ -1,0 +1,36 @@
+---
+name: safe-prod-db-write
+description: Safely run a one-off write, backfill, or data-mutating script against a PRODUCTION database — pull the connection from the platform, dry-run, get explicit human authorization, execute, verify, clean up. Use before running any script that inserts/updates/deletes prod data (generating codes, backfills, one-off fixes, seed data), when the user asks to write/mutate production data, or when a task needs a real prod DB connection. Assumes a Neon/Vercel-style setup with the platform CLI, but the protocol generalizes.
+---
+
+# Safe production DB write
+
+**Never write prod blind.** Every production mutation follows the same protocol: pull the connection → dry-run → authorize → execute → verify → clean up. Skipping any step is how a one-off script silently corrupts live data.
+
+## The protocol
+
+1. **Pull the connection safely.** `vercel env pull /tmp/op.env --environment=production -y` (or your platform's equivalent) into a **temp file**.
+   - **Neon + Vercel gotcha:** `DATABASE_URL` / `DIRECT_DATABASE_URL` are often marked *Sensitive*, so `vercel env pull` returns them **empty** — the run then has no connection. Use `DATABASE_URL_UNPOOLED` (Neon's direct, non-sensitive URL), which pulls fine, and map it into `DATABASE_URL` for the command. Don't un-mark the sensitive vars (that widens exposure).
+2. **Dry-run first.** If the script has `--dry-run`, run it and **read the exact rows/output that WOULD be written**. No dry-run flag? Preview with a rolled-back transaction or a `SELECT` that shows the effect. Confirm the target (table / batch / id range) is in the expected **pre-state** — e.g. the batch count is `0` before you insert.
+3. **Get explicit human authorization for the real write.** State precisely: what operation, **how many rows**, which table, which env. Approval of a dry-run is **not** approval of the write — ask again for the live run.
+4. **Execute.** Capture stdout to a file if it *is* the deliverable (e.g. a codes CSV). Keep the command identical to the dry-run minus the flag.
+5. **Verify post-state with a read.** Row count == intended, and key invariants hold (uniqueness, flags set correctly, `redeemedBy IS NULL`, etc.). A write you didn't verify isn't done.
+6. **Clean up.** `rm` the temp env file — it holds prod credentials. Remove it **even on failure** (trap/`finally`).
+
+## Rules
+
+- **Least blast radius.** Scope every mutation by batch / id / explicit filter. Never an unbounded `UPDATE`/`DELETE` — add the `WHERE` and prove it selects only what you intend (count it first).
+- **Idempotent + unique.** Use `skipDuplicates` / unique keys / random tokens so a re-run or partial failure can't double-insert or collide.
+- **Know the undo before you run.** If you can't state how to reverse it, you're not ready to run it.
+- **Separate generation from distribution — and test on a *different* batch.** Burn throwaway/smoke-test rows from a batch you are **not** shipping, so the live batch you hand off stays pristine.
+- **The connection is a secret.** Never echo the URL, never commit the pulled env file, never paste creds into chat.
+
+## Red flags — stop
+
+| Thought | Reality |
+|---|---|
+| "It's a small update, I'll just run it" | Small unbounded writes corrupt the most. Dry-run + `WHERE` + count. |
+| "The dry-run looked fine, running it" | Re-confirm the live write with the human — dry-run approval ≠ write approval. |
+| "Connection came back empty, I'll un-mark Sensitive" | Use `DATABASE_URL_UNPOOLED` instead; don't widen credential exposure. |
+| "Done — it inserted" | Not done until a read verifies count + invariants. |
+| "I'll clean up the env file later" | Clean up now, on every exit path — it holds prod creds. |
