@@ -9,7 +9,7 @@ description: Default to a branch + pull request for every change — code AND do
 
 ## The loop
 
-1. **Start from a clean default branch.** Check out the repo's **default branch** — usually `main`, but may be `master` / `trunk` / `develop`; `git symbolic-ref --short refs/remotes/origin/HEAD` reveals it — and `git pull` before branching. Never branch off stale or dirty state. (Substitute your repo's default branch wherever this skill says `main`.)
+1. **Start from a clean default branch.** Check out the repo's **default branch** — usually `main`, but may be `master` / `trunk` / `develop`. Get the **bare** branch name (not the `origin/…` remote-tracking name, or you'll detach HEAD) with `git remote show origin | sed -n '/HEAD branch/s/.*: //p'` (or `git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'`). Then `git checkout <branch> && git pull` before branching. Never branch off stale or dirty state. (Substitute your repo's default branch wherever this skill says `main`.)
 2. **Branch per logical change.** `type/scope-slug` (e.g. `fix/redeem-stacking`, `docs/roadmap-ph-idea`). One logical change per branch — don't bundle unrelated edits.
 3. **Commit** with a clear message; **push** the branch.
 4. **Open the PR** with a body saying what + why. Hand it to **codex-review-loop** (or your reviewer) to drive to green.
