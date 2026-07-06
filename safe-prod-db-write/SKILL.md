@@ -1,6 +1,6 @@
 ---
 name: safe-prod-db-write
-description: Safely run a one-off write, backfill, or data-mutating script against a PRODUCTION database — pull the connection from the platform, dry-run, get explicit human authorization, execute, verify, clean up. Use before running any script that inserts/updates/deletes prod data (generating codes, backfills, one-off fixes, seed data), when the user asks to write/mutate production data, or when a task needs a real prod DB connection. Assumes a Neon/Vercel-style setup with the platform CLI, but the protocol generalizes.
+description: Safely run a one-off write, backfill, or data-mutating script against a PRODUCTION database — pull the connection from the platform, dry-run, get explicit human authorization, execute, verify, clean up. Use before running any script that inserts/updates/deletes prod data (generating codes, backfills, one-off fixes, seed data), when the user asks to write/mutate production data, or when a task needs a real prod DB connection. Also use when adding a DB model/table/migration or setting up a CI guard that enforces a per-table invariant (RLS enabled, tenant column, required index) — see "Enforce schema invariants in CI". Assumes a Neon/Vercel-style setup with the platform CLI, but the protocol generalizes.
 ---
 
 # Safe production DB write
@@ -28,6 +28,17 @@ description: Safely run a one-off write, backfill, or data-mutating script again
 - **Know the undo before you run.** If you can't state how to reverse it, you're not ready to run it.
 - **Separate generation from distribution — and test on a *different* batch.** Burn throwaway/smoke-test rows from a batch you are **not** shipping, so the live batch you hand off stays pristine.
 - **The connection is a secret.** Never echo the URL, never commit the pulled env file, never paste creds into chat.
+
+## Enforce schema invariants in CI, not by memory
+
+When **every** table/model must satisfy a rule — RLS enabled, a tenant column, a required index, a `createdAt`, a soft-delete flag — don't trust humans to remember it on each new migration. Add a **static CI guard** (no database needed) that reconciles the ORM schema against the migrations and **fails the build** when any model is missing the invariant:
+
+- Parse the schema for model→table names, honoring name overrides (Prisma `@@map`, Rails `table_name`, etc.) — the table name, not the model name, is what the DB rule applies to.
+- Scan the migration SQL for the invariant, matching the real statement shape — for Postgres RLS the table comes **before** the clause: `ALTER TABLE "<table>" ENABLE ROW LEVEL SECURITY` (capture the quoted identifier immediately preceding `ENABLE ROW LEVEL SECURITY`). Build the set of covered tables.
+- Diff the two; exit non-zero listing any uncovered model. Wire it as a fail-fast CI step + a `db:check-*` script.
+- **Derive the *final* state, not mere presence.** A plain "does any migration mention it" scan is a false pass in long histories: a table enabled early then later `DISABLE`d (or an index since dropped) still reads as covered. Replay statements in order so a later removal wins — or, for full correctness, run the migrations against a throwaway DB and **introspect the live catalog** (`pg_class.relrowsecurity`, `pg_indexes`) instead of parsing SQL. Presence-scan is the cheap first-order guard; introspection is the exact one.
+
+This catches the gap at **PR time** instead of in production, and it's portable (pure file parsing). Prove it both ways: green on the current schema, and **red when you add a throwaway model** without the invariant. Caveat: the guard only proves the invariant is *declared* — runtime enforcement (real RLS *policies*, a working index plan) is a separate concern, so don't let a green guard imply the behavior is actually enforced.
 
 ## Red flags — stop
 
