@@ -29,6 +29,16 @@ description: Safely run a one-off write, backfill, or data-mutating script again
 - **Separate generation from distribution — and test on a *different* batch.** Burn throwaway/smoke-test rows from a batch you are **not** shipping, so the live batch you hand off stays pristine.
 - **The connection is a secret.** Never echo the URL, never commit the pulled env file, never paste creds into chat.
 
+## Enforce schema invariants in CI, not by memory
+
+When **every** table/model must satisfy a rule — RLS enabled, a tenant column, a required index, a `createdAt`, a soft-delete flag — don't trust humans to remember it on each new migration. Add a **static CI guard** (no database needed) that reconciles the ORM schema against the migrations and **fails the build** when any model is missing the invariant:
+
+- Parse the schema for model→table names, honoring name overrides (Prisma `@@map`, Rails `table_name`, etc.) — the table name, not the model name, is what the DB rule applies to.
+- Scan the migration SQL for the invariant (e.g. `ENABLE ROW LEVEL SECURITY "<table>"`), build the set of covered tables.
+- Diff the two; exit non-zero listing any uncovered model. Wire it as a fail-fast CI step + a `db:check-*` script.
+
+This catches the gap at **PR time** instead of in production, and it's portable (pure file parsing). Prove it both ways: green on the current schema, and **red when you add a throwaway model** without the invariant. Caveat: the guard only proves the invariant is *declared* — runtime enforcement (real RLS *policies*, a working index plan) is a separate concern, so don't let a green guard imply the behavior is actually enforced.
+
 ## Red flags — stop
 
 | Thought | Reality |
