@@ -26,9 +26,10 @@ un-triaged finding on another.
 
 ```bash
 # (a) Inline review comments — where most findings live. Emit each finding's
-#     commit_id (this is the FINDING_COMMIT for the ancestor check) + line.
+#     id + commit_id (the FINDING_COMMIT for the ancestor check) + line.
 #     line:null = the anchored code changed → usually already handled/outdated.
-gh api repos/<owner>/<repo>/pulls/<PR>/comments \
+#     --paginate is REQUIRED (endpoint pages at 30; late rounds land past page 1).
+gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
   --jq '.[] | select(.user.login|test("codex|chatgpt";"i")) |
     "id="+(.id|tostring)+" commit="+(.commit_id[0:8])+" ["+.path+":"+((.line//0)|tostring)+"] "+(.body[0:200])'
 
@@ -56,10 +57,19 @@ gh pr view <PR> -R <owner>/<repo> --json comments \
 
 ```bash
 # LIVE findings only — the ones that still need triage this round.
-gh api repos/<owner>/<repo>/pulls/<PR>/comments \
+# --paginate is REQUIRED: this endpoint pages at 30, and in a multi-round review the
+# newest blocking finding is often past the first page. Without it you will read a
+# converged PR that isn't.
+# Emit `id` (the stability key + what you need to react/audit) and `commit_id`
+# (the FINDING_COMMIT for the ancestor check) — never just path/line/body.
+gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
   --jq '.[] | select(.user.login|test("codex|chatgpt";"i")) | select((.line//null)!=null) |
-    "L"+((.line)|tostring)+" "+.path+" :: "+(.body[0:160])'
+    "id="+(.id|tostring)+" commit="+(.commit_id[0:8])+" ["+.path+":"+((.line)|tostring)+"] "+(.body[0:160])'
 ```
+
+**Compare rounds by the set of comment `id`s, not by path/line/body.** Codex re-posts an
+identical-looking finding with a *new* id; a text-only diff makes a fresh blocking finding look
+like last round's stable set.
 
 ---
 
