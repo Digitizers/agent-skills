@@ -44,6 +44,23 @@ gh pr view <PR> -R <owner>/<repo> --json comments \
   --jq '[.comments[]|select(.author.login|test("codex|chatgpt";"i"))]|last|.body[0:160]'
 ```
 
+> **⚠️ Race: (b) lands before (a).** The review object appears first (state `COMMENTED`, generic
+> "here are some automated review suggestions" body); its inline comments in (a) arrive
+> seconds-to-minutes later. So `(b) exists at HEAD` + `(a) empty` is **not** a clean pass — it's a
+> poll that fired too early. Re-poll ≥90 s and require (a) to be **stable across two polls**, or
+> wait for the (c) clean-verdict text. **Never add a `commit_id` filter to (a)** — a live finding
+> can carry an unexpected sha and the filter drops it silently. Partition (a) by `line` instead:
+> `line != null` = live finding, `line == null` = stale/outdated.
+
+**Live vs stale in one query** (what you actually want each round):
+
+```bash
+# LIVE findings only — the ones that still need triage this round.
+gh api repos/<owner>/<repo>/pulls/<PR>/comments \
+  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")) | select((.line//null)!=null) |
+    "L"+((.line)|tostring)+" "+.path+" :: "+(.body[0:160])'
+```
+
 ---
 
 ## 3. Verify a finding against HEAD (stale vs current)
