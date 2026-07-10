@@ -18,7 +18,7 @@ Claude develops, Codex reviews, Claude fixes — **in a loop** — the human rev
 
 ## Convergence
 
-Converged = Codex's latest review is against **current HEAD** *and* raises no new actionable finding at any blocking severity (P0/P1/P2). Do **not** declare convergence off a single comment surface — a PR clean on `/reviews` can still carry an un-triaged finding on the inline or issue surface.
+Converged = Codex's latest review is against **current HEAD**, its findings have **fully landed** (see the race below), *and* none is a new actionable finding at any blocking severity (P0/P1/P2). Do **not** declare convergence off a single comment surface — a PR clean on `/reviews` can still carry an un-triaged finding on the inline or issue surface.
 
 **Codex posts its outcome on different surfaces depending on the result — poll BOTH or you will misread the loop:**
 
@@ -27,7 +27,17 @@ Converged = Codex's latest review is against **current HEAD** *and* raises no ne
 | **Has findings** | a PR **review** + inline **review-comments** | `pulls/N/reviews` + `pulls/N/comments` |
 | **Clean** ("Didn't find any major issues") | a top-level **issue comment** — *no* review object, *no* `commit_id`, *no* inline comment | `issues/N/comments` |
 
-A clean pass emits **only** an issue comment. If your poll watches `pulls/N/reviews` for a HEAD-matching `commit_id`, a clean PR reads as **"never reviewed" forever** — you'll re-trigger endlessly and wrongly conclude Codex is down/rate-capped. **Convergence check = an `issues/N/comments` Codex comment matching `/didn.t find any major issues/i` on/after your last push, OR a `reviews` entry at HEAD with no new blocking finding.** Never gate convergence on the `/reviews` surface alone.
+A clean pass emits **only** an issue comment. If your poll watches `pulls/N/reviews` for a HEAD-matching `commit_id`, a clean PR reads as **"never reviewed" forever** — you'll re-trigger endlessly and wrongly conclude Codex is down/rate-capped. **Convergence requires EITHER** (a) an `issues/N/comments` Codex comment matching `/didn.t find any major issues/i` on/after your last push — *the only unambiguous clean signal* — **or** (b) a `reviews` entry at HEAD whose inline findings you have actually **enumerated and triaged**. Never gate convergence on the `/reviews` surface alone.
+
+### ⚠️ The review-object / inline-comment race — this WILL bite you
+
+Codex posts the **review object first** (state `COMMENTED`, body = a generic *"💡 Codex Review — Here are some automated review suggestions"* wrapper) and its **inline review-comments land seconds-to-minutes later**. A poll that fires inside that window sees *a review at HEAD with zero inline comments*, which looks exactly like a clean pass. **It is not.** Merging there ships the findings unfixed — including P0/P1s.
+
+- A review whose body is the **generic suggestions wrapper means findings exist**. Go find them. An empty inline list at that moment is a race, not a verdict.
+- **Never conclude "0 findings" from a single poll.** Either wait for the explicit clean-verdict issue comment, or re-poll ≥90 s later and require the live set to be **stable across two consecutive polls** — compared by the set of comment **`id`s**, not by path/line/body. Codex re-posts an identical-looking finding with a **new id**, so a text-only diff hides a fresh blocking finding inside a "stable" set.
+- **Always `--paginate`.** `pulls/N/comments` pages at **30**. In a multi-round review the newest blocking finding routinely lands past page 1, so an un-paginated fetch reads a converged PR that isn't one — the same false-convergence failure wearing a different disguise.
+- **Never filter inline comments by `commit_id`.** Fetch *all* of `pulls/N/comments` and partition by `line`: `line != null` = **live finding**; `line == null` = stale/outdated (already handled in an earlier round). A live finding can carry a sha your filter didn't expect, and the commit filter drops it **silently**.
+- Corollary: **never merge on a premature zero.** If you have not seen either the clean-verdict text or a stable, triaged inline set, the review is still in flight.
 
 ## Rules that keep it correct
 
@@ -48,5 +58,7 @@ The reviewer is not an oracle — two failure modes will mislead the loop if you
 ## Polling cadence
 
 Codex takes a few minutes per review. Poll **~every 4 minutes (240–270s)** to stay inside the prompt-cache window — don't busy-poll. If a push isn't auto-re-reviewed (Codex reviews reliably on PR-open, less so on later pushes), re-trigger with a `@codex review` comment.
+
+**A single poll never decides the round.** Because of the review-object/inline-comment race above, one poll showing "review at HEAD, no inline findings" is indistinguishable from "the findings haven't posted yet." Treat a round as read **only** after the clean-verdict issue comment, or after two consecutive polls (≥90 s apart) return the **same** live-finding set.
 
 See [REFERENCE.md](REFERENCE.md) for the exact gh commands — verify-vs-HEAD, the three finding surfaces, triggering, reacting — and a worked round.
