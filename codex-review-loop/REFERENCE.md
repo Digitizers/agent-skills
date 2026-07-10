@@ -26,12 +26,15 @@ un-triaged finding on another.
 
 ```bash
 # (a) Inline review comments — where most findings live. Emit each finding's
-#     id + commit_id (the FINDING_COMMIT for the ancestor check) + line.
+#     id + original_commit_id (the IMMUTABLE "raised at" anchor) + line.
+#     NEVER emit `commit_id` here: GitHub re-anchors it to HEAD, so every finding
+#     — including one raised three pushes ago — reads as "raised at HEAD". That is
+#     the false-current case; it makes you re-fix what you already fixed.
 #     line:null = the anchored code changed → usually already handled/outdated.
 #     --paginate is REQUIRED (endpoint pages at 30; late rounds land past page 1).
 gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
   --jq '.[] | select(.user.login|test("codex|chatgpt";"i")) |
-    "id="+(.id|tostring)+" commit="+(.commit_id[0:8])+" ["+.path+":"+((.line//0)|tostring)+"] "+(.body[0:200])'
+    "id="+(.id|tostring)+" raised_at="+(.original_commit_id[0:8])+" ["+.path+":"+((.line//0)|tostring)+"] "+(.body[0:200])'
 
 # (b) Review bodies — the summary verdict + the commit Codex actually reviewed.
 gh api repos/<owner>/<repo>/pulls/<PR>/reviews \
