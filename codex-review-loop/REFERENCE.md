@@ -43,8 +43,13 @@ gh api repos/<owner>/<repo>/pulls/<PR>/reviews \
 #     review object. Watching only /reviews makes a converged PR look un-reviewed.
 #     Use the PAGINATED REST endpoint: `gh pr view --json comments` truncates at
 #     the first 100 and its `last` is then not the newest comment.
-gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments \
-  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")) | .body[0:160]' | tail -1
+#     Do the `last` selection INSIDE jq and flatten newlines — a Codex body is
+#     multi-line, so `--jq ... | tail -1` tails PHYSICAL LINES, not comments, and
+#     silently drops the "Didn't find any major issues" text (it prints the
+#     trailing `<details>` block instead), so the verdict can never match.
+gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments --jq '.[]' \
+  | jq -r -s '[.[] | select(.user.login|test("codex|chatgpt";"i"))] | last // empty
+              | .body | gsub("\r?\n"; " ") | .[0:200]'
 ```
 
 > **⚠️ Race: (b) lands before (a).** The review object appears first (state `COMMENTED`, generic
