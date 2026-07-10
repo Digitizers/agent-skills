@@ -70,8 +70,21 @@ gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
 # ALWAYS pair it with the clean-verdict check — a clean pass emits ONLY an issue
 # comment (surface (c)), never a review object or an inline comment. Polling (a)
 # alone can never observe convergence; you will wait forever on a green PR.
-gh pr view <PR> -R <owner>/<repo> --json comments \
-  --jq '[.comments[]|select(.author.login|test("codex|chatgpt";"i"))]|last|.body[0:120]'
+#
+# CRITICAL: the verdict must match the CURRENT HEAD. Codex's clean comment prints
+# "Reviewed commit: <sha>". A PR that was clean on A and then received commit B
+# still shows A's verdict — pairing "no new inline findings" (Codex hasn't reviewed
+# B yet) with A's stale "Didn't find..." text declares B converged. Same
+# false-convergence bug, new disguise. Compare the SHA; don't just read the text.
+HEAD=$(gh api repos/<owner>/<repo>/pulls/<PR> --jq '.head.sha')
+gh pr view <PR> -R <owner>/<repo> --json comments --jq --arg H "${HEAD:0:10}" '
+  [.comments[] | select(.author.login|test("codex|chatgpt";"i"))] | last
+  | if   (.body|test("didn.t find any major issues";"i")) and (.body|test($H))
+    then "CLEAN @ HEAD — converged"
+    elif (.body|test("didn.t find any major issues";"i"))
+    then "STALE VERDICT — clean, but for an older commit. Codex has not reviewed HEAD yet."
+    else "NOT CLEAN — findings, or the review is still in flight."
+    end'
 ```
 
 **Compare rounds by the set of comment `id`s, not by path/line/body.** Codex re-posts an
