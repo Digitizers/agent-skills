@@ -41,8 +41,10 @@ gh api repos/<owner>/<repo>/pulls/<PR>/reviews \
 # (c) Issue/conversation comments — Codex often posts its clean-pass verdict
 #     ("Didn't find any major issues") HERE as an issue comment, with no formal
 #     review object. Watching only /reviews makes a converged PR look un-reviewed.
-gh pr view <PR> -R <owner>/<repo> --json comments \
-  --jq '[.comments[]|select(.author.login|test("codex|chatgpt";"i"))]|last|.body[0:160]'
+#     Use the PAGINATED REST endpoint: `gh pr view --json comments` truncates at
+#     the first 100 and its `last` is then not the newest comment.
+gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments \
+  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")) | .body[0:160]' | tail -1
 ```
 
 > **⚠️ Race: (b) lands before (a).** The review object appears first (state `COMMENTED`, generic
@@ -80,10 +82,14 @@ gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
 # flags like `--arg`. Passing `--arg` there exits 1 and the check fails SILENTLY —
 # you then see "no verdict" forever and never converge. Pipe gh's JSON into the
 # real `jq` binary instead, which does support `--arg`.
+# ALSO: `gh pr view --json comments` fetches `comments(first: 100)` — TRUNCATED.
+# On a busy review-loop PR, `last` is the last item of that first page, not the
+# newest comment, so the verdict reads stale or absent forever. Use the PAGINATED
+# REST issue-comments endpoint.
 HEAD=$(gh api repos/<owner>/<repo>/pulls/<PR> --jq '.head.sha')
-gh pr view <PR> -R <owner>/<repo> --json comments \
-  | jq -r --arg H "${HEAD:0:10}" '
-      [.comments[] | select(.author.login|test("codex|chatgpt";"i"))] | last // empty
+gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments --jq '.[]' \
+  | jq -r -s --arg H "${HEAD:0:10}" '
+      [.[] | select(.user.login|test("codex|chatgpt";"i"))] | last // empty
       | if   (.body|test("didn.t find any major issues";"i")) and (.body|test($H))
         then "CLEAN @ HEAD — converged"
         elif (.body|test("didn.t find any major issues";"i"))
