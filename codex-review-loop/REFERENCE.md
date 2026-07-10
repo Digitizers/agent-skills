@@ -47,9 +47,14 @@ gh api repos/<owner>/<repo>/pulls/<PR>/reviews \
 #     multi-line, so `--jq ... | tail -1` tails PHYSICAL LINES, not comments, and
 #     silently drops the "Didn't find any major issues" text (it prints the
 #     trailing `<details>` block instead), so the verdict can never match.
+#     `last // empty` on a findings-only PR (no Codex issue comment yet) empties
+#     the stream, so nothing downstream runs and the command PRINTS NOTHING.
+#     Silence then reads as "surface (c) is broken" instead of "not clean yet".
+#     Default the body to a string so the negative branch always fires.
 gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments --jq '.[]' \
-  | jq -r -s '[.[] | select(.user.login|test("codex|chatgpt";"i"))] | last // empty
-              | .body | gsub("\r?\n"; " ") | .[0:200]'
+  | jq -r -s '[.[] | select(.user.login|test("codex|chatgpt";"i"))]
+              | (last.body // "(no Codex issue comment yet)")
+              | gsub("\r?\n"; " ") | .[0:200]'
 ```
 
 > **⚠️ Race: (b) lands before (a).** The review object appears first (state `COMMENTED`, generic
@@ -91,13 +96,19 @@ gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
 # On a busy review-loop PR, `last` is the last item of that first page, not the
 # newest comment, so the verdict reads stale or absent forever. Use the PAGINATED
 # REST issue-comments endpoint.
+# AND: a findings-only PR has NO Codex issue comment at all. `last // empty` on
+# that empty array empties the jq stream, the if/else never runs, and the command
+# prints NOTHING — so a not-clean PR is indistinguishable from a broken poll. A
+# convergence check that can go silent is the same false-convergence bug again.
+# Default the body to "" (`last.body // ""`) so the negative branch ALWAYS fires.
 HEAD=$(gh api repos/<owner>/<repo>/pulls/<PR> --jq '.head.sha')
 gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments --jq '.[]' \
   | jq -r -s --arg H "${HEAD:0:10}" '
-      [.[] | select(.user.login|test("codex|chatgpt";"i"))] | last // empty
-      | if   (.body|test("didn.t find any major issues";"i")) and (.body|test($H))
+      [.[] | select(.user.login|test("codex|chatgpt";"i"))]
+      | (last.body // "") | gsub("\r?\n"; " ")
+      | if   (test("didn.t find any major issues";"i")) and (test($H))
         then "CLEAN @ HEAD — converged"
-        elif (.body|test("didn.t find any major issues";"i"))
+        elif (test("didn.t find any major issues";"i"))
         then "STALE VERDICT — clean, but for an older commit. Codex has not reviewed HEAD yet."
         else "NOT CLEAN — findings, or the review is still in flight."
         end'
@@ -112,36 +123,45 @@ finding — even when its `commit_id`/`line` moved (GitHub re-anchored it).
 
 ## 3. Verify a finding against HEAD (stale vs current)
 
-> **⚠️ Use `original_commit_id`, NOT `commit_id`.** GitHub **re-anchors** an inline comment onto
-> the current HEAD as the branch moves: `commit_id` and `line` are *mutable* and track the latest
-> commit, while `original_commit_id` and `original_line` are *immutable* — the commit/line the
-> finding was actually raised against. Feeding `commit_id` into the ancestor check makes a
-> **stale, already-fixed finding read as "ON HEAD — current"**, so you re-fix what you already
-> fixed. Observed live: a comment raised at `b1d3d3f` (line 85) reported `commit_id=855997d`
-> (HEAD, line 88) one push later.
+> **⚠️ Ancestry can prove a finding CURRENT. It can never prove one STALE.**
+> `original_commit_id == HEAD` ⇒ Codex raised this against the code you have now ⇒ **current**.
+> But `original_commit_id` being a *strict ancestor* of HEAD means only that **some** commit landed
+> afterwards — not that that commit touched this code, and not that it fixed the bug. An unrelated
+> push, or an attempted fix that missed, leaves the defect live while the ancestor test happily
+> prints `STALE`. **Auto-skipping there is how you ship the bug you were told about.** Ancestry is a
+> *hint about what to read*, never a verdict. Only two things settle it: `line == null` (GitHub lost
+> the anchor entirely) and **reading the code at HEAD**.
+>
+> **⚠️ And use `original_commit_id`, NOT `commit_id`, for that hint.** GitHub **re-anchors** an
+> inline comment onto current HEAD as the branch moves: `commit_id`/`line` are *mutable*;
+> `original_commit_id`/`original_line` are *immutable*. Feeding `commit_id` in makes **every**
+> finding look like it was raised at HEAD. Observed live: a comment raised at `b1d3d3f` (line 85)
+> reported `commit_id=855997d` (HEAD, line 88) one push later.
 
 ```bash
 HEAD=$(gh api repos/<owner>/<repo>/pulls/<PR> --jq '.head.sha')
-# IMMUTABLE anchor — the commit the finding was raised against.
+# IMMUTABLE anchor — the commit the finding was RAISED AGAINST (not where it now points).
 FINDING_COMMIT=$(gh api repos/<owner>/<repo>/pulls/comments/<comment_id> --jq '.original_commit_id')
 
 # A commit is its own ancestor, so the equality case MUST be excluded — else a
-# finding ON HEAD gets mis-labelled stale and skipped.
-if [ "$FINDING_COMMIT" != "${HEAD:0:${#FINDING_COMMIT}}" ] \
-   && git merge-base --is-ancestor "$FINDING_COMMIT" "$HEAD" 2>/dev/null; then
-  echo "STALE — predates HEAD; read the code at HEAD, confirm the fix, do NOT re-fix"
+# finding raised ON HEAD gets mis-labelled and skipped.
+if [ "$FINDING_COMMIT" = "${HEAD:0:${#FINDING_COMMIT}}" ]; then
+  echo "RAISED AT HEAD — definitely current. Triage now."
 else
-  echo "ON HEAD — current finding; triage (real → fix loop; wrong → verify + 👎)"
+  echo "RAISED EARLIER — MAYBE fixed by a later commit, maybe not. READ THE CODE AT HEAD."
+  echo "  Does the defect still exist there?  yes -> current finding, fix it."
+  echo "                                       no -> stale, do NOT re-fix (re-fixing restarts the loop)."
 fi
 ```
 
-Then **read the actual code at HEAD** to confirm. Never fix from the finding
-text alone — Codex sometimes re-posts a finding against a commit that already
-fixed it, and sometimes anchors to a stale line number.
+There is no shortcut around that second branch. Never fix from the finding text alone (Codex
+re-posts findings against commits that already fixed them, and anchors to stale line numbers) —
+and never *dismiss* one from the ancestry alone either.
 
-**The three currency signals, in order of trust:** (1) a **new comment `id`** you have not seen
-before; (2) `original_commit_id` == HEAD; (3) the code at HEAD actually still exhibits the
-problem. `commit_id` proves nothing.
+**The currency signals, in order of trust:** (1) **the code at HEAD still exhibits the problem** —
+the only authority; (2) a **new comment `id`** you have not seen before; (3) `original_commit_id`
+== HEAD ⇒ current. An older `original_commit_id` is *not* signal (3) inverted — it is **no
+signal**, and sends you to (1). `commit_id` proves nothing at all.
 
 ---
 
