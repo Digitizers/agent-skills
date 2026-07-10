@@ -60,24 +60,41 @@ gh pr view <PR> -R <owner>/<repo> --json comments \
 # --paginate is REQUIRED: this endpoint pages at 30, and in a multi-round review the
 # newest blocking finding is often past the first page. Without it you will read a
 # converged PR that isn't.
-# Emit `id` (the stability key + what you need to react/audit) and `commit_id`
-# (the FINDING_COMMIT for the ancestor check) — never just path/line/body.
+# Emit `id` (the stability key + what you need to react/audit) and
+# `original_commit_id` (the IMMUTABLE FINDING_COMMIT for the ancestor check —
+# `commit_id` is re-anchored to HEAD and proves nothing).
 gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
   --jq '.[] | select(.user.login|test("codex|chatgpt";"i")) | select((.line//null)!=null) |
-    "id="+(.id|tostring)+" commit="+(.commit_id[0:8])+" ["+.path+":"+((.line)|tostring)+"] "+(.body[0:160])'
+    "id="+(.id|tostring)+" raised_at="+(.original_commit_id[0:8])+" ["+.path+":"+((.line)|tostring)+"] "+(.body[0:160])'
+
+# ALWAYS pair it with the clean-verdict check — a clean pass emits ONLY an issue
+# comment (surface (c)), never a review object or an inline comment. Polling (a)
+# alone can never observe convergence; you will wait forever on a green PR.
+gh pr view <PR> -R <owner>/<repo> --json comments \
+  --jq '[.comments[]|select(.author.login|test("codex|chatgpt";"i"))]|last|.body[0:120]'
 ```
 
 **Compare rounds by the set of comment `id`s, not by path/line/body.** Codex re-posts an
 identical-looking finding with a *new* id; a text-only diff makes a fresh blocking finding look
-like last round's stable set.
+like last round's stable set. Conversely, an **unchanged id** across rounds is *not* a new
+finding — even when its `commit_id`/`line` moved (GitHub re-anchored it).
 
 ---
 
 ## 3. Verify a finding against HEAD (stale vs current)
 
+> **⚠️ Use `original_commit_id`, NOT `commit_id`.** GitHub **re-anchors** an inline comment onto
+> the current HEAD as the branch moves: `commit_id` and `line` are *mutable* and track the latest
+> commit, while `original_commit_id` and `original_line` are *immutable* — the commit/line the
+> finding was actually raised against. Feeding `commit_id` into the ancestor check makes a
+> **stale, already-fixed finding read as "ON HEAD — current"**, so you re-fix what you already
+> fixed. Observed live: a comment raised at `b1d3d3f` (line 85) reported `commit_id=855997d`
+> (HEAD, line 88) one push later.
+
 ```bash
 HEAD=$(gh api repos/<owner>/<repo>/pulls/<PR> --jq '.head.sha')
-FINDING_COMMIT=<commit from surface (a)/(b)>
+# IMMUTABLE anchor — the commit the finding was raised against.
+FINDING_COMMIT=$(gh api repos/<owner>/<repo>/pulls/comments/<comment_id> --jq '.original_commit_id')
 
 # A commit is its own ancestor, so the equality case MUST be excluded — else a
 # finding ON HEAD gets mis-labelled stale and skipped.
@@ -92,6 +109,10 @@ fi
 Then **read the actual code at HEAD** to confirm. Never fix from the finding
 text alone — Codex sometimes re-posts a finding against a commit that already
 fixed it, and sometimes anchors to a stale line number.
+
+**The three currency signals, in order of trust:** (1) a **new comment `id`** you have not seen
+before; (2) `original_commit_id` == HEAD; (3) the code at HEAD actually still exhibits the
+problem. `commit_id` proves nothing.
 
 ---
 
