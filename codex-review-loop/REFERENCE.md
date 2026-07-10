@@ -76,15 +76,20 @@ gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
 # still shows A's verdict — pairing "no new inline findings" (Codex hasn't reviewed
 # B yet) with A's stale "Didn't find..." text declares B converged. Same
 # false-convergence bug, new disguise. Compare the SHA; don't just read the text.
+# NOTE: `gh`'s built-in `--jq` takes ONE jq expression and does NOT accept jq CLI
+# flags like `--arg`. Passing `--arg` there exits 1 and the check fails SILENTLY —
+# you then see "no verdict" forever and never converge. Pipe gh's JSON into the
+# real `jq` binary instead, which does support `--arg`.
 HEAD=$(gh api repos/<owner>/<repo>/pulls/<PR> --jq '.head.sha')
-gh pr view <PR> -R <owner>/<repo> --json comments --jq --arg H "${HEAD:0:10}" '
-  [.comments[] | select(.author.login|test("codex|chatgpt";"i"))] | last
-  | if   (.body|test("didn.t find any major issues";"i")) and (.body|test($H))
-    then "CLEAN @ HEAD — converged"
-    elif (.body|test("didn.t find any major issues";"i"))
-    then "STALE VERDICT — clean, but for an older commit. Codex has not reviewed HEAD yet."
-    else "NOT CLEAN — findings, or the review is still in flight."
-    end'
+gh pr view <PR> -R <owner>/<repo> --json comments \
+  | jq -r --arg H "${HEAD:0:10}" '
+      [.comments[] | select(.author.login|test("codex|chatgpt";"i"))] | last // empty
+      | if   (.body|test("didn.t find any major issues";"i")) and (.body|test($H))
+        then "CLEAN @ HEAD — converged"
+        elif (.body|test("didn.t find any major issues";"i"))
+        then "STALE VERDICT — clean, but for an older commit. Codex has not reviewed HEAD yet."
+        else "NOT CLEAN — findings, or the review is still in flight."
+        end'
 ```
 
 **Compare rounds by the set of comment `id`s, not by path/line/body.** Codex re-posts an
