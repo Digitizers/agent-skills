@@ -20,8 +20,8 @@ Check if the repo is **public**: GitHub Actions on standard runners is free and 
 ## Phase 1 — Measure, don't guess
 
 - Read **every** file in `.github/workflows/`.
-- If the `gh` CLI (or the GitHub MCP tools) is available, pull real run data and compute per workflow: average duration, run frequency, and the % of runs cancelled/failed (pure waste). Exact commands → [REFERENCE.md](REFERENCE.md) §1.
-- Map every `runs-on` to its billing multiplier: **Linux ×1, Windows ×2, macOS ×10**. A 5-minute macOS job bills as 50 minutes.
+- If the `gh` CLI (or the GitHub MCP tools) is available, pull real run data and compute per workflow: average duration, run frequency, and the **superseded rate** (`cancelled` — the one unambiguous waste; a failing run that catches a bug is CI *working*, not waste). Exact commands → [REFERENCE.md](REFERENCE.md) §1.
+- **Ask the API for billed minutes; don't hand-multiply.** The usage report gives real minutes and dollars per repo/SKU, and the run-timing endpoint returns a per-OS `billable` block. Multipliers (**Linux ×1, Windows ×2, macOS ≈×10**) are for intuition when you have no API data — real SKUs (`Actions macOS 3-core` at $0.062/min vs Linux $0.006) and larger runners have their own rates.
 - **No `gh` / no billing access? Say so explicitly.** Never invent minute numbers — label every figure "estimate based on workflow content only" and derive it from trigger frequency × step count, clearly marked as such.
 
 ## Phase 2 — Redundancy audit (the highest-value pass)
