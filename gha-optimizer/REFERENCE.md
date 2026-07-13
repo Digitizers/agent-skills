@@ -25,7 +25,7 @@ gh api repos/{owner}/{repo}/actions/runs/<id>/timing \
 
 For a 50-run sample it's usually enough to fetch timing for the **top 3–5 workflows by run count**. Compute per workflow:
 
-- **Average billable minutes** — sum `billable.*.total_ms` across OSes. Billing is per **job** per runner OS, rounded up per job — so with parallel or matrix jobs, `run_duration_ms` (wall clock) **undercounts** what you pay: a run with four parallel 5-minute jobs bills ~20 minutes but walls 5. Per-job detail is in `billable.*.job_runs[].duration_ms`. Use wall time for queue-latency questions only, never for cost. (If `billable` comes back empty on your plan, fall back to summing per-job `started_at→completed_at` from `/actions/runs/<id>/jobs` — still per job, not per run.)
+- **Billable-eligible minutes** — from `billable.*.total_ms`, per OS. This is **raw job runtime**: the endpoint applies **neither** OS multipliers **nor** per-job minute rounding, so to estimate the charge compute per job `ceil(minutes) × OS rate` (table below; per-job detail in `billable.*.job_runs[].duration_ms`). Never use `run_duration_ms` (wall clock) for cost — with parallel or matrix jobs it undercounts even the raw job time: four parallel 5-minute jobs = ~20 job-minutes, walls 5. Wall time is for queue-latency questions only. (If `billable` comes back empty on your plan, fall back to summing per-job `started_at→completed_at` from `/actions/runs/<id>/jobs` — still per job, not per run.)
 - **Frequency** — runs in the sample window ÷ window days, ×30 for monthly
 - **Superseded %** — `cancelled` ÷ total. This is the only unambiguous waste: a run that a `concurrency` group would have prevented from ever starting. It's the clearest quick win.
 - **Failure %** — `failure` / `timed_out` ÷ total. **This is NOT waste by itself.** A run that fails because it caught a bug is CI doing its job; cutting it saves minutes by removing the safety net. Treat a high failure rate as a *signal* (flaky job? broken main? timeout too tight?) and investigate — never as a reason to delete the job.
@@ -34,15 +34,15 @@ For a 50-run sample it's usually enough to fetch timing for the **top 3–5 work
 
 ```bash
 gh api "/organizations/{org}/settings/billing/usage" \
-  --jq '[.usageItems[] | select(.product=="actions")]
+  --jq '[.usageItems[] | select(.product | ascii_downcase == "actions")]
         | group_by(.repositoryName)
         | map({repo: .[0].repositoryName,
-               minutes: ((map(select(.unitType=="Minutes") | .quantity) | add) // 0),
+               minutes: ((map(select(.unitType | ascii_downcase == "minutes") | .quantity) | add) // 0),
                net:     ((map(.netAmount) | add) // 0)})
         | sort_by(-.minutes)'
 ```
 
-The `// 0` matters: a repo can have Actions **storage** rows and no Minutes rows, so `add` returns `null` and `sort_by(-.minutes)` dies with `cannot negate: null`. Output is ranked biggest-consumer-first:
+Match `product`/`unitType` **case-insensitively** (`ascii_downcase`): GitHub's docs show `"Actions"`/`"minutes"` while live responses have been observed returning `"actions"`/`"Minutes"` — an exact-case filter silently returns zero rows on the other casing. The `// 0` matters too: a repo can have Actions **storage** rows and no minutes rows, so `add` returns `null` and `sort_by(-.minutes)` dies with `cannot negate: null`. Output is ranked biggest-consumer-first:
 
 ```json
 [{"minutes":4775,"net":0.618,"repo":"openclaw-workspace"},
@@ -56,13 +56,13 @@ Cache size (separate): `gh api /repos/{owner}/{repo}/actions/cache/usage`.
 
 > **The old endpoints are GONE.** `GET /orgs/{org}/settings/billing/actions` now returns **HTTP 410 — "This endpoint has been moved"**, and the `/users/{user}/...` twin 404s. Do not use them; they were replaced by the usage report above.
 
-**Prefer the API's own billable numbers over hand-multiplying.** Two sources already give them to you:
+**Where the truth lives — two sources, only one is charged money:**
 
+- The **usage report** (above) is the only source of **actually-charged** numbers: billed `quantity` (minutes, with multipliers and per-job rounding already applied) and `netAmount` ($) per SKU. Prefer it whenever you have access.
 - The **timing** endpoint returns a per-OS `billable` block:
-  `{"billable":{"UBUNTU":{"total_ms":…},"MACOS":{"total_ms":…}}, "run_duration_ms":…}` — note `run_duration_ms` is **wall clock**, while `billable.*.total_ms` is what you're charged for.
-- The **usage report** returns actual billed `quantity` (minutes) and `netAmount` ($) per SKU.
+  `{"billable":{"UBUNTU":{"total_ms":…},"MACOS":{"total_ms":…}}, "run_duration_ms":…}` — `run_duration_ms` is **wall clock**; `billable.*.total_ms` is **raw billable-eligible job time**, with **no OS multiplier and no per-job rounding applied**. Estimating cost from it means doing that arithmetic yourself, per job.
 
-**Multipliers** — keep for intuition when you have no API data, not as the arithmetic of record:
+**Multipliers / rates** — the arithmetic you must apply to timing data (the usage report never needs them — it's already charged):
 
 | Runner | Multiplier | Real SKU / rate (list price) |
 |---|---|---|
