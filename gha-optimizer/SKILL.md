@@ -37,7 +37,7 @@ Look for work a deploy platform already does:
 Per workflow, check and report each item (details and canonical diffs → REFERENCE.md §3):
 
 - [ ] `concurrency` group with `cancel-in-progress: true`
-- [ ] `paths` / `paths-ignore` filters on triggers
+- [ ] `paths` / `paths-ignore` filters on triggers (job-level gating if the check is required — REFERENCE §3)
 - [ ] Double-run on `push` + `pull_request` for the same commit
 - [ ] `actions/cache` present and keyed correctly (lockfile-hash key + restore-keys)
 - [ ] `runs-on`: Windows/macOS without justification (×2 / ×10)

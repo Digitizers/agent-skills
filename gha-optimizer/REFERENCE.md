@@ -16,15 +16,16 @@ gh repo view --json visibility --jq .visibility
 gh run list --limit 50 --json name,conclusion,createdAt,databaseId,workflowName,event
 ```
 
-Then per run, duration comes from the run detail (`gh run view <id> --json ...` is slow at 50 runs; the timing endpoint is cheaper):
+Then per run, duration comes from the timing endpoint (`gh run view <id> --json ...` is slow at 50 runs) — take the **billable** block, not the wall time:
 
 ```bash
-gh api repos/{owner}/{repo}/actions/runs/<id>/timing --jq .run_duration_ms
+gh api repos/{owner}/{repo}/actions/runs/<id>/timing \
+  --jq '{billable_ms: ((.billable // {}) | map_values(.total_ms)), wall_ms: .run_duration_ms}'
 ```
 
 For a 50-run sample it's usually enough to fetch timing for the **top 3–5 workflows by run count**. Compute per workflow:
 
-- **Average duration** (minutes) — from `run_duration_ms`
+- **Average billable minutes** — sum `billable.*.total_ms` across OSes. Billing is per **job** per runner OS, rounded up per job — so with parallel or matrix jobs, `run_duration_ms` (wall clock) **undercounts** what you pay: a run with four parallel 5-minute jobs bills ~20 minutes but walls 5. Per-job detail is in `billable.*.job_runs[].duration_ms`. Use wall time for queue-latency questions only, never for cost. (If `billable` comes back empty on your plan, fall back to summing per-job `started_at→completed_at` from `/actions/runs/<id>/jobs` — still per job, not per run.)
 - **Frequency** — runs in the sample window ÷ window days, ×30 for monthly
 - **Superseded %** — `cancelled` ÷ total. This is the only unambiguous waste: a run that a `concurrency` group would have prevented from ever starting. It's the clearest quick win.
 - **Failure %** — `failure` / `timed_out` ÷ total. **This is NOT waste by itself.** A run that fails because it caught a bug is CI doing its job; cutting it saves minutes by removing the safety net. Treat a high failure rate as a *signal* (flaky job? broken main? timeout too tight?) and investigate — never as a reason to delete the job.
@@ -117,6 +118,8 @@ Judgment calls:
 ```
 
 Or `paths-ignore: ["**.md", "docs/**"]` when the exclude list is shorter. Include the workflow file itself in `paths` so workflow edits still get CI.
+
+> **Required-check trap.** If this workflow feeds a **required status check** (branch protection / rulesets), workflow-level `paths` can make non-matching PRs **unmergeable**: a workflow skipped by path filtering leaves its required check `Pending` forever, while a job skipped by an `if:` condition reports `Success`. Before recommending this diff, check the required checks (`gh api repos/{o}/{r}/branches/<default>/protection --jq .required_status_checks.contexts`, or rulesets). For required workflows, gate at the **job level** instead — a cheap change-detection job (e.g. `dorny/paths-filter`) + `if:` on the expensive jobs — so the check always completes.
 
 **push + pull_request double-run — keep PR runs, restrict push to main:**
 
