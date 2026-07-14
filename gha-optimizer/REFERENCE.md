@@ -41,8 +41,7 @@ gh api "/organizations/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(da
         | map({repo: .[0].repositoryName,
                minutes: ((map(select(.unitType | ascii_downcase == "minutes") | .quantity) | add) // 0),
                net:     ((map(.netAmount) | add) // 0)})
-        | map(select(.repo != ""))
-        | sort_by(-.net)' \
+        | map(select(.repo != "" and .minutes > 0))' \
 | jq -c '.[]' | while read -r row; do
     repo=$(jq -r .repo <<<"$row")
     # repositoryName has been observed bare ("my-repo"), but the docs show the
@@ -51,8 +50,16 @@ gh api "/organizations/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(da
     case "$repo" in */*) full="$repo" ;; *) full="$OWNER/$repo" ;; esac
     vis=$(gh repo view "$full" --json visibility --jq .visibility 2>/dev/null || echo UNKNOWN)
     jq -c --arg v "$vis" '. + {visibility:$v}' <<<"$row"
-  done
+  done \
+| jq -s '{
+    org_is_over_allowance: (map(.net) | add > 0),   # org-level alarm, NOT a per-repo verdict
+    cost_targets: (map(select(.visibility == "PRIVATE")) | sort_by(-.minutes)),
+    free_ignore:  (map(select(.visibility == "PUBLIC"))  | sort_by(-.minutes) | map(.repo)),
+    unknown:      (map(select(.visibility == "UNKNOWN")) | map(.repo))
+  }'
 ```
+
+**The sort happens *after* visibility, and on `minutes` — not `net`.** Sorting the raw billing rows by `net` (the obvious move) would rank the pool's last user first; see below.
 
 Match `product`/`unitType` **case-insensitively** (`ascii_downcase`): GitHub's docs show `"Actions"`/`"minutes"` while live responses have been observed returning `"actions"`/`"Minutes"` — an exact-case filter silently returns zero rows on the other casing. The `// 0` matters too: a repo can have Actions **storage** rows and no minutes rows, so `add` returns `null` and `sort_by(-.net)` dies with `cannot negate: null`.
 

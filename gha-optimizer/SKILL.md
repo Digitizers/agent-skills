@@ -41,7 +41,7 @@ Look for work a deploy platform already does:
 
 The workflow can be perfectly configured and still be pure waste — because the thing pushing isn't a person. Mirror, backup, sync and archive repos take automated pushes on a fixed cadence, and **every push re-runs the full CI or security scan**, forever, on code nobody is developing.
 
-Cheapest tell: **run timestamps collapse onto one minute-of-hour.** A human does not push at exactly `:00` twelve times running. (Do **not** trust the commit author — an automated backup usually pushes under a *human's* name.) Detection command → REFERENCE §2.
+Cheapest tell: **the inter-run jitter is negligible *relative to the gap*.** A cron fires on a near-constant interval; a human doesn't. Measure the median gap between runs and the mean deviation from it — `rel-jitter < 5%` is a machine. (Do **not** bucket by exact minute-of-hour: a backup that drifts across `:00`/`:01`/`:02` escapes it, and a bursty human repo trips it. And do **not** trust the commit author — an automated backup usually pushes under a *human's* name.) Detection command → REFERENCE §2.
 
 Real case: a 300 MB backup repo received an hourly automated push; each one triggered a full CodeQL scan — **24 scans/day of code no one was writing**, and it was the only repo in the org actually being billed. The fix wasn't caching. It was *stop scanning a backup*.
 
