@@ -40,17 +40,37 @@ gh api "/organizations/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(da
         | map({repo: .[0].repositoryName,
                minutes: ((map(select(.unitType | ascii_downcase == "minutes") | .quantity) | add) // 0),
                net:     ((map(.netAmount) | add) // 0)})
-        | sort_by(-.minutes)'
+        | map(select(.repo != ""))
+        | sort_by(-.net)' \
+| jq -c '.[]' | while read -r row; do
+    repo=$(jq -r .repo <<<"$row")
+    vis=$(gh repo view "$OWNER/$repo" --json visibility --jq .visibility 2>/dev/null || echo UNKNOWN)
+    jq -c --arg v "$vis" '. + {visibility:$v}' <<<"$row"
+  done
 ```
 
-Match `product`/`unitType` **case-insensitively** (`ascii_downcase`): GitHub's docs show `"Actions"`/`"minutes"` while live responses have been observed returning `"actions"`/`"Minutes"` — an exact-case filter silently returns zero rows on the other casing. The `// 0` matters too: a repo can have Actions **storage** rows and no minutes rows, so `add` returns `null` and `sort_by(-.minutes)` dies with `cannot negate: null`. Output is ranked biggest-consumer-first:
+Match `product`/`unitType` **case-insensitively** (`ascii_downcase`): GitHub's docs show `"Actions"`/`"minutes"` while live responses have been observed returning `"actions"`/`"Minutes"` — an exact-case filter silently returns zero rows on the other casing. The `// 0` matters too: a repo can have Actions **storage** rows and no minutes rows, so `add` returns `null` and `sort_by(-.net)` dies with `cannot negate: null`.
+
+### Rank by money, not minutes — and carry `visibility`
+
+**The usage report bills public repos at zero, but it still reports their minutes.** Ranking by `minutes` therefore puts free repos at the top of your audit and sends you optimizing work that costs nothing — contradicting Phase 0. Real output from an org, ranked correctly:
 
 ```json
-[{"minutes":4775,"net":0.618,"repo":"openclaw-workspace"},
- {"minutes":3200,"net":0,"repo":"openclaw"}, ...]
+{"minutes":4792,"net":0.72,"repo":"openclaw-workspace","visibility":"PRIVATE"}   <- the only one costing money
+{"minutes":214, "net":0,   "repo":"aura",              "visibility":"PRIVATE"}   <- private, still inside the allowance
+{"minutes":1735,"net":0,   "repo":"sumit-api",         "visibility":"PUBLIC"}    <- 1,735 min and FREE
+{"minutes":1619,"net":0,   "repo":"siteagent",         "visibility":"PUBLIC"}    <- 1,619 min and FREE
 ```
 
-`net > 0` means that repo is past the included allowance and actually costing money — start there.
+By minutes, `sumit-api` and `siteagent` look like top consumers. They cost **$0**. Optimizing them saves nothing.
+
+So the triage order is:
+
+1. **`visibility: PRIVATE` and `net > 0`** — past the included allowance, actually billing. This is the entire cost problem; start and usually finish here.
+2. **`PRIVATE` and `net == 0`** — inside the allowance. Worth watching (it's what tips into #1), not worth cutting yet.
+3. **`PUBLIC`** — free on standard runners. Only ever a *hygiene* finding (queue time, cancelled runs), never a cost one. Say so explicitly instead of reporting its minutes as if they mattered.
+
+If the loop can't read a repo's visibility it emits `UNKNOWN` — don't assume; check before you rank it as a cost target.
 
 The `month` filter is load-bearing: **omitting it returns year-to-date**, not the current month — an unfiltered sum presented as "minutes/month" overstates by up to 12× late in the year. Filter explicitly, or label the number YTD. For a personal account: `gh api "/users/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(date +%-m)"`.
 Cache size (separate): `gh api /repos/{owner}/{repo}/actions/cache/usage`.

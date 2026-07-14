@@ -17,6 +17,8 @@ Jumping straight to caching a job that shouldn't exist optimizes waste. A delete
 
 Check if the repo is **public**: GitHub Actions on standard runners is free and unlimited for public repos. If so, say that up front — the entire minutes-saving exercise is moot (hygiene findings like concurrency-cancel are still worth reporting for queue-time, not cost).
 
+**Auditing a whole org? Carry that check into the ranking.** The billing report lists minutes for public repos too, at **$0** — so ranking repos by *minutes* puts free ones at the top and sends you optimizing work that costs nothing. Rank by **money** (`net`) and annotate each repo's `visibility`; the cost problem is only the repos that are **private AND `net > 0`**. (Recipe → REFERENCE §1.)
+
 ## Phase 1 — Measure, don't guess
 
 - Read **every** file in `.github/workflows/`.
@@ -77,3 +79,4 @@ For every recommendation show the **exact diff**. **Never edit workflow files wi
 | "Roughly 400 minutes/month" (no data) | Measured, or labeled "estimate based on workflow content only". Never in between. |
 | "This nightly workflow looks unused, deleting" | It might be security scanning. Warn explicitly; the human decides. |
 | "I'll just apply the obvious fixes" | Report + diffs only. Edits happen after explicit approval. |
+| "Top consumer: 1,735 minutes — start there" | Check `visibility` first. If it's public those minutes are **free**; you'd be optimizing $0. Rank by `net`, not minutes. |
