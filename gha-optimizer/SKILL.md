@@ -34,6 +34,16 @@ Look for work a deploy platform already does:
 - **Cloudways / git-pull deployments**: a workflow doing rsync/scp/ssh deploy that the platform could do via a git webhook → flag as replaceable.
 - **Docker registry builds**: CI building an image the platform (or another pipeline) also builds → flag.
 
+**Then ask a different question: is a *robot* pulling the trigger?**
+
+The workflow can be perfectly configured and still be pure waste — because the thing pushing isn't a person. Mirror, backup, sync and archive repos take automated pushes on a fixed cadence, and **every push re-runs the full CI or security scan**, forever, on code nobody is developing.
+
+Cheapest tell: **run timestamps collapse onto one minute-of-hour.** A human does not push at exactly `:00` twelve times running. (Do **not** trust the commit author — an automated backup usually pushes under a *human's* name.) Detection command → REFERENCE §2.
+
+Real case: a 300 MB backup repo received an hourly automated push; each one triggered a full CodeQL scan — **24 scans/day of code no one was writing**, and it was the only repo in the org actually being billed. The fix wasn't caching. It was *stop scanning a backup*.
+
+The remedy is rarely "delete the workflow": it's **disable it on this repo**, or narrow the trigger (`on: push` → a weekly `schedule`), or scan the **source** repo instead of the mirror. ⚠️ If the thing you're switching off is security scanning (CodeQL, dependency review), say so explicitly and confirm the *source* repo is still covered — see Hard limits.
+
 ## Phase 3 — Standard optimization checklist
 
 Per workflow, check and report each item (details and canonical diffs → REFERENCE.md §3):
@@ -80,3 +90,5 @@ For every recommendation show the **exact diff**. **Never edit workflow files wi
 | "This nightly workflow looks unused, deleting" | It might be security scanning. Warn explicitly; the human decides. |
 | "I'll just apply the obvious fixes" | Report + diffs only. Edits happen after explicit approval. |
 | "Top consumer: 1,735 minutes — start there" | Check `visibility` first. If it's public those minutes are **free**; you'd be optimizing $0. Rank by `net`, not minutes. |
+| "This repo runs CI constantly — it must be busy" | Bucket the runs by minute-of-hour. All on `:00`? That's a **cron pushing to a mirror**, not a team. Ask whether it should run at all. |
+| "The commits are from a real person, so it's active" | An automated backup pushes under a **human's** name. Cadence is the tell; authorship lies. |

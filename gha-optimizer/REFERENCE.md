@@ -113,6 +113,41 @@ Judgment calls:
 - CI `build` that **gates** (fails PRs on type errors) is legitimate even when Vercel also builds — but prefer `tsc --noEmit` + lint + test over a full `next build`, and never artifact-upload/deploy from it.
 - Vercel already fails the deployment on build errors and shows it on the PR — for many solo/small projects that IS the gate, and the CI build job can go entirely.
 
+### The trigger is a robot
+
+The workflow can be flawless and still be pure waste, because **the pusher isn't a person**. Mirror / backup / sync / archive repos take automated pushes on a fixed cadence, and every push re-runs the full CI or security scan — forever, on code nobody is developing.
+
+**Cheapest tell — the cadence is inhumanly regular.** Bucket the runs by minute-of-hour; a machine lands on one bucket:
+
+```bash
+gh run list -R "$OWNER/$REPO" -L 24 --json createdAt \
+  --jq '[.[].createdAt | .[14:16]] | group_by(.) | map({minute: .[0], n: length}) | sort_by(-.n)'
+```
+
+```json
+[{"minute":"00","n":12}]   # twelve consecutive pushes at exactly :00 — that is a cron, not a colleague
+```
+
+Corroborate cheaply:
+
+```bash
+gh api "repos/$OWNER/$REPO" --jq '{pushed_at, size_mb: (.size/1024|floor), open_issues: .open_issues_count, forks: .forks_count}'
+```
+
+A repo that is large, pushed minutes ago, and has **no issues, no forks, no PRs** is a backup, not a project.
+
+> **Do NOT use the commit author as the signal.** An automated backup usually pushes under a *human's* name — in the case below every commit read `BenKalsky` while the push was entirely machine-driven. Cadence is the tell; authorship lies.
+
+**Worked case.** A 300 MB private backup repo received an hourly automated push. Each push triggered a full **CodeQL** scan → 24 scans/day of code nobody was writing. Across the whole org it was the *only* repo actually being billed. The fix was not caching, not concurrency: it was **stop scanning a backup**.
+
+Remedies, in order of preference:
+
+1. **Disable the workflow/scan on that repo** (leave the source repo's scanning alone).
+2. **Narrow the trigger** — `on: push` → a weekly `schedule`, so the mirror is still checked occasionally.
+3. **Scan the source, not the mirror** — the code is identical; pay once.
+
+⚠️ **If what you're switching off is security scanning** (CodeQL, dependency review, secret scanning), that is a Hard-limit item: say it out loud, and confirm the **source** repo is still covered. Turning off the mirror's scan is fine *only* because the original is scanned. If the mirror is the only copy, you have just stopped scanning that code.
+
 ## §3 Canonical diffs
 
 **Concurrency cancel (near-always safe; per-branch group):**
