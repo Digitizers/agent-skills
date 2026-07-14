@@ -33,7 +33,8 @@ For a 50-run sample it's usually enough to fetch timing for the **top 3–5 work
 **Actual billing — use the enhanced-billing usage report.** This is the best data available: real billed minutes **per repo, per SKU, per month, with dollars**. Needs admin/owner scope; say so if it 403s.
 
 ```bash
-gh api "/organizations/{org}/settings/billing/usage" \
+OWNER=$(gh repo view --json owner --jq .owner.login)
+gh api "/organizations/$OWNER/settings/billing/usage" \
   --jq '[.usageItems[] | select(.product | ascii_downcase == "actions")]
         | group_by(.repositoryName)
         | map({repo: .[0].repositoryName,
@@ -51,8 +52,10 @@ Match `product`/`unitType` **case-insensitively** (`ascii_downcase`): GitHub's d
 
 `net > 0` means that repo is past the included allowance and actually costing money — start there.
 
-Optional filters: `?year=2026&month=7`. For a personal account: `/users/{user}/settings/billing/usage`.
+Optional filters: `?year=2026&month=7`. For a personal account: `gh api "/users/$OWNER/settings/billing/usage"`.
 Cache size (separate): `gh api /repos/{owner}/{repo}/actions/cache/usage`.
+
+Placeholder gotcha: `gh api` auto-expands only `{owner}`, `{repo}`, and `{branch}` (from the current repo). Anything else — `{org}`, `{user}` — is sent **literally** and the request fails; substitute those with a real value or a shell variable like `$OWNER` above.
 
 > **The old endpoints are GONE.** `GET /orgs/{org}/settings/billing/actions` now returns **HTTP 410 — "This endpoint has been moved"**, and the `/users/{user}/...` twin 404s. Do not use them; they were replaced by the usage report above.
 
@@ -78,7 +81,7 @@ No `gh` and no MCP GitHub tools? State it, and estimate only from workflow conte
 
 | Platform | Config evidence | Stronger proof it actually builds |
 |---|---|---|
-| Vercel | `vercel.json`, `.vercel/project.json` | `vercel[bot]` deployment comments/statuses on recent PRs; `gh api repos/{o}/{r}/deployments --jq '.[].creator.login'` |
+| Vercel | `vercel.json`, `.vercel/project.json` | `vercel[bot]` deployment comments/statuses on recent PRs; `gh api repos/{owner}/{repo}/deployments --jq '.[].creator.login'` |
 | Netlify | `netlify.toml` | `netlify[bot]` checks on PRs |
 | Cloudflare Pages | `wrangler.toml` (pages config), CF dash | `cloudflare-pages[bot]` on PRs |
 | Cloudways / git-pull hosts | workflow steps using `rsync`/`scp`/`ssh`/`appleboy/ssh-action` | The platform side supports "git deployment via webhook" — the workflow can shrink to nothing or a webhook `curl` |
@@ -119,7 +122,7 @@ Judgment calls:
 
 Or `paths-ignore: ["**.md", "docs/**"]` when the exclude list is shorter. Include the workflow file itself in `paths` so workflow edits still get CI.
 
-> **Required-check trap.** If this workflow feeds a **required status check** (branch protection / rulesets), workflow-level `paths` can make non-matching PRs **unmergeable**: a workflow skipped by path filtering leaves its required check `Pending` forever, while a job skipped by an `if:` condition reports `Success`. Before recommending this diff, check the required checks (`gh api repos/{o}/{r}/branches/<default>/protection --jq .required_status_checks.contexts`, or rulesets). For required workflows, gate at the **job level** instead — a cheap change-detection job (e.g. `dorny/paths-filter`) + `if:` on the expensive jobs — so the check always completes.
+> **Required-check trap.** If this workflow feeds a **required status check** (branch protection / rulesets), workflow-level `paths` can make non-matching PRs **unmergeable**: a workflow skipped by path filtering leaves its required check `Pending` forever, while a job skipped by an `if:` condition reports `Success`. Before recommending this diff, check the required checks (`gh api "repos/{owner}/{repo}/branches/$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)/protection" --jq .required_status_checks.contexts`, or rulesets). For required workflows, gate at the **job level** instead — a cheap change-detection job (e.g. `dorny/paths-filter`) + `if:` on the expensive jobs — so the check always completes.
 
 **push + pull_request double-run — keep PR runs, restrict push to main:**
 
