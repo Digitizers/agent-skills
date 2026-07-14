@@ -61,7 +61,7 @@ gh api "/organizations/$OWNER/settings/billing/usage?year=$YEAR&month=$MONTH" \
                # storage (artifacts/cache, in GigabyteHours) — summing every
                # netAmount would let storage spend masquerade as runner-minute
                # spend, flagging a standard-runner public repo as "paid larger
-               # runners" and tripping the over-allowance alarm on storage alone.
+               # runners" and tripping the paid-minutes alarm on storage alone.
                net:     ((map(select(.unitType | ascii_downcase == "minutes") | .netAmount) | add) // 0),
                # gross = list-price cost of the minute rows BEFORE the shared
                # allowance is applied. This is the ranking key: it is SKU-weighted
@@ -82,7 +82,13 @@ gh api "/organizations/$OWNER/settings/billing/usage?year=$YEAR&month=$MONTH" \
     jq -c --arg v "$vis" '. + {visibility:$v}' <<<"$row"
   done \
 | jq -s '{
-    org_is_over_allowance: (map(.net) | add > 0),   # org-level alarm, NOT a per-repo verdict
+    # ANY billed minute spend — NOT specifically pool exhaustion. `net > 0` can
+    # mean the included-minutes pool is drained (standard runners) OR that the org
+    # runs larger runners, which are ALWAYS billed and never draw from that pool.
+    # Both mean the same actionable thing: marginal minutes cost money. Don't call
+    # it "over allowance" — a larger-runner-only org trips this with the pool
+    # untouched. It's an org-level alarm, NOT a per-repo verdict.
+    org_has_paid_minute_spend: (map(.net) | add > 0),
     # Everything that is NOT public-and-free drains the shared pool. Select by
     # exclusion, never by listing "PRIVATE" — GitHub Enterprise also returns
     # INTERNAL, which is billed like private. Whitelisting PRIVATE would make
@@ -141,7 +147,7 @@ FamilyOS                 72   $0.43    $0.396    PRIVATE     <- HIGHEST net, 72 
 
 1. **Drop the `PUBLIC` rows billed at zero** (`free_ignore`) — free on standard runners, never a cost finding, only ever hygiene (queue time, cancelled runs). Say so; don't report their minutes as if they mattered. **Do not drop public rows with `net > 0`** — those are larger-runner spend (`paid_public`) and stay in scope.
 2. **Rank the `PRIVATE`/`INTERNAL` repos by `gross` (list-price cost), not raw `minutes`.** `gross` weights each minute by its SKU rate, so a mostly-macOS/larger-runner repo doesn't hide behind a Linux-heavy one with more raw minutes. It is computed pre-discount, so — unlike `net` — it reflects true consumption regardless of pool-drain order. (On an all-Linux org `gross` ranking and `minutes` ranking coincide; the difference only appears under mixed SKUs.) This is the cause, and this is where the savings are.
-3. **Treat `net > 0` as an org-level alarm, not a per-repo verdict** — it says *"the pool is exhausted, marginal minutes now cost money"*. Which repo it happened to land on is noise.
+3. **Treat `net > 0` as an org-level alarm, not a per-repo verdict** — it says *"marginal minutes now cost money"* (either the standard-runner pool is exhausted, or the org runs always-billed larger runners — `net` can't tell you which, and for the takeaway it doesn't matter). Which repo it happened to land on is noise.
 
 If the loop can't read a repo's visibility it emits `UNKNOWN` — don't assume; check before you rank it as a cost target.
 
