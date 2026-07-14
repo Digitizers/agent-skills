@@ -20,12 +20,13 @@ Then per run, duration comes from the timing endpoint (`gh run view <id> --json 
 
 ```bash
 gh api repos/{owner}/{repo}/actions/runs/<id>/timing \
-  --jq '{billable_ms: ((.billable // {}) | map_values(.total_ms)), wall_ms: .run_duration_ms}'
+  --jq '{billable: ((.billable // {}) | map_values({total_ms, job_ms: [.job_runs[]?.duration_ms]})),
+        wall_ms: .run_duration_ms}'
 ```
 
 For a 50-run sample it's usually enough to fetch timing for the **top 3–5 workflows by run count**. Compute per workflow:
 
-- **Billable-eligible minutes** — from `billable.*.total_ms`, per OS. This is **raw job runtime**: the endpoint applies **neither** OS multipliers **nor** per-job minute rounding, so to estimate the charge compute per job `ceil(minutes) × OS rate` (table below; per-job detail in `billable.*.job_runs[].duration_ms`). Never use `run_duration_ms` (wall clock) for cost — with parallel or matrix jobs it undercounts even the raw job time: four parallel 5-minute jobs = ~20 job-minutes, walls 5. Wall time is for queue-latency questions only. (If `billable` comes back empty on your plan, fall back to summing per-job `started_at→completed_at` from `/actions/runs/<id>/jobs` — still per job, not per run.)
+- **Billable-eligible minutes** — from `billable.*.total_ms`, per OS. This is **raw job runtime**: the endpoint applies **neither** OS multipliers **nor** per-job minute rounding, so to estimate the charge compute per job `ceil(minutes) × OS rate` (table below) — round each entry of `job_ms` separately, never the per-OS total once. Never use `run_duration_ms` (wall clock) for cost — with parallel or matrix jobs it undercounts even the raw job time: four parallel 5-minute jobs = ~20 job-minutes, walls 5. Wall time is for queue-latency questions only. (If `billable` comes back empty on your plan, fall back to summing per-job `started_at→completed_at` from `/actions/runs/<id>/jobs` — still per job, not per run.)
 - **Frequency** — runs in the sample window ÷ window days, ×30 for monthly
 - **Superseded %** — `cancelled` ÷ total. This is the only unambiguous waste: a run that a `concurrency` group would have prevented from ever starting. It's the clearest quick win.
 - **Failure %** — `failure` / `timed_out` ÷ total. **This is NOT waste by itself.** A run that fails because it caught a bug is CI doing its job; cutting it saves minutes by removing the safety net. Treat a high failure rate as a *signal* (flaky job? broken main? timeout too tight?) and investigate — never as a reason to delete the job.
