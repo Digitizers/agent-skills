@@ -78,7 +78,10 @@ The reviewer is not an oracle — three failure modes will mislead the loop if y
 
 **Poll the first time ~60–90 s after the trigger, not four minutes later.** Codex often answers in about a minute. A fixed 4-minute wait optimises the wrong variable: it saves a little prompt cache and spends *human* time — the reviewer finishes, the PR sits idle, and the person watching sees the review land before you do and has to prod you. If the first poll is empty, back off (90 s → 2 min → 4 min); don't busy-poll a reviewer that is genuinely still thinking.
 
-Measure, don't assume: the right first-poll delay is however long *this* repo's Codex actually takes, and you can read that off the gap between your trigger comment and the review's `submitted_at`.
+Measure, don't assume — but measure the moment the round becomes **readable**, not the moment something first appears. `reviews[].submitted_at` is the wrong clock for both outcomes: on a findings run it timestamps the *wrapper*, which lands before the inline comments (the race above), and on a clean run there is **no review object at all**. Calibrate the delay from your trigger comment to whichever signal actually ends the round:
+
+- clean pass → the **issue comment's** `created_at`;
+- findings → the `created_at` of the **last inline comment** in the stable set.
 
 If a push isn't auto-re-reviewed (Codex reviews reliably on PR-open, less so on later pushes), re-trigger with a `@codex review` comment.
 
