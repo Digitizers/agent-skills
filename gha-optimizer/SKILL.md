@@ -17,7 +17,11 @@ Jumping straight to caching a job that shouldn't exist optimizes waste. A delete
 
 Two independent ways a repo can have **$0 GitHub Actions spend** — check both before declaring the exercise moot:
 
-1. **Self-hosted runners are free.** GitHub bills nothing for `runs-on: [self-hosted, …]` or a custom runner group — the cost lives in *your own* infra, not GitHub's meter. A repo whose expensive jobs run self-hosted has no GitHub minutes to save no matter how often it runs. (Do **not** confuse self-hosted with *larger GitHub-hosted* runners — those bill on public repos too. `runs-on: ubuntu-latest-4-core` is billed; `runs-on: self-hosted` is not.) Time/queue optimization can still be worth reporting; **dollar** savings are zero.
+1. **Self-hosted runners are free.** GitHub bills nothing for `runs-on: [self-hosted, …]` — the cost lives in *your own* infra, not GitHub's meter. A repo whose expensive jobs run self-hosted has no GitHub minutes to save no matter how often it runs. Two traps here:
+   - **A custom runner *group* (`runs-on: { group: … }`) is NOT a free signal by itself.** Runner groups can contain GitHub-hosted **larger** runners, which *are* billed (even on public repos). Don't declare $0 off the `group:` syntax — check what the group actually contains, or let the billing `net`/`gross` decide.
+   - **Don't confuse self-hosted with *larger GitHub-hosted* runners.** `runs-on: ubuntu-latest-4-core` is billed; `runs-on: self-hosted` is not.
+
+   Where GitHub genuinely bills $0 (true self-hosted), time/queue optimization can still be worth reporting; **dollar** savings are zero.
 2. **Public repo on standard GitHub-hosted runners.** Actions is free and unlimited there — but *only* there. So for a public repo confirm both:
    - `runs-on` is a standard label (`ubuntu-latest`, `windows-latest`, `macos-latest`) — not a larger-runner label, **and**
    - its billing `net` is 0 (org path → REFERENCE §1).

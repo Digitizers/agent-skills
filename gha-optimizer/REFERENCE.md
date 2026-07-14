@@ -153,7 +153,8 @@ Placeholder gotcha: `gh api` auto-expands only `{owner}`, `{repo}`, and `{branch
 | `ubuntu-*-arm` (arm64) | — | `Actions Linux arm64` — **$0.005/min** |
 | `windows-*` | ×2 | `Actions Windows` — $0.010/min |
 | `macos-*` | ~×10 | `Actions macOS 3-core` — $0.062/min (≈10.3×) |
-| `self-hosted` / custom group | — | **$0 — GitHub bills nothing** (you pay your own infra) |
+| `self-hosted` (true self-hosted machines) | — | **$0 — GitHub bills nothing** (you pay your own infra) |
+| `runs-on: { group: … }` | ? | **Depends** — a runner group can hold self-hosted ($0) *or* GitHub-hosted larger runners (billed). Check the group, don't assume $0. |
 
 Rounded up per job. **The `$0.006` catch-all over-prices `ubuntu-slim` (1-core) and arm64 by up to 3×** — don't apply it to every `ubuntu-*` label blindly. Larger/multi-core runners are separate SKUs at their own rates, and self-hosted is free. This is exactly why the **usage report (§1) is authoritative** — it carries the real per-SKU `pricePerUnit`; only fall back to this multiplier table when you have no billing access, and label the result an estimate.
 
