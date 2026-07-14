@@ -1,6 +1,7 @@
 ---
 name: codex-review-loop
-description: Drive a pull request to convergence through the Codex AI reviewer — build → PR → @codex review → verify each finding against HEAD → fix the real ones with regression tests → re-trigger until clean → human reviews last. Use when a PR is open or just pushed and should be reviewed, when the user mentions "codex", "@codex review", "the review loop", "ultrareview", or asks to iterate a PR to green. Works in any git + GitHub repo with the gh CLI and the Codex GitHub reviewer enabled.
+description: Drive a pull request to convergence through the Codex AI reviewer — build → PR → @codex review → verify each finding against HEAD → fix the real ones with regression tests → re-trigger until clean → human reviews last. Use when a PR is open or just pushed and should be reviewed, when the user mentions "codex", "@codex review", "the review loop", "ultrareview", or asks to iterate a PR to green.
+compatibility: Requires a git repository with a GitHub remote, the `gh` CLI authenticated, and the Codex GitHub reviewer enabled on the repo.
 ---
 
 # Codex Review Loop

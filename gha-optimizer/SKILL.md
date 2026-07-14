@@ -1,6 +1,7 @@
 ---
 name: gha-optimizer
 description: Audit and cut GitHub Actions minutes consumption in a repo — measure real usage first, hunt REDUNDANT work before optimizing existing work (does this job need to run at all? at this frequency? only then tune it), detect double-builds against deploy platforms (Vercel/Netlify/Cloudflare Pages/Cloudways), then propose exact diffs grouped by delete/reduce-frequency/optimize. Use whenever the user's intent is to SPEND LESS on CI — reduce GitHub Actions minutes, audit CI cost or billing, ask why Actions usage is high, ask what CI work can be cut or is redundant, request a CI-efficiency review of `.github/workflows/`, or mention "gha-optimizer". Read-only by default — never edits workflows without explicit approval. The dividing line is intent, not subject matter: this skill answers "what is our CI costing us, and what can we delete?" It is the wrong skill for "make this CI work" — writing a new workflow, or fixing a red/failing/misconfigured job — where the user wants MORE working CI, not less CI.
+compatibility: Requires a git repository with a GitHub remote, the `gh` CLI authenticated, and `jq`. Reads the GitHub Actions usage/billing APIs, so the token needs billing read access for org-level numbers.
 ---
 
 # GitHub Actions Optimizer
