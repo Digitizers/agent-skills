@@ -13,7 +13,10 @@ gh repo view --json visibility --jq .visibility
 **Pull recent runs and aggregate:**
 
 ```bash
-gh run list --limit 50 --json name,conclusion,createdAt,databaseId,workflowName,event
+# headBranch + headSha are needed downstream: headSha to collapse same-push runs
+# before the cadence/jitter test (§2), headBranch to confirm "same workflow + ref"
+# before counting a `cancelled` run as genuinely superseded (see Superseded % below).
+gh run list --limit 50 --json name,conclusion,createdAt,databaseId,workflowName,event,headBranch,headSha
 ```
 
 Then per run, duration comes from the timing endpoint (`gh run view <id> --json ...` is slow at 50 runs) — take the **billable** block, not the wall time:
