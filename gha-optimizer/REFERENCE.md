@@ -38,7 +38,10 @@ For a 50-run sample it's usually enough to fetch timing for the **top 3–5 work
 
 ```bash
 OWNER=$(gh repo view --json owner --jq .owner.login)
-gh api "/organizations/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(date +%-m)" \
+# %-m (strip leading zero) is a GNU-ism — BSD/macOS `date` errors on it. Use the
+# portable base-10 strip so this pastes cleanly on the common macOS environment.
+YEAR=$(date +%Y); MONTH=$((10#$(date +%m)))
+gh api "/organizations/$OWNER/settings/billing/usage?year=$YEAR&month=$MONTH" \
   --jq '[.usageItems[] | select(.product | ascii_downcase == "actions")]
         | group_by(.repositoryName)
         | map({repo: .[0].repositoryName,
@@ -131,7 +134,7 @@ FamilyOS                 72   $0.43    $0.396    PRIVATE     <- HIGHEST net, 72 
 
 If the loop can't read a repo's visibility it emits `UNKNOWN` — don't assume; check before you rank it as a cost target.
 
-The `month` filter is load-bearing: **omitting it returns year-to-date**, not the current month — an unfiltered sum presented as "minutes/month" overstates by up to 12× late in the year. Filter explicitly, or label the number YTD. For a personal account: `gh api "/users/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(date +%-m)"`.
+The `month` filter is load-bearing: **omitting it returns year-to-date**, not the current month — an unfiltered sum presented as "minutes/month" overstates by up to 12× late in the year. Filter explicitly, or label the number YTD. For a personal account (same portable month — `%-m` is GNU-only): `MONTH=$((10#$(date +%m))); gh api "/users/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$MONTH"`.
 Cache size (separate): `gh api /repos/{owner}/{repo}/actions/cache/usage`.
 
 Placeholder gotcha: `gh api` auto-expands only `{owner}`, `{repo}`, and `{branch}` (from the current repo). Anything else — `{org}`, `{user}` — is sent **literally** and the request fails; substitute those with a real value or a shell variable like `$OWNER` above.
