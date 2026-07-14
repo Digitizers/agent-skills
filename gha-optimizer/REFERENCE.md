@@ -28,7 +28,7 @@ For a 50-run sample it's usually enough to fetch timing for the **top 3–5 work
 
 - **Billable-eligible minutes** — from `billable.*.total_ms`, per OS. This is **raw job runtime**: the endpoint applies **neither** OS multipliers **nor** per-job minute rounding, so to estimate the charge compute per job `ceil(minutes) × OS rate` (table below) — round each entry of `job_ms` separately, never the per-OS total once. Never use `run_duration_ms` (wall clock) for cost — with parallel or matrix jobs it undercounts even the raw job time: four parallel 5-minute jobs = ~20 job-minutes, walls 5. Wall time is for queue-latency questions only. (If `billable` comes back empty on your plan, fall back to summing per-job `started_at→completed_at` from `/actions/runs/<id>/jobs` — still per job, not per run.)
 - **Frequency** — runs in the sample window ÷ window days, ×30 for monthly
-- **Superseded %** — `cancelled` ÷ total. This is the only unambiguous waste: a run that a `concurrency` group would have prevented from ever starting. It's the clearest quick win.
+- **Superseded %** — an *upper bound* on the waste a `concurrency` group would remove, not a measured figure. The raw `cancelled` ÷ total **overstates** it: the `cancelled` conclusion also covers manual cancellations and runs an *existing* concurrency group already killed — neither of which a new concurrency rule would prevent. To count a cancellation as genuinely superseded, confirm a **newer run on the same workflow + ref** exists (`gh run list --workflow <wf> --branch <ref>` and compare `createdAt`). What survives that filter is the clearest quick win; the raw ratio is a first-glance signal only.
 - **Failure %** — `failure` / `timed_out` ÷ total. **This is NOT waste by itself.** A run that fails because it caught a bug is CI doing its job; cutting it saves minutes by removing the safety net. Treat a high failure rate as a *signal* (flaky job? broken main? timeout too tight?) and investigate — never as a reason to delete the job.
 
 **Actual billing — use the enhanced-billing usage report.** This is the best data available: real billed minutes **per repo, per SKU, per month, with dollars**. Needs admin/owner scope; say so if it 403s.
@@ -266,7 +266,7 @@ Or `paths-ignore: ["**.md", "docs/**"]` when the exclude list is shorter. Includ
 -  push:
    pull_request:
 +  push:
-+    branches: [main]
++    branches: [main]  # ← substitute $DEFAULT (see the placeholder caveat above); literal "main" breaks master/trunk/develop repos
 ```
 
 **Cache with lockfile key (setup-node has it built in — prefer this over raw actions/cache):**
