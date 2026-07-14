@@ -40,7 +40,13 @@ gh api "/organizations/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(da
         | group_by(.repositoryName)
         | map({repo: .[0].repositoryName,
                minutes: ((map(select(.unitType | ascii_downcase == "minutes") | .quantity) | add) // 0),
-               net:     ((map(.netAmount) | add) // 0)})
+               # net MUST be scoped to minute rows. The Actions product also bills
+               # storage (artifacts/cache, in GigabyteHours) — summing every
+               # netAmount would let storage spend masquerade as runner-minute
+               # spend, flagging a standard-runner public repo as "paid larger
+               # runners" and tripping the over-allowance alarm on storage alone.
+               net:     ((map(select(.unitType | ascii_downcase == "minutes") | .netAmount) | add) // 0),
+               net_storage: ((map(select(.unitType | ascii_downcase != "minutes") | .netAmount) | add) // 0)})
         | map(select(.repo != "" and .minutes > 0))' \
 | jq -c '.[]' | while read -r row; do
     repo=$(jq -r .repo <<<"$row")
@@ -162,13 +168,22 @@ The workflow can be flawless and still be pure waste, because **the pusher isn't
 **The tell is cadence regularity — measured as jitter relative to the gap.** A cron fires on a near-constant interval; a human doesn't:
 
 ```bash
-gh run list -R "$OWNER/$REPO" -L 24 --json createdAt --jq '[.[].createdAt] | sort' \
+# EXCLUDE `schedule` runs. A scheduled workflow is SUPPOSED to be periodic —
+# perfectly regular cadence there is the design, not a smell, and feeding it to
+# this test would flag every legitimate nightly as a "robot mirror" to delete.
+# Do NOT narrow to `--event push` either: default-setup code scanning fires as
+# event `dynamic`, and that is exactly what the real backup repos were burning
+# minutes on. Filter out schedule; keep everything a push can trigger.
+gh run list -R "$OWNER/$REPO" -L 30 --json createdAt,event \
 | jq -r '
-    [ . as $t | range(1; length) | (($t[.]|fromdate) - ($t[.-1]|fromdate)) ] | map(select(. > 0))
-    | if length < 5 then "too few runs" else
+    map(select(.event != "schedule" and .event != "workflow_dispatch"))
+    | (group_by(.event) | map("\(.[0].event)=\(length)") | join(" ")) as $events
+    | ([.[].createdAt] | sort) as $t
+    | [ range(1; ($t|length)) | (($t[.]|fromdate) - ($t[.-1]|fromdate)) ] | map(select(. > 0))
+    | if length < 5 then "too few non-scheduled runs" else
         (sort | .[length/2|floor]) as $m
       | ((map(($m - .)|fabs) | add / length) / (if $m>0 then $m else 1 end)) as $rel
-      | "gap=\(($m/60)|round)m  relative-jitter=\((($rel*100)|round))%  -> \(if $rel < 0.05 then "ROBOT (cron cadence)" else "human / bursty" end)"
+      | "events[\($events)]  gap=\(($m/60)|round)m  rel-jitter=\((($rel*100)|round))%  -> \(if $rel < 0.05 then "ROBOT (automated push)" else "human / bursty" end)"
       end'
 ```
 
