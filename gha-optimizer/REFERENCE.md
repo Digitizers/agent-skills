@@ -174,16 +174,22 @@ The workflow can be flawless and still be pure waste, because **the pusher isn't
 # Do NOT narrow to `--event push` either: default-setup code scanning fires as
 # event `dynamic`, and that is exactly what the real backup repos were burning
 # minutes on. Filter out schedule; keep everything a push can trigger.
-gh run list -R "$OWNER/$REPO" -L 30 --json createdAt,event \
+# COLLAPSE BY COMMIT before measuring cadence. Several workflows fire off the SAME
+# push seconds apart (the mirror/backup case is precisely CI + CodeQL together), so
+# a raw run stream interleaves sub-minute gaps between workflows with the hour-scale
+# gaps between pushes — and the jitter test then reads a perfectly hourly robot as
+# "bursty / human". Group by `headSha`, take the earliest run per commit, and measure
+# the gaps between DISTINCT pushes.
+gh run list -R "$OWNER/$REPO" -L 60 --json createdAt,event,headSha \
 | jq -r '
     map(select(.event != "schedule" and .event != "workflow_dispatch"))
     | (group_by(.event) | map("\(.[0].event)=\(length)") | join(" ")) as $events
-    | ([.[].createdAt] | sort) as $t
+    | (group_by(.headSha) | map([.[].createdAt] | min) | sort) as $t
     | [ range(1; ($t|length)) | (($t[.]|fromdate) - ($t[.-1]|fromdate)) ] | map(select(. > 0))
-    | if length < 5 then "too few non-scheduled runs" else
+    | if length < 5 then "too few distinct pushes" else
         (sort | .[length/2|floor]) as $m
       | ((map(($m - .)|fabs) | add / length) / (if $m>0 then $m else 1 end)) as $rel
-      | "events[\($events)]  gap=\(($m/60)|round)m  rel-jitter=\((($rel*100)|round))%  -> \(if $rel < 0.05 then "ROBOT (automated push)" else "human / bursty" end)"
+      | "events[\($events)]  pushes=\($t|length)  gap=\(($m/60)|round)m  rel-jitter=\((($rel*100)|round))%  -> \(if $rel < 0.05 then "ROBOT (automated push)" else "human / bursty" end)"
       end'
 ```
 

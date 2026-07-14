@@ -30,7 +30,7 @@ Both true → say it up front: no cost to save (concurrency-cancel and friends a
 ## Phase 1 — Measure, don't guess
 
 - Read **every** file in `.github/workflows/`.
-- If the `gh` CLI (or the GitHub MCP tools) is available, pull real run data and compute per workflow: average duration, run frequency, and the **superseded rate** (`cancelled` — the one unambiguous waste; a failing run that catches a bug is CI *working*, not waste). Exact commands → [REFERENCE.md](REFERENCE.md) §1.
+- If the `gh` CLI (or the GitHub MCP tools) is available, pull real run data and compute per workflow: average duration, run frequency, and the **superseded rate**. Treat raw `cancelled ÷ total` as an **upper bound**, not measured waste — the `cancelled` conclusion also covers manual cancellations and runs an *existing* concurrency group already killed; confirm a newer run on the **same workflow + ref** before counting a cancel as superseded (a failing run that catches a bug is CI *working*, not waste). Exact commands → [REFERENCE.md](REFERENCE.md) §1.
 - **Ask the API for billed minutes.** The usage report gives real charged minutes and dollars per repo/SKU — the only source with multipliers and per-job rounding already applied. The run-timing endpoint's per-OS `billable` block is **raw job time**: apply the OS multiplier (**Linux ×1, Windows ×2, macOS ≈×10**) and per-job rounding yourself when estimating from it — and real SKUs (`Actions macOS 3-core` at $0.062/min vs Linux $0.006) and larger runners have their own rates.
 - **No `gh` / no billing access? Say so explicitly.** Never invent minute numbers — label every figure "estimate based on workflow content only" and derive it from trigger frequency × step count, clearly marked as such.
 
@@ -46,7 +46,7 @@ Look for work a deploy platform already does:
 
 The workflow can be perfectly configured and still be pure waste — because the thing pushing isn't a person. Mirror, backup, sync and archive repos take automated pushes on a fixed cadence, and **every push re-runs the full CI or security scan**, forever, on code nobody is developing.
 
-Cheapest tell: **the inter-run jitter is negligible *relative to the gap*.** A cron fires on a near-constant interval; a human doesn't. Measure the median gap between runs and the mean deviation from it — `rel-jitter < 5%` is a machine. (Do **not** bucket by exact minute-of-hour: a backup that drifts across `:00`/`:01`/`:02` escapes it, and a bursty human repo trips it. And do **not** trust the commit author — an automated backup usually pushes under a *human's* name.) Detection command → REFERENCE §2.
+Cheapest tell: **the inter-run jitter is negligible *relative to the gap*.** A cron fires on a near-constant interval; a human doesn't. Measure the median gap between **distinct pushes** — collapse same-commit runs first (CI + CodeQL fire off one push seconds apart; measuring *those* gaps makes an hourly robot look bursty) — and the mean deviation from it — `rel-jitter < 5%` is a machine. (Do **not** bucket by exact minute-of-hour: a backup that drifts across `:00`/`:01`/`:02` escapes it, and a bursty human repo trips it. And do **not** trust the commit author — an automated backup usually pushes under a *human's* name.) Detection command → REFERENCE §2.
 
 Real case: a 300 MB backup repo received an hourly automated push; each one triggered a full CodeQL scan — **24 scans/day of code no one was writing**, and it was the only repo in the org actually being billed. The fix wasn't caching. It was *stop scanning a backup*.
 
