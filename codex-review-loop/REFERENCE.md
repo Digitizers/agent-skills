@@ -195,7 +195,7 @@ A round isn't done until CI is green AND Codex is clean on that HEAD.
 
 1. Push commit `abc123` to the PR branch.
 2. `@codex review`.
-3. Poll (~4 min): surface (a) shows `id=555 commit=abc123 [src/x.ts:48] "P1: str_contains is PHP 8-only; CI runs 7.4"`. Surface (b) review on `abc123`.
+3. Poll (first at ~60–90 s; back off if empty): surface (a) shows `id=555 commit=abc123 [src/x.ts:48] "P1: str_contains is PHP 8-only; CI runs 7.4"`. Surface (b) review on `abc123`.
 4. Verify: `abc123 == HEAD` → **current**. Read `src/x.ts:48` — confirmed, and `.github/workflows` runs a 7.4 job → **real** (matrix constraint).
 5. Fix with the project's older-runtime-safe idiom, add a regression test, commit `fix(x): 7.4-compat strpos (Codex P1)`. Push.
 6. 👍 comment 555. `@codex review`.
