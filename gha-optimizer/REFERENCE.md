@@ -53,15 +53,23 @@ gh api "/organizations/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(da
   done \
 | jq -s '{
     org_is_over_allowance: (map(.net) | add > 0),   # org-level alarm, NOT a per-repo verdict
-    # PRIVATE repos drain the shared pool — rank them by minutes (the cause).
-    cost_targets: (map(select(.visibility == "PRIVATE")) | sort_by(-.minutes)),
+    # Everything that is NOT public-and-free drains the shared pool. Select by
+    # exclusion, never by listing "PRIVATE" — GitHub Enterprise also returns
+    # INTERNAL, which is billed like private. Whitelisting PRIVATE would make
+    # every INTERNAL repo VANISH from the report, top consumers included.
+    cost_targets: (map(select(.visibility != "PUBLIC" and .visibility != "UNKNOWN")) | sort_by(-.minutes)),
     # PUBLIC is free ONLY on standard runners. A public repo with net > 0 is
     # paying for larger runners — real spend, must NOT be dropped.
     paid_public:  (map(select(.visibility == "PUBLIC" and .net > 0)) | sort_by(-.net)),
     free_ignore:  (map(select(.visibility == "PUBLIC" and .net == 0)) | map(.repo)),
     unknown:      (map(select(.visibility == "UNKNOWN")) | map(.repo))
-  }'
+  }
+  # Every row must land in exactly one bucket — if these disagree, a visibility
+  # value you did not anticipate is being silently dropped.
+  | . + {rows_accounted: ((.cost_targets|length) + (.paid_public|length) + (.free_ignore|length) + (.unknown|length))}'
 ```
+
+**Bucket by exclusion, not by whitelist.** `visibility` is not just `PUBLIC`/`PRIVATE` — GitHub Enterprise returns **`INTERNAL`** (org-visible, and billed exactly like private). A `select(.visibility == "PRIVATE")` silently drops every internal repo out of the report entirely, so a genuine top consumer can simply not appear. Anything that isn't public-and-free is a cost target; `rows_accounted` is there to catch it if a new visibility value ever shows up.
 
 Two things the partition is doing:
 
@@ -196,6 +204,15 @@ Remedies, in order of preference:
 ⚠️ **If what you're switching off is security scanning** (CodeQL, dependency review, secret scanning), that is a Hard-limit item: say it out loud, and confirm the **source** repo is still covered. Turning off the mirror's scan is fine *only* because the original is scanned. If the mirror is the only copy, you have just stopped scanning that code.
 
 ## §3 Canonical diffs
+
+> **`main` below is a placeholder — resolve the real default branch first.**
+> On a repo whose default is `master` / `trunk` / `develop`, pasting these verbatim restricts `push` CI to a branch that doesn't exist: PR runs keep working, so it looks fine, while **post-merge coverage silently disappears**. The matrix example is worse — `github.ref == 'refs/heads/main'` just never matches, so the "full matrix on the default branch" quietly never runs.
+>
+> ```bash
+> DEFAULT=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)
+> ```
+>
+> Substitute `$DEFAULT` everywhere `main` appears in this section before proposing the diff.
 
 **Concurrency cancel (near-always safe; per-branch group):**
 
