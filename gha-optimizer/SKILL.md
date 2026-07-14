@@ -17,7 +17,10 @@ Jumping straight to caching a job that shouldn't exist optimizes waste. A delete
 
 Check if the repo is **public**: GitHub Actions on standard runners is free and unlimited for public repos. If so, say that up front — the entire minutes-saving exercise is moot (hygiene findings like concurrency-cancel are still worth reporting for queue-time, not cost).
 
-**Auditing a whole org? Carry that check into the ranking.** The billing report lists minutes for public repos too, at **$0** — so ranking repos by *minutes* puts free ones at the top and sends you optimizing work that costs nothing. Rank by **money** (`net`) and annotate each repo's `visibility`; the cost problem is only the repos that are **private AND `net > 0`**. (Recipe → REFERENCE §1.)
+**Auditing a whole org? Two traps, in order.** (Recipe → REFERENCE §1.)
+
+1. **Public repos are listed too, at $0.** Ranking by raw *minutes* floats free repos to the top and sends you optimizing work that cannot save a cent. Annotate `visibility` and **drop `PUBLIC`** from the cost analysis.
+2. **Then rank the private repos by `minutes` — not by `net`.** The included minutes are a **shared org pool**: once it's drained, whatever runs next gets billed, so `net` fingers whichever repo happened to go last, not the one that ate the pool. Observed: the repo with the org's **highest bill** had **72 Linux minutes**, while the two backup repos burning **1,640 min/month between them** showed a smaller `net`. Treat `net > 0` as an **org-level alarm** ("the pool is empty"), never as a per-repo verdict.
 
 ## Phase 1 — Measure, don't guess
 
@@ -89,6 +92,7 @@ For every recommendation show the **exact diff**. **Never edit workflow files wi
 | "Roughly 400 minutes/month" (no data) | Measured, or labeled "estimate based on workflow content only". Never in between. |
 | "This nightly workflow looks unused, deleting" | It might be security scanning. Warn explicitly; the human decides. |
 | "I'll just apply the obvious fixes" | Report + diffs only. Edits happen after explicit approval. |
-| "Top consumer: 1,735 minutes — start there" | Check `visibility` first. If it's public those minutes are **free**; you'd be optimizing $0. Rank by `net`, not minutes. |
+| "Top consumer: 1,735 minutes — start there" | Check `visibility` first. If it's public those minutes are **free**; you'd be optimizing $0. |
+| "This repo has the biggest bill — that's the problem" | `net` is order-dependent: the included minutes are a **shared pool**, so it fingers whoever ran *after* it drained. Rank **private repos by minutes**; treat `net > 0` as an org-level alarm. |
 | "This repo runs CI constantly — it must be busy" | Bucket the runs by minute-of-hour. All on `:00`? That's a **cron pushing to a mirror**, not a team. Ask whether it should run at all. |
 | "The commits are from a real person, so it's active" | An automated backup pushes under a **human's** name. Cadence is the tell; authorship lies. |

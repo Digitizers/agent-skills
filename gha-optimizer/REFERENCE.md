@@ -45,7 +45,11 @@ gh api "/organizations/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(da
         | sort_by(-.net)' \
 | jq -c '.[]' | while read -r row; do
     repo=$(jq -r .repo <<<"$row")
-    vis=$(gh repo view "$OWNER/$repo" --json visibility --jq .visibility 2>/dev/null || echo UNKNOWN)
+    # repositoryName has been observed bare ("my-repo"), but the docs show the
+    # "owner/repo" form — prefixing blindly would build "owner/owner/repo" and
+    # silently degrade every row to UNKNOWN. Normalize instead of assuming.
+    case "$repo" in */*) full="$repo" ;; *) full="$OWNER/$repo" ;; esac
+    vis=$(gh repo view "$full" --json visibility --jq .visibility 2>/dev/null || echo UNKNOWN)
     jq -c --arg v "$vis" '. + {visibility:$v}' <<<"$row"
   done
 ```
@@ -65,11 +69,27 @@ Match `product`/`unitType` **case-insensitively** (`ascii_downcase`): GitHub's d
 
 By minutes, `sumit-api` and `siteagent` look like top consumers. They cost **$0**. Optimizing them saves nothing.
 
-So the triage order is:
+### `net` names the victim, not the culprit
 
-1. **`visibility: PRIVATE` and `net > 0`** — past the included allowance, actually billing. This is the entire cost problem; start and usually finish here.
-2. **`PRIVATE` and `net == 0`** — inside the allowance. Worth watching (it's what tips into #1), not worth cutting yet.
-3. **`PUBLIC`** — free on standard runners. Only ever a *hygiene* finding (queue time, cancelled runs), never a cost one. Say so explicitly instead of reporting its minutes as if they mattered.
+The obvious next move — "rank by `net`, that's the money" — is **also wrong**, and it took real data to see why.
+
+The included minutes are a **shared org pool**. Every private repo draws from it; once it's exhausted, whatever runs *next* gets charged. So `net` is an artifact of **ordering**, not of consumption. Measured in one org:
+
+```text
+repo                minutes   net       visibility
+Aura                  1,155   $0        PRIVATE     <- biggest consumer, billed nothing
+openclaw-workspace      851   $0.198    PRIVATE     <- robot backup
+hermes-workspace        789   $0.162    PRIVATE     <- robot backup
+FamilyOS                 72   $0.396    PRIVATE     <- HIGHEST net, 72 minutes, plain Linux
+```
+
+`FamilyOS` shows the largest bill in the org off **72 Linux minutes**. It did nothing wrong — it merely ran after the pool was empty. Rank by `net` and you send the audit at an innocent bystander while the two robot backups (**1,640 min ≈ 53% of all private minutes**) sit below it, untouched.
+
+**The correct model:**
+
+1. **Drop `PUBLIC` entirely.** Free on standard runners; never a cost finding, only ever hygiene (queue time, cancelled runs). Say so — don't report its minutes as if they mattered.
+2. **Rank the `PRIVATE` repos by `minutes`.** They are what drains the shared pool. This is the cause, and this is where the savings are.
+3. **Treat `net > 0` as an org-level alarm, not a per-repo verdict** — it says *"the pool is exhausted, marginal minutes now cost money"*. Which repo it happened to land on is noise.
 
 If the loop can't read a repo's visibility it emits `UNKNOWN` — don't assume; check before you rank it as a cost target.
 
@@ -117,16 +137,29 @@ Judgment calls:
 
 The workflow can be flawless and still be pure waste, because **the pusher isn't a person**. Mirror / backup / sync / archive repos take automated pushes on a fixed cadence, and every push re-runs the full CI or security scan — forever, on code nobody is developing.
 
-**Cheapest tell — the cadence is inhumanly regular.** Bucket the runs by minute-of-hour; a machine lands on one bucket:
+**The tell is cadence regularity — measured as jitter relative to the gap.** A cron fires on a near-constant interval; a human doesn't:
 
 ```bash
-gh run list -R "$OWNER/$REPO" -L 24 --json createdAt \
-  --jq '[.[].createdAt | .[14:16]] | group_by(.) | map({minute: .[0], n: length}) | sort_by(-.n)'
+gh run list -R "$OWNER/$REPO" -L 24 --json createdAt --jq '[.[].createdAt] | sort' \
+| jq -r '
+    [ . as $t | range(1; length) | (($t[.]|fromdate) - ($t[.-1]|fromdate)) ] | map(select(. > 0))
+    | if length < 5 then "too few runs" else
+        (sort | .[length/2|floor]) as $m
+      | ((map(($m - .)|fabs) | add / length) / (if $m>0 then $m else 1 end)) as $rel
+      | "gap=\(($m/60)|round)m  relative-jitter=\((($rel*100)|round))%  -> \(if $rel < 0.05 then "ROBOT (cron cadence)" else "human / bursty" end)"
+      end'
 ```
 
-```json
-[{"minute":"00","n":12}]   # twelve consecutive pushes at exactly :00 — that is a cron, not a colleague
+Measured across one org:
+
+```text
+openclaw-workspace  gap=60m  relative-jitter=0%     -> ROBOT      (hourly backup push)
+hermes-workspace    gap=60m  relative-jitter=1%     -> ROBOT      (hourly backup push)
+FamilyOS            gap=11m  relative-jitter=23%    -> human / bursty
+Aura                gap=5m   relative-jitter=2345%  -> human / bursty
 ```
+
+**Use *relative* jitter, not an exact minute-of-hour bucket.** The obvious version of this check — group runs by minute-of-hour and look for one bucket — is too brittle: the second backup above jittered across `:00`/`:01`/`:02` and the bucket test nearly missed it, while a bursty human repo (11-minute median gap) would trip an absolute-seconds threshold. A cron's jitter is negligible *relative to its interval*; that ratio is what separates them.
 
 Corroborate cheaply:
 
