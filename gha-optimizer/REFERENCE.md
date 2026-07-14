@@ -19,17 +19,23 @@ gh repo view --json visibility --jq .visibility
 gh run list --limit 50 --json name,conclusion,createdAt,databaseId,workflowName,event,headBranch,headSha
 ```
 
-Then per run, duration comes from the timing endpoint (`gh run view <id> --json ...` is slow at 50 runs) — take the **billable** block, not the wall time:
+Then per run, get **per-job** duration (`gh run view <id> --json ...` is slow at 50 runs). The **jobs** endpoint is the durable primary — sum each job's `started_at → completed_at`, per job, never per run:
 
 ```bash
-gh api repos/{owner}/{repo}/actions/runs/<id>/timing \
-  --jq '{billable: ((.billable // {}) | map_values({total_ms, job_ms: [.job_runs[]?.duration_ms]})),
-        wall_ms: .run_duration_ms}'
+gh api repos/{owner}/{repo}/actions/runs/<id>/jobs \
+  --jq '[.jobs[] | {name, labels, ms: (((.completed_at // .started_at | fromdate) - (.started_at | fromdate)) * 1000)}]'
 ```
 
-For a 50-run sample it's usually enough to fetch timing for the **top 3–5 workflows by run count**. Compute per workflow:
+> **Don't lead with `/actions/runs/<id>/timing`.** GitHub's *Get workflow run usage* endpoint is **closing down** (billing-platform migration completed 2025-04-01) and can fail outright on migrated Team/Enterprise accounts — the same retirement wave as the old `/settings/billing/actions` endpoint this skill already had to drop. Use it **only as a legacy fallback** where it still responds; it does hand you a clean per-OS `billable` block when it works:
+>
+> ```bash
+> gh api repos/{owner}/{repo}/actions/runs/<id>/timing \
+>   --jq '{billable: ((.billable // {}) | map_values({total_ms, job_ms: [.job_runs[]?.duration_ms]})), wall_ms: .run_duration_ms}'
+> ```
 
-- **Billable-eligible minutes** — from `billable.*.total_ms`, per OS. This is **raw job runtime**: the endpoint applies **neither** OS multipliers **nor** per-job minute rounding, so to estimate the charge compute per job `ceil(minutes) × OS rate` (table below) — round each entry of `job_ms` separately, never the per-OS total once. Never use `run_duration_ms` (wall clock) for cost — with parallel or matrix jobs it undercounts even the raw job time: four parallel 5-minute jobs = ~20 job-minutes, walls 5. Wall time is for queue-latency questions only. (If `billable` comes back empty on your plan, fall back to summing per-job `started_at→completed_at` from `/actions/runs/<id>/jobs` — still per job, not per run.)
+For a 50-run sample it's usually enough to fetch durations for the **top 3–5 workflows by run count**. Compute per workflow:
+
+- **Billable-eligible minutes** — from the jobs endpoint's per-job `started_at→completed_at` (or `/timing`'s `billable.*.total_ms` where it still works), per OS. This is **raw job runtime**: neither source applies OS multipliers or per-job minute rounding, so to estimate the charge compute per job `ceil(minutes) × OS rate` (table below) — round each job separately, never the per-OS total once. Never use `run_duration_ms` (wall clock) for cost — with parallel or matrix jobs it undercounts even the raw job time: four parallel 5-minute jobs = ~20 job-minutes, walls 5. Wall time is for queue-latency questions only. **For actual dollars, the billing usage report (§1) is authoritative — this per-job math is only for the estimate path when you lack billing access.**
 - **Frequency** — runs in the sample window ÷ window days, ×30 for monthly
 - **Superseded %** — an *upper bound* on the waste a `concurrency` group would remove, not a measured figure. The raw `cancelled` ÷ total **overstates** it: the `cancelled` conclusion also covers manual cancellations and runs an *existing* concurrency group already killed — neither of which a new concurrency rule would prevent. To count a cancellation as genuinely superseded, confirm a **newer run on the same workflow + ref** exists (`gh run list --workflow <wf> --branch <ref>` and compare `createdAt`). What survives that filter is the clearest quick win; the raw ratio is a first-glance signal only.
 - **Failure %** — `failure` / `timed_out` ÷ total. **This is NOT waste by itself.** A run that fails because it caught a bug is CI doing its job; cutting it saves minutes by removing the safety net. Treat a high failure rate as a *signal* (flaky job? broken main? timeout too tight?) and investigate — never as a reason to delete the job.
@@ -144,7 +150,7 @@ Placeholder gotcha: `gh api` auto-expands only `{owner}`, `{repo}`, and `{branch
 **Where the truth lives — two sources, only one is charged money:**
 
 - The **usage report** (above) is the only source of **actually-charged** numbers: billed `quantity` (minutes, with multipliers and per-job rounding already applied) and `netAmount` ($) per SKU. Prefer it whenever you have access.
-- The **timing** endpoint returns a per-OS `billable` block:
+- The **timing** endpoint (legacy — closing down, see §1; use the jobs endpoint as primary) returns a per-OS `billable` block:
   `{"billable":{"UBUNTU":{"total_ms":…},"MACOS":{"total_ms":…}}, "run_duration_ms":…}` — `run_duration_ms` is **wall clock**; `billable.*.total_ms` is **raw billable-eligible job time**, with **no OS multiplier and no per-job rounding applied**. Estimating cost from it means doing that arithmetic yourself, per job.
 
 **Multipliers / rates** — the arithmetic you must apply to timing data (the usage report never needs them — it's already charged):
