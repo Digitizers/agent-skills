@@ -15,7 +15,12 @@ Jumping straight to caching a job that shouldn't exist optimizes waste. A delete
 
 ## Phase 0 — Is this even a problem?
 
-Check if the repo is **public**: GitHub Actions on standard runners is free and unlimited for public repos. If so, say that up front — the entire minutes-saving exercise is moot (hygiene findings like concurrency-cancel are still worth reporting for queue-time, not cost).
+Check if the repo is **public**. Actions is free and unlimited for public repos **on standard GitHub-hosted runners** — but *only* there: **larger runners are billed on public repos too**. So before declaring the exercise moot, confirm the repo isn't paying:
+
+- `runs-on` is a standard label (`ubuntu-latest`, `windows-latest`, `macos-latest`) — not a larger-runner label or a custom runner group, **and**
+- its billing `net` is 0 (org path → REFERENCE §1).
+
+Both true → say it up front: no cost to save (concurrency-cancel and friends are still worth reporting for **queue time**, not money). A public repo on larger runners is a **real cost target** — treat it like a private one.
 
 **Auditing a whole org? Two traps, in order.** (Recipe → REFERENCE §1.)
 
@@ -81,7 +86,7 @@ For every recommendation show the **exact diff**. **Never edit workflow files wi
 - **Never delete or disable** security-scanning or dependency-update workflows (CodeQL, Dependabot, `npm audit`, Renovate) without an explicit, separate warning — cost is not the only axis.
 - **Never assume the CI build is redundant** until you've verified the platform actually builds this repo (Phase 2). "There's a `vercel.json`" is a lead, not proof.
 - **Never fabricate minutes.** No data → say so, and mark estimates as estimates.
-- Public repo → free Actions; lead with that (Phase 0).
+- Public repo → free Actions **on standard runners only**; confirm that (not just the visibility) before leading with it (Phase 0). A public repo on larger runners bills like a private one.
 
 ## Red flags — stop
 
@@ -92,7 +97,7 @@ For every recommendation show the **exact diff**. **Never edit workflow files wi
 | "Roughly 400 minutes/month" (no data) | Measured, or labeled "estimate based on workflow content only". Never in between. |
 | "This nightly workflow looks unused, deleting" | It might be security scanning. Warn explicitly; the human decides. |
 | "I'll just apply the obvious fixes" | Report + diffs only. Edits happen after explicit approval. |
-| "Top consumer: 1,735 minutes — start there" | Check `visibility` first. If it's public those minutes are **free**; you'd be optimizing $0. |
+| "Top consumer: 1,735 minutes — start there" | Check `visibility` first. Public **on standard runners** → those minutes are **free**; you'd be optimizing $0. (Public on *larger* runners still bills — check `net`.) |
 | "This repo has the biggest bill — that's the problem" | `net` is order-dependent: the included minutes are a **shared pool**, so it fingers whoever ran *after* it drained. Rank **private repos by minutes**; treat `net > 0` as an org-level alarm. |
 | "This repo runs CI constantly — it must be busy" | Measure jitter **relative to the median gap**. Under ~5%? That's a **cron pushing to a mirror**, not a team. (Don't bucket by minute-of-hour — a cron that drifts across `:00`/`:01` escapes it.) Ask whether it should run at all. |
 | "The commits are from a real person, so it's active" | An automated backup pushes under a **human's** name. Cadence is the tell; authorship lies. |

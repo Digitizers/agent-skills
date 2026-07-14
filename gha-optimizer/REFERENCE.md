@@ -76,11 +76,11 @@ Two things the partition is doing:
 - **The sort happens *after* visibility, and on `minutes` — not `net`.** Sorting the raw billing rows by `net` (the obvious move) would rank the pool's last user first; see below.
 - **"Public = free" is only true on *standard* runners.** Larger runners are billed on public repos too, so a public repo with `net > 0` has genuine spend — it goes to `paid_public`, not to the ignore pile. Dropping every public row would silently hide it.
 
-Match `product`/`unitType` **case-insensitively** (`ascii_downcase`): GitHub's docs show `"Actions"`/`"minutes"` while live responses have been observed returning `"actions"`/`"Minutes"` — an exact-case filter silently returns zero rows on the other casing. The `// 0` matters too: a repo can have Actions **storage** rows and no minutes rows, so `add` returns `null` and `sort_by(-.net)` dies with `cannot negate: null`.
+Match `product`/`unitType` **case-insensitively** (`ascii_downcase`): GitHub's docs show `"Actions"`/`"minutes"` while live responses have been observed returning `"actions"`/`"Minutes"` — an exact-case filter silently returns zero rows on the other casing. The `// 0` matters too: a repo can have Actions **storage** rows and no minutes rows, so `add` returns `null` and the later `sort_by(-.minutes)` dies with `cannot negate: null`.
 
 ### Rank by money, not minutes — and carry `visibility`
 
-**The usage report bills public repos at zero, but it still reports their minutes.** Ranking by `minutes` therefore puts free repos at the top of your audit and sends you optimizing work that costs nothing — contradicting Phase 0. Real output from an org, ranked correctly:
+**The usage report bills standard-runner public repos at zero, but it still reports their minutes.** Ranking by `minutes` therefore puts those free repos at the top of your audit and sends you optimizing work that costs nothing — contradicting Phase 0. (A public repo on *larger* runners does bill; that's what `paid_public` is for.) Real output from an org, ranked correctly:
 
 ```json
 {"minutes":4792,"net":0.72,"repo":"openclaw-workspace","visibility":"PRIVATE"}   <- the only one costing money
@@ -109,7 +109,7 @@ FamilyOS                 72   $0.396    PRIVATE     <- HIGHEST net, 72 minutes, 
 
 **The correct model:**
 
-1. **Drop `PUBLIC` entirely.** Free on standard runners; never a cost finding, only ever hygiene (queue time, cancelled runs). Say so — don't report its minutes as if they mattered.
+1. **Drop the `PUBLIC` rows billed at zero** (`free_ignore`) — free on standard runners, never a cost finding, only ever hygiene (queue time, cancelled runs). Say so; don't report their minutes as if they mattered. **Do not drop public rows with `net > 0`** — those are larger-runner spend (`paid_public`) and stay in scope.
 2. **Rank the `PRIVATE` repos by `minutes`.** They are what drains the shared pool. This is the cause, and this is where the savings are.
 3. **Treat `net > 0` as an org-level alarm, not a per-repo verdict** — it says *"the pool is exhausted, marginal minutes now cost money"*. Which repo it happened to land on is noise.
 
@@ -305,7 +305,9 @@ strategy:
 ## GitHub Actions audit — <repo>
 
 Data source: [gh run list, N runs over D days | workflow content only — no run data available]
-Repo visibility: [public — Actions free, findings are hygiene only | private]
+Repo visibility: [public + standard runners — Actions free, findings are hygiene only
+                 | public + larger runners — BILLED, treat as a cost target
+                 | private / internal — billed]
 
 | Workflow | Est. min/month | Finding | Potential saving | Severity |
 |---|---|---|---|---|
