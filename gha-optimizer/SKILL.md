@@ -15,12 +15,14 @@ Jumping straight to caching a job that shouldn't exist optimizes waste. A delete
 
 ## Phase 0 — Is this even a problem?
 
-Check if the repo is **public**. Actions is free and unlimited for public repos **on standard GitHub-hosted runners** — but *only* there: **larger runners are billed on public repos too**. So before declaring the exercise moot, confirm the repo isn't paying:
+Two independent ways a repo can have **$0 GitHub Actions spend** — check both before declaring the exercise moot:
 
-- `runs-on` is a standard label (`ubuntu-latest`, `windows-latest`, `macos-latest`) — not a larger-runner label or a custom runner group, **and**
-- its billing `net` is 0 (org path → REFERENCE §1).
+1. **Self-hosted runners are free.** GitHub bills nothing for `runs-on: [self-hosted, …]` or a custom runner group — the cost lives in *your own* infra, not GitHub's meter. A repo whose expensive jobs run self-hosted has no GitHub minutes to save no matter how often it runs. (Do **not** confuse self-hosted with *larger GitHub-hosted* runners — those bill on public repos too. `runs-on: ubuntu-latest-4-core` is billed; `runs-on: self-hosted` is not.) Time/queue optimization can still be worth reporting; **dollar** savings are zero.
+2. **Public repo on standard GitHub-hosted runners.** Actions is free and unlimited there — but *only* there. So for a public repo confirm both:
+   - `runs-on` is a standard label (`ubuntu-latest`, `windows-latest`, `macos-latest`) — not a larger-runner label, **and**
+   - its billing `net` is 0 (org path → REFERENCE §1).
 
-Both true → say it up front: no cost to save (concurrency-cancel and friends are still worth reporting for **queue time**, not money). A public repo on larger runners is a **real cost target** — treat it like a private one.
+Either case true → say it up front: no cost to save (concurrency-cancel and friends are still worth reporting for **queue time**, not money). A public repo on **larger** runners is a **real cost target** — treat it like a private one. When in doubt, let the usage report's `net`/`gross` decide — a repo that bills $0 across a full month has nothing to optimize for money.
 
 **Auditing a whole org? Two traps, in order.** (Recipe → REFERENCE §1.)
 
@@ -31,7 +33,7 @@ Both true → say it up front: no cost to save (concurrency-cancel and friends a
 
 - Read **every** file in `.github/workflows/`.
 - If the `gh` CLI (or the GitHub MCP tools) is available, pull real run data and compute per workflow: average duration, run frequency, and the **superseded rate**. Treat raw `cancelled ÷ total` as an **upper bound**, not measured waste — the `cancelled` conclusion also covers manual cancellations and runs an *existing* concurrency group already killed; confirm a newer run on the **same workflow + ref** before counting a cancel as superseded (a failing run that catches a bug is CI *working*, not waste). Exact commands → [REFERENCE.md](REFERENCE.md) §1.
-- **Ask the API for billed minutes.** The usage report gives real charged minutes and dollars per repo/SKU — the only source with multipliers and per-job rounding already applied. The run-timing endpoint's per-OS `billable` block is **raw job time**: apply the OS multiplier (**Linux ×1, Windows ×2, macOS ≈×10**) and per-job rounding yourself when estimating from it — and real SKUs (`Actions macOS 3-core` at $0.062/min vs Linux $0.006) and larger runners have their own rates.
+- **Ask the API for billed minutes.** The usage report gives real charged minutes and dollars per repo/SKU — the only source with multipliers and per-job rounding already applied. The run-timing endpoint's per-OS `billable` block is **raw job time**: apply the OS multiplier (**Linux ×1, Windows ×2, macOS ≈×10**) and per-job rounding yourself when estimating from it — and real SKUs (`Actions macOS 3-core` at $0.062/min vs Linux $0.006) and larger runners have their own rates. Watch two zero/low cases the ×1 Linux rate hides: **self-hosted runners are free** ($0), and **`ubuntu-slim` (1-core, $0.002) / arm64 ($0.005)** cost less than the $0.006 catch-all — full SKU table in REFERENCE §Multipliers.
 - **No `gh` / no billing access? Say so explicitly.** Never invent minute numbers — label every figure "estimate based on workflow content only" and derive it from trigger frequency × step count, clearly marked as such.
 
 ## Phase 2 — Redundancy audit (the highest-value pass)

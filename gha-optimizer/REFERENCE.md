@@ -4,7 +4,7 @@ Exact commands, detection heuristics, and canonical diffs. Load when actually ru
 
 ## §1 Measuring real usage
 
-**Is the repo public?** (free Actions on standard runners if so)
+**Is the repo public, or on self-hosted runners?** (Actions is free on public + *standard* runners, and always free on self-hosted — GitHub bills $0 either way. Larger GitHub-hosted runners bill even on public repos.)
 
 ```bash
 gh repo view --json visibility --jq .visibility
@@ -148,11 +148,14 @@ Placeholder gotcha: `gh api` auto-expands only `{owner}`, `{repo}`, and `{branch
 
 | Runner | Multiplier | Real SKU / rate (list price) |
 |---|---|---|
-| `ubuntu-*` | ×1 | `Actions Linux` — $0.006/min |
+| `ubuntu-*` (2-core x64) | ×1 | `Actions Linux` — $0.006/min |
+| `ubuntu-slim` (1-core) | — | `Actions Linux` — **$0.002/min** |
+| `ubuntu-*-arm` (arm64) | — | `Actions Linux arm64` — **$0.005/min** |
 | `windows-*` | ×2 | `Actions Windows` — $0.010/min |
 | `macos-*` | ~×10 | `Actions macOS 3-core` — $0.062/min (≈10.3×) |
+| `self-hosted` / custom group | — | **$0 — GitHub bills nothing** (you pay your own infra) |
 
-Rounded up per job. Larger/multi-core runners are separate SKUs at their own rates — another reason to read the usage report rather than assume a multiplier.
+Rounded up per job. **The `$0.006` catch-all over-prices `ubuntu-slim` (1-core) and arm64 by up to 3×** — don't apply it to every `ubuntu-*` label blindly. Larger/multi-core runners are separate SKUs at their own rates, and self-hosted is free. This is exactly why the **usage report (§1) is authoritative** — it carries the real per-SKU `pricePerUnit`; only fall back to this multiplier table when you have no billing access, and label the result an estimate.
 
 No `gh` and no MCP GitHub tools? State it, and estimate only from workflow content: (triggers × typical push volume the user confirms) × (step count as a duration proxy). Label every such number **"estimate based on workflow content only"**.
 
@@ -336,7 +339,8 @@ strategy:
 ## GitHub Actions audit — <repo>
 
 Data source: [gh run list, N runs over D days | workflow content only — no run data available]
-Repo visibility: [public + standard runners — Actions free, findings are hygiene only
+Repo visibility: [self-hosted runners — GitHub bills $0, findings are time/hygiene only
+                 | public + standard runners — Actions free, findings are hygiene only
                  | public + larger runners — BILLED, treat as a cost target
                  | private / internal — billed]
 
