@@ -1,6 +1,6 @@
 ---
 name: pr-first-workflow
-description: Default to a branch + pull request for every change — code AND docs — instead of committing to main. Branch → commit → PR → review → merge → return to main; direct-to-main only when the human explicitly says so. Use when starting any change in a git + GitHub repo, when deciding whether something can skip a PR, when the user mentions branching / PR workflow, or right before you're about to `git commit` on main. Pairs with codex-review-loop, which drives the opened PR to green.
+description: Default to a branch + pull request for every change — code, docs, config, content, and marketing copy alike — instead of committing to main. Branch → commit → PR → review → merge → return to main; direct-to-main only when the human explicitly says so. Use when starting any change in a git + GitHub repo, when deciding whether something can skip a PR, when the user mentions branching / PR workflow, and whenever a request implies landing a change — "commit it", "ship it", "push it", "get it into main", "publish it", "update the copy / the page / the README" — however small the edit sounds. Pairs with codex-review-loop, which drives the opened PR to green.
 ---
 
 # PR-first workflow

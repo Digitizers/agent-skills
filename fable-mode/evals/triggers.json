@@ -1,0 +1,8 @@
+[
+  { "query": "fable-mode: review the auth flow in apps/app/lib/auth.ts", "should_trigger": true },
+  { "query": "what's the current rate limit on the Cloudflare API for zone purges? I want to be sure before I write the retry logic.", "should_trigger": true },
+  { "query": "we're about to drop the AppLinkOverrides table in production. walk me through it.", "should_trigger": true },
+  { "query": "double-check this for me — is NEXTAUTH_SECRET still required in NextAuth v5, or did that change?", "should_trigger": true },
+  { "query": "rename the variable clientId to tenantId in this file", "should_trigger": false },
+  { "query": "write me a short fable about a fox who learns to share", "should_trigger": false }
+]

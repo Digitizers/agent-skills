@@ -1,0 +1,8 @@
+[
+  { "query": "our GitHub Actions bill jumped to $180 this month and I have no idea why. can you figure out what's eating the minutes?", "should_trigger": true },
+  { "query": "we're burning way too many CI minutes. take a look at .github/workflows and tell me what to cut.", "should_trigger": true },
+  { "query": "I think our CI is building the app twice — once in Actions and once on Vercel. is that actually happening?", "should_trigger": true },
+  { "query": "can you audit our CI cost and tell me where the waste is?", "should_trigger": true },
+  { "query": "the CI is failing on the lint step, can you fix the eslint config?", "should_trigger": false },
+  { "query": "add a new GitHub Actions workflow that runs our vitest suite on every PR", "should_trigger": false }
+]

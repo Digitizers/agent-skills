@@ -1,0 +1,8 @@
+[
+  { "query": "fix the typo in the README where it says 'recieve' and commit it", "should_trigger": true },
+  { "query": "add a rate limit to the /api/contact endpoint and get it into main", "should_trigger": true },
+  { "query": "should I just commit this straight to main? it's a tiny change", "should_trigger": true },
+  { "query": "update the pricing copy on the marketing site and ship it", "should_trigger": true },
+  { "query": "what's the difference between git rebase and git merge?", "should_trigger": false },
+  { "query": "the build is broken on main, what's the last commit that touched next.config.js?", "should_trigger": false }
+]

@@ -1,0 +1,8 @@
+[
+  { "query": "I just pushed PR #42. can you get it reviewed and iterate until it's clean?", "should_trigger": true },
+  { "query": "run the review loop on this PR until it converges", "should_trigger": true },
+  { "query": "ask codex to review the branch and fix whatever it finds", "should_trigger": true },
+  { "query": "PR is open. drive it to green.", "should_trigger": true },
+  { "query": "review this function and tell me if the null check is in the right place", "should_trigger": false },
+  { "query": "what does the gh pr list command output look like?", "should_trigger": false }
+]

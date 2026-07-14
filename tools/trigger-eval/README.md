@@ -1,0 +1,97 @@
+# trigger-eval
+
+Measures whether a skill's `description` actually makes an agent load it.
+
+A skill that never triggers is indistinguishable from a skill that doesn't
+exist — and you won't notice, because nothing errors. This is the silent
+failure mode of skill authoring, and it's separate from the one the
+`evals/evals.json` behavioral suites cover:
+
+| Failure | Symptom | Caught by |
+|---|---|---|
+| Description doesn't fire | Skill is never loaded; agent answers without it | `trigger-eval` (this tool) |
+| Body is wrong | Skill loads, then behaves incorrectly | `<skill>/evals/evals.json` |
+
+Both matter. A perfect body behind a description that never fires is dead code.
+
+## Run it
+
+```bash
+python3 tools/trigger-eval/trigger_eval.py \
+    --skill gha-optimizer \
+    --eval-set gha-optimizer/evals/triggers.json
+```
+
+Exits non-zero if any case fails, so it drops into CI as-is.
+
+| Flag | Default | Why |
+|---|---|---|
+| `--runs` | 3 | Triggering is stochastic. One run tells you almost nothing. |
+| `--threshold` | 0.5 | Fire rate that counts as a pass. |
+| `--timeout` | 90 | Per query. A query that doesn't trigger has no natural end. |
+| `--workers` | 6 | Parallel probes. |
+| `--git` | off | Probe inside a git repo with a GitHub remote. **Required** for any skill with a git/GitHub precondition — see below. |
+
+## `--git`, and why the fixture can lie
+
+The scratch project is the context the agent judges the description against. If
+the skill's description states a precondition the fixture doesn't satisfy, the
+agent declines for a reason that has nothing to do with the description, and
+the harness reports a description defect that isn't there.
+
+This is not hypothetical — it happened on the first run of this tool:
+
+| Skill | Bare fixture | `--git` fixture |
+|---|---|---|
+| `codex-review-loop` | `"run the review loop on this PR"` fired **33%** | **100%** |
+| `pr-first-workflow` | `"fix the typo and commit it"` fired **0%** | **100%** |
+
+Both descriptions were fine. The probe was running in an empty directory with
+no repo, so "this PR" referred to nothing. Acting on that first result would
+have meant rewriting two healthy descriptions to satisfy a broken fixture.
+
+The tell was a correlation: the two failing skills were exactly the two that
+name git/GitHub in their preconditions, while the skills with no repo
+dependency scored clean. **If a skill states a precondition, satisfy it in the
+fixture or you are measuring the fixture.**
+
+Each probe spawns a real `claude -p` subprocess, so a full run costs quota.
+A 6-query set at `--runs 3` is 18 invocations.
+
+## How it works
+
+For each query it builds a throwaway project containing *only* the skill under
+test, runs `claude -p <query>` there, and watches the streamed events for the
+agent reaching for that skill — either a `Skill` tool call or a direct `Read`
+of its `SKILL.md`. Both count: reading the file is loading the skill by another
+route. The subprocess is killed the moment a trigger appears, since the
+question is whether the agent *decided* to load the skill, not what it does
+afterwards. That also keeps the spawned agent from doing real work.
+
+Isolating the skill is deliberate. Testing it alongside its neighbours would
+measure the routing contest between them, not this description's own pulling
+power — worth measuring, but a different question.
+
+## Writing an eval set
+
+A JSON list of `{"query", "should_trigger"}`.
+
+```json
+[
+  { "query": "our GitHub Actions bill jumped to $180 and I don't know why", "should_trigger": true },
+  { "query": "add a workflow that runs vitest on every PR", "should_trigger": false }
+]
+```
+
+Two rules earn their keep:
+
+**Write the positive cases the way a user actually talks.** If every positive
+query names the skill, you've tested nothing — the name always matches itself.
+The cases that matter describe the *problem* and never name the tool.
+
+**Negative cases are not filler.** A description that fires on everything is as
+broken as one that never fires, and it's the more expensive failure: it drags
+irrelevant instructions into context on unrelated work. The negatives worth
+writing are near-misses — same domain, wrong intent. `gha-optimizer` is a
+read-only audit skill, so "add a workflow that runs vitest" belongs in the
+negative set: same subject, opposite verb.
