@@ -22,8 +22,13 @@ gh run list --limit 50 --json name,conclusion,createdAt,databaseId,workflowName,
 Then per run, get **per-job** duration (`gh run view <id> --json ...` is slow at 50 runs). The **jobs** endpoint is the durable primary — sum each job's `started_at → completed_at`, per job, never per run:
 
 ```bash
-gh api repos/{owner}/{repo}/actions/runs/<id>/jobs \
-  --jq '[.jobs[] | {name, labels, ms: (((.completed_at // .started_at | fromdate) - (.started_at | fromdate)) * 1000)}]'
+# --paginate + per_page=100 + filter=all are all load-bearing: the endpoint
+# defaults to page 1, per_page=30, filter=latest, so a >30-job matrix is
+# truncated and rerun attempts (each of which WAS billed) are dropped —
+# under-counting minutes. Stream `.jobs[]` unwrapped (not `[.jobs[]]`) so
+# --paginate concatenates a flat stream across pages; sum/group with `jq -s`.
+gh api --paginate "repos/{owner}/{repo}/actions/runs/<id>/jobs?per_page=100&filter=all" \
+  --jq '.jobs[] | {name, labels, ms: (((.completed_at // .started_at | fromdate) - (.started_at | fromdate)) * 1000)}'
 ```
 
 > **Don't lead with `/actions/runs/<id>/timing`.** GitHub's *Get workflow run usage* endpoint is **closing down** (billing-platform migration completed 2025-04-01) and can fail outright on migrated Team/Enterprise accounts — the same retirement wave as the old `/settings/billing/actions` endpoint this skill already had to drop. Use it **only as a legacy fallback** where it still responds; it does hand you a clean per-OS `billable` block when it works:
