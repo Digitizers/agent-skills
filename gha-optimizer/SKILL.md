@@ -19,7 +19,7 @@ Check if the repo is **public**: GitHub Actions on standard runners is free and 
 
 **Auditing a whole org? Two traps, in order.** (Recipe → REFERENCE §1.)
 
-1. **Public repos are listed too, at $0.** Ranking by raw *minutes* floats free repos to the top and sends you optimizing work that cannot save a cent. Annotate `visibility` and **drop `PUBLIC`** from the cost analysis.
+1. **Public repos are listed too, usually at $0.** Ranking by raw *minutes* floats free repos to the top and sends you optimizing work that cannot save a cent. Annotate `visibility` and drop them — **but only the ones billed at zero**. Public is free on **standard** runners only; **larger runners are billed on public repos too**, so a public repo with `net > 0` has real spend and stays in scope.
 2. **Then rank the private repos by `minutes` — not by `net`.** The included minutes are a **shared org pool**: once it's drained, whatever runs next gets billed, so `net` fingers whichever repo happened to go last, not the one that ate the pool. Observed: the repo with the org's **highest bill** had **72 Linux minutes**, while the two backup repos burning **1,640 min/month between them** showed a smaller `net`. Treat `net > 0` as an **org-level alarm** ("the pool is empty"), never as a per-repo verdict.
 
 ## Phase 1 — Measure, don't guess
@@ -94,5 +94,5 @@ For every recommendation show the **exact diff**. **Never edit workflow files wi
 | "I'll just apply the obvious fixes" | Report + diffs only. Edits happen after explicit approval. |
 | "Top consumer: 1,735 minutes — start there" | Check `visibility` first. If it's public those minutes are **free**; you'd be optimizing $0. |
 | "This repo has the biggest bill — that's the problem" | `net` is order-dependent: the included minutes are a **shared pool**, so it fingers whoever ran *after* it drained. Rank **private repos by minutes**; treat `net > 0` as an org-level alarm. |
-| "This repo runs CI constantly — it must be busy" | Bucket the runs by minute-of-hour. All on `:00`? That's a **cron pushing to a mirror**, not a team. Ask whether it should run at all. |
+| "This repo runs CI constantly — it must be busy" | Measure jitter **relative to the median gap**. Under ~5%? That's a **cron pushing to a mirror**, not a team. (Don't bucket by minute-of-hour — a cron that drifts across `:00`/`:01` escapes it.) Ask whether it should run at all. |
 | "The commits are from a real person, so it's active" | An automated backup pushes under a **human's** name. Cadence is the tell; authorship lies. |

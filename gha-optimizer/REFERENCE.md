@@ -53,13 +53,20 @@ gh api "/organizations/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(da
   done \
 | jq -s '{
     org_is_over_allowance: (map(.net) | add > 0),   # org-level alarm, NOT a per-repo verdict
+    # PRIVATE repos drain the shared pool — rank them by minutes (the cause).
     cost_targets: (map(select(.visibility == "PRIVATE")) | sort_by(-.minutes)),
-    free_ignore:  (map(select(.visibility == "PUBLIC"))  | sort_by(-.minutes) | map(.repo)),
+    # PUBLIC is free ONLY on standard runners. A public repo with net > 0 is
+    # paying for larger runners — real spend, must NOT be dropped.
+    paid_public:  (map(select(.visibility == "PUBLIC" and .net > 0)) | sort_by(-.net)),
+    free_ignore:  (map(select(.visibility == "PUBLIC" and .net == 0)) | map(.repo)),
     unknown:      (map(select(.visibility == "UNKNOWN")) | map(.repo))
   }'
 ```
 
-**The sort happens *after* visibility, and on `minutes` — not `net`.** Sorting the raw billing rows by `net` (the obvious move) would rank the pool's last user first; see below.
+Two things the partition is doing:
+
+- **The sort happens *after* visibility, and on `minutes` — not `net`.** Sorting the raw billing rows by `net` (the obvious move) would rank the pool's last user first; see below.
+- **"Public = free" is only true on *standard* runners.** Larger runners are billed on public repos too, so a public repo with `net > 0` has genuine spend — it goes to `paid_public`, not to the ignore pile. Dropping every public row would silently hide it.
 
 Match `product`/`unitType` **case-insensitively** (`ascii_downcase`): GitHub's docs show `"Actions"`/`"minutes"` while live responses have been observed returning `"actions"`/`"Minutes"` — an exact-case filter silently returns zero rows on the other casing. The `// 0` matters too: a repo can have Actions **storage** rows and no minutes rows, so `add` returns `null` and `sort_by(-.net)` dies with `cannot negate: null`.
 
