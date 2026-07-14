@@ -46,6 +46,13 @@ gh api "/organizations/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(da
                # spend, flagging a standard-runner public repo as "paid larger
                # runners" and tripping the over-allowance alarm on storage alone.
                net:     ((map(select(.unitType | ascii_downcase == "minutes") | .netAmount) | add) // 0),
+               # gross = list-price cost of the minute rows BEFORE the shared
+               # allowance is applied. This is the ranking key: it is SKU-weighted
+               # (unlike raw minutes — 200 macOS min at $0.062 outcost 1,000 Linux
+               # min at $0.006) AND order-independent (unlike net, which only shows
+               # what spilled past the pool and so depends on run order). Fall back
+               # to pricePerUnit*quantity if grossAmount is ever absent.
+               gross:   ((map(select(.unitType | ascii_downcase == "minutes") | (.grossAmount // (.pricePerUnit * .quantity))) | add) // 0),
                net_storage: ((map(select(.unitType | ascii_downcase != "minutes") | .netAmount) | add) // 0)})
         | map(select(.repo != "" and .minutes > 0))' \
 | jq -c '.[]' | while read -r row; do
@@ -63,7 +70,7 @@ gh api "/organizations/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(da
     # exclusion, never by listing "PRIVATE" — GitHub Enterprise also returns
     # INTERNAL, which is billed like private. Whitelisting PRIVATE would make
     # every INTERNAL repo VANISH from the report, top consumers included.
-    cost_targets: (map(select(.visibility != "PUBLIC" and .visibility != "UNKNOWN")) | sort_by(-.minutes)),
+    cost_targets: (map(select(.visibility != "PUBLIC" and .visibility != "UNKNOWN")) | sort_by(-.gross)),
     # PUBLIC is free ONLY on standard runners. A public repo with net > 0 is
     # paying for larger runners — real spend, must NOT be dropped.
     paid_public:  (map(select(.visibility == "PUBLIC" and .net > 0)) | sort_by(-.net)),
@@ -79,10 +86,10 @@ gh api "/organizations/$OWNER/settings/billing/usage?year=$(date +%Y)&month=$(da
 
 Two things the partition is doing:
 
-- **The sort happens *after* visibility, and on `minutes` — not `net`.** Sorting the raw billing rows by `net` (the obvious move) would rank the pool's last user first; see below.
+- **The sort happens *after* visibility, and on `gross` (list-price cost) — not `minutes`, not `net`.** `minutes` ignores SKU rates (200 macOS min outcost 1,000 Linux min); `net` (the other obvious move) ranks the pool's last user first. `gross` is both SKU-weighted and order-independent; see below.
 - **"Public = free" is only true on *standard* runners.** Larger runners are billed on public repos too, so a public repo with `net > 0` has genuine spend — it goes to `paid_public`, not to the ignore pile. Dropping every public row would silently hide it.
 
-Match `product`/`unitType` **case-insensitively** (`ascii_downcase`): GitHub's docs show `"Actions"`/`"minutes"` while live responses have been observed returning `"actions"`/`"Minutes"` — an exact-case filter silently returns zero rows on the other casing. The `// 0` matters too: a repo can have Actions **storage** rows and no minutes rows, so `add` returns `null` and the later `sort_by(-.minutes)` dies with `cannot negate: null`.
+Match `product`/`unitType` **case-insensitively** (`ascii_downcase`): GitHub's docs show `"Actions"`/`"minutes"` while live responses have been observed returning `"actions"`/`"Minutes"` — an exact-case filter silently returns zero rows on the other casing. The `// 0` matters too: a repo can have Actions **storage** rows and no minutes rows, so `add` returns `null` and the later `sort_by(-.gross)` dies with `cannot negate: null`.
 
 ### Rank by money, not minutes — and carry `visibility`
 
@@ -104,19 +111,19 @@ The obvious next move — "rank by `net`, that's the money" — is **also wrong*
 The included minutes are a **shared org pool**. Every private repo draws from it; once it's exhausted, whatever runs *next* gets charged. So `net` is an artifact of **ordering**, not of consumption. Measured in one org:
 
 ```text
-repo                minutes   net       visibility
-Aura                  1,155   $0        PRIVATE     <- biggest consumer, billed nothing
-openclaw-workspace      851   $0.198    PRIVATE     <- robot backup
-hermes-workspace        789   $0.162    PRIVATE     <- robot backup
-FamilyOS                 72   $0.396    PRIVATE     <- HIGHEST net, 72 minutes, plain Linux
+repo                minutes   gross    net       visibility
+Aura                  1,155   $6.93    $0        PRIVATE     <- biggest consumer, billed nothing (inside allowance)
+openclaw-workspace      851   $5.11    $0.198    PRIVATE     <- robot backup
+hermes-workspace        789   $4.73    $0.162    PRIVATE     <- robot backup
+FamilyOS                 72   $0.43    $0.396    PRIVATE     <- HIGHEST net, 72 minutes, plain Linux
 ```
 
-`FamilyOS` shows the largest bill in the org off **72 Linux minutes**. It did nothing wrong — it merely ran after the pool was empty. Rank by `net` and you send the audit at an innocent bystander while the two robot backups (**1,640 min ≈ 53% of all private minutes**) sit below it, untouched.
+`FamilyOS` shows the largest **`net`** bill in the org off **72 Linux minutes**. It did nothing wrong — it merely ran after the pool was empty. Rank by `net` and you send the audit at an innocent bystander while the two robot backups (**1,640 min ≈ 53% of all private minutes**) sit below it, untouched. Rank by **`gross`** (the `$` column above; here all-Linux at $0.006/min, so it tracks minutes) and the culprits sort to the top where they belong — and on a mixed-SKU org `gross` would still be right where a raw-minutes sort would mis-rank a macOS-heavy repo.
 
 **The correct model:**
 
 1. **Drop the `PUBLIC` rows billed at zero** (`free_ignore`) — free on standard runners, never a cost finding, only ever hygiene (queue time, cancelled runs). Say so; don't report their minutes as if they mattered. **Do not drop public rows with `net > 0`** — those are larger-runner spend (`paid_public`) and stay in scope.
-2. **Rank the `PRIVATE` repos by `minutes`.** They are what drains the shared pool. This is the cause, and this is where the savings are.
+2. **Rank the `PRIVATE`/`INTERNAL` repos by `gross` (list-price cost), not raw `minutes`.** `gross` weights each minute by its SKU rate, so a mostly-macOS/larger-runner repo doesn't hide behind a Linux-heavy one with more raw minutes. It is computed pre-discount, so — unlike `net` — it reflects true consumption regardless of pool-drain order. (On an all-Linux org `gross` ranking and `minutes` ranking coincide; the difference only appears under mixed SKUs.) This is the cause, and this is where the savings are.
 3. **Treat `net > 0` as an org-level alarm, not a per-repo verdict** — it says *"the pool is exhausted, marginal minutes now cost money"*. Which repo it happened to land on is noise.
 
 If the loop can't read a repo's visibility it emits `UNKNOWN` — don't assume; check before you rank it as a cost target.
