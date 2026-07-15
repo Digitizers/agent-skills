@@ -31,6 +31,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+class ProbeError(Exception):
+    """The claude subprocess failed, so its run is not a usable measurement."""
+
+
 def assert_not_shadowed(skill_name: str, skill_dir: Path) -> None:
     """Refuse to probe a skill that a personal skill of the same name overrides.
 
@@ -128,32 +132,58 @@ def probe(skill_dir: Path, skill_name: str, query: str, timeout: int, model: str
         if model:
             cmd += ["--model", model]
 
-        proc = subprocess.Popen(
-            cmd, cwd=project, env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-        )
-        # A non-triggering query has no natural end — the agent just keeps
-        # working. Without this the probe blocks on stdout forever.
-        watchdog = threading.Timer(timeout, proc.kill)
-        watchdog.start()
-        try:
-            for line in proc.stdout:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if _is_trigger(event, skill_name, project):
-                    return True
-            return False
-        except Exception:
-            return False
-        finally:
-            watchdog.cancel()
+        # stderr goes to a file, not DEVNULL: a probe that dies before streaming
+        # a trigger (expired auth, an unsupported flag, an unavailable model)
+        # must not be silently scored as "did not trigger" — that turns a broken
+        # measurement into data, the exact failure this tool exists to catch. A
+        # file rather than a PIPE avoids a buffer-fill deadlock while we read
+        # stdout. (Kept small: we only ever look at the tail.)
+        errf = project / "stderr.log"
+        timed_out = threading.Event()
+
+        def on_timeout() -> None:
+            timed_out.set()
             proc.kill()
-            proc.wait(timeout=10)
+
+        with errf.open("w+") as err:
+            proc = subprocess.Popen(
+                cmd, cwd=project, env=env,
+                stdout=subprocess.PIPE, stderr=err, text=True,
+            )
+            # A non-triggering query has no natural end — the agent just keeps
+            # working. Without this the probe blocks on stdout forever.
+            watchdog = threading.Timer(timeout, on_timeout)
+            watchdog.start()
+            try:
+                for line in proc.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if _is_trigger(event, skill_name, project):
+                        return True  # decided; the finally kills the process
+            finally:
+                watchdog.cancel()
+                proc.kill()
+                proc.wait(timeout=10)
+
+            if timed_out.is_set():
+                return False  # ran the full window without triggering — a real "no"
+
+            # stdout closed on its own. returncode 0 = the agent finished without
+            # loading the skill (a legitimate no-trigger). Non-zero = the probe
+            # itself failed, and a failed probe is not a data point.
+            if proc.returncode not in (0, None):
+                err.seek(0)
+                tail = err.read().strip().splitlines()[-5:]
+                raise ProbeError(
+                    f"claude exited {proc.returncode} on query {query!r} without a trigger.\n"
+                    + "\n".join(f"    {l}" for l in tail)
+                )
+            return False
 
 
 def _same_skill(emitted: object, skill_name: str) -> bool:
@@ -227,6 +257,7 @@ def main() -> int:
     jobs = [(item, i) for item in eval_set for i in range(args.runs)]
     hits: dict[str, list[bool]] = {}
 
+    probe_errors: list[str] = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {
             pool.submit(probe, skill_dir, args.skill, item["query"], args.timeout,
@@ -237,9 +268,19 @@ def main() -> int:
             item = futures[f]
             try:
                 hits.setdefault(item["query"], []).append(f.result())
-            except Exception as e:
-                print(f"query failed: {e}", file=sys.stderr)
-                hits.setdefault(item["query"], []).append(False)
+            except ProbeError as e:
+                probe_errors.append(str(e))
+            except Exception as e:  # noqa: BLE001 — anything unexpected is also not data
+                probe_errors.append(repr(e))
+
+    # A broken probe is not a zero — reporting a rate built on failed subprocesses
+    # would be the silent-failure this tool exists to prevent. Abort loud instead.
+    if probe_errors:
+        print(f"\n{args.skill}: {len(probe_errors)} probe(s) failed — results withheld.\n",
+              file=sys.stderr)
+        for e in probe_errors[:5]:
+            print(f"  {e}", file=sys.stderr)
+        return 2
 
     failures = 0
     print(f"\n{args.skill}\n")

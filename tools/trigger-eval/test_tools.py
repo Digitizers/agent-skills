@@ -157,6 +157,39 @@ check("namespaced leaf matches (apps/web:deploy vs deploy)",
 check("namespaced leaf substring does NOT match (apps/web:deploy vs epl)",
       not trigger_eval._same_skill("apps/web:deploy", "epl"))
 
+# ── trigger_eval: a failed subprocess must raise, not read as "did not trigger" ──
+# Codex round-5 P2. stderr was DEVNULL'd and an early exit returned False, so a
+# broken probe (expired auth, bad flag) scored as a clean negative.
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    under_test = skill_at(root / "repo", "widget", "name: widget\ndescription: A widget.")
+
+    real_run = trigger_eval.subprocess.Popen
+
+    class FakePopen:
+        """A claude that dies immediately with a non-zero code and an error on stderr."""
+        def __init__(self, *a, **k):
+            self.stdout = iter(())  # no events streamed
+            self.returncode = 1
+            errf = k.get("stderr")
+            if errf and hasattr(errf, "write"):
+                errf.write("Invalid API key · Please run /login\n")
+                errf.flush()
+        def kill(self): pass
+        def wait(self, timeout=None): return 1
+
+    trigger_eval.subprocess.Popen = FakePopen  # type: ignore[assignment]
+    try:
+        raised = False
+        try:
+            trigger_eval.probe(under_test, "widget", "any query", timeout=5, model=None)
+        except trigger_eval.ProbeError as e:
+            raised = "exited 1" in str(e)
+        check("a non-zero claude exit raises ProbeError, not a silent False", raised)
+    finally:
+        trigger_eval.subprocess.Popen = real_run  # type: ignore[assignment]
+
 print()
 if FAILURES:
     print(f"  {len(FAILURES)} failed\n")

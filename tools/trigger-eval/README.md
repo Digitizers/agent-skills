@@ -23,7 +23,9 @@ python3 tools/trigger-eval/trigger_eval.py \
     --git   # gha-optimizer declares a git/GitHub precondition — see --git below
 ```
 
-Exits non-zero if any case fails, so it drops into CI as-is.
+Exits non-zero if any case fails, so it drops into CI as-is. `validate_spec.py`
+needs PyYAML (`pip install -r tools/trigger-eval/requirements.txt`); the trigger
+harness itself is stdlib-only.
 
 `--git` is in the example on purpose: `gha-optimizer`'s `compatibility` requires a
 git repo with a GitHub remote, and per the flag table a preconditioned skill must

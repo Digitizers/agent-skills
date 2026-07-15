@@ -1,0 +1,5 @@
+# trigger-eval / validate_spec dependencies.
+# validate_spec parses SKILL.md frontmatter as real YAML (a regex approximation
+# accepts input the runtime rejects), and yaml is not in the standard library.
+#   pip install -r tools/trigger-eval/requirements.txt
+PyYAML>=6.0
