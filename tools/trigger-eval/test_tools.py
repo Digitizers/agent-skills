@@ -136,6 +136,13 @@ with tempfile.TemporaryDirectory() as tmp:
     errors, _ = validate_spec.check(ok_opt)
     check("validate_spec accepts a mapping metadata + string allowed-tools", not errors, f"got {errors}")
 
+    # Codex round-12 P3: a whitespace-only description is blank — nothing to
+    # trigger on — but passed a truthiness check.
+    blank_desc = skill_at(root, "blankdesc", 'name: blankdesc\ndescription: "   "')
+    errors, _ = validate_spec.check(blank_desc)
+    check("validate_spec rejects a whitespace-only description",
+          any("description" in e for e in errors), f"got {errors}")
+
 # (The assert_not_shadowed preflight and its tests were removed once the probe
 # became fully isolated — personal skills are no longer loaded into the measured
 # session, so a same-name personal skill cannot win and there is nothing to guard.

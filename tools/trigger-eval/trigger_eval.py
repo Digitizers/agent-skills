@@ -117,52 +117,62 @@ def probe(skill_dir: Path, skill_name: str, query: str, timeout: int, model: str
         # measurement into data, the exact failure this tool exists to catch. A
         # file rather than a PIPE avoids a buffer-fill deadlock while we read
         # stdout. (Kept small: we only ever look at the tail.)
-        errf = project / "stderr.log"
+        #
+        # It lives OUTSIDE the project dir on purpose. Under --git the project is
+        # a committed-clean repo; a harness file in its root would show up as an
+        # untracked change in the git-status snapshot the session sees, and a
+        # git/PR skill routes differently against a dirty tree — so the fixture
+        # would no longer be the clean repo we meant to measure.
+        errfd, errpath = tempfile.mkstemp(prefix="trigeval-stderr-", suffix=".log")
+        os.close(errfd)
         timed_out = threading.Event()
 
         def on_timeout() -> None:
             timed_out.set()
             proc.kill()
 
-        with errf.open("w+") as err:
-            proc = subprocess.Popen(
-                cmd, cwd=project, env=env,
-                stdout=subprocess.PIPE, stderr=err, text=True,
-            )
-            # A non-triggering query has no natural end — the agent just keeps
-            # working. Without this the probe blocks on stdout forever.
-            watchdog = threading.Timer(timeout, on_timeout)
-            watchdog.start()
-            try:
-                for line in proc.stdout:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        event = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if _is_trigger(event, skill_name, project):
-                        return True  # decided; the finally kills the process
-            finally:
-                watchdog.cancel()
-                proc.kill()
-                proc.wait(timeout=10)
-
-            if timed_out.is_set():
-                return False  # ran the full window without triggering — a real "no"
-
-            # stdout closed on its own. returncode 0 = the agent finished without
-            # loading the skill (a legitimate no-trigger). Non-zero = the probe
-            # itself failed, and a failed probe is not a data point.
-            if proc.returncode not in (0, None):
-                err.seek(0)
-                tail = err.read().strip().splitlines()[-5:]
-                raise ProbeError(
-                    f"claude exited {proc.returncode} on query {query!r} without a trigger.\n"
-                    + "\n".join(f"    {l}" for l in tail)
+        try:
+            with open(errpath, "w+") as err:
+                proc = subprocess.Popen(
+                    cmd, cwd=project, env=env,
+                    stdout=subprocess.PIPE, stderr=err, text=True,
                 )
-            return False
+                # A non-triggering query has no natural end — the agent just
+                # keeps working. Without this the probe blocks on stdout forever.
+                watchdog = threading.Timer(timeout, on_timeout)
+                watchdog.start()
+                try:
+                    for line in proc.stdout:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            event = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if _is_trigger(event, skill_name, project):
+                            return True  # decided; the finally kills the process
+                finally:
+                    watchdog.cancel()
+                    proc.kill()
+                    proc.wait(timeout=10)
+
+                if timed_out.is_set():
+                    return False  # ran the full window without triggering — a real "no"
+
+                # stdout closed on its own. returncode 0 = the agent finished
+                # without loading the skill (a legitimate no-trigger). Non-zero =
+                # the probe itself failed, and a failed probe is not a data point.
+                if proc.returncode not in (0, None):
+                    err.seek(0)
+                    tail = err.read().strip().splitlines()[-5:]
+                    raise ProbeError(
+                        f"claude exited {proc.returncode} on query {query!r} without a trigger.\n"
+                        + "\n".join(f"    {l}" for l in tail)
+                    )
+                return False
+        finally:
+            os.unlink(errpath)
 
 
 def _same_skill(emitted: object, skill_name: str) -> bool:

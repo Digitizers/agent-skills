@@ -88,6 +88,10 @@ def text_field(raw: dict, key: str, errors: list[str]) -> str | None:
             f"quote it (e.g. `{key}: \"{value}\"`); the spec's text fields must be strings"
         )
         return None
+    if not value.strip():
+        # Whitespace-only is blank: a description of "   " has nothing to trigger
+        # on. Treat as absent — the caller's required-field check reports it.
+        return None
     # Return the parsed string as-is. The character limits apply to the value the
     # runtime loads — collapsing whitespace here first would measure a shorter
     # string than the runtime sees and could pass an over-budget description.
@@ -111,7 +115,7 @@ def check(skill: Path) -> tuple[list[str], list[str]]:
 
     name = fm.get("name")
     if not name:
-        errors.append("missing required field `name`")
+        errors.append("missing or blank required field `name`")
     else:
         if name != skill.name:
             errors.append(f"`name` is {name!r} but the directory is {skill.name!r} — spec requires they match")
@@ -122,7 +126,7 @@ def check(skill: Path) -> tuple[list[str], list[str]]:
 
     desc = fm.get("description")
     if not desc:
-        errors.append("missing required field `description`")
+        errors.append("missing or blank required field `description`")
     elif len(desc) > DESC_MAX:
         errors.append(f"`description` is {len(desc)} chars, limit {DESC_MAX} — MALFORMED")
     elif len(desc) >= DESC_WARN:
