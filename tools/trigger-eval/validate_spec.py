@@ -67,11 +67,28 @@ def parse_frontmatter(text: str) -> dict[str, object]:
     return loaded
 
 
-def as_text(value: object) -> str | None:
-    """Collapse a scalar frontmatter value to a single line, or None if absent."""
-    if value is None:
+TEXT_FIELDS = ("name", "description", "compatibility")
+
+
+def text_field(raw: dict, key: str, errors: list[str]) -> str | None:
+    """Return a text field's value, or record an error if it isn't actually text.
+
+    The spec's text fields have character limits, so they must be strings. But
+    YAML coerces unquoted scalars: `description: no` becomes the boolean False,
+    `description: 123` an int. str()-ing those would green-light metadata the
+    runtime sees as a non-string and the author never intended — so reject the
+    non-string outright and tell them to quote it, rather than stringifying it.
+    """
+    if key not in raw or raw[key] is None:
         return None
-    return " ".join(str(value).split())
+    value = raw[key]
+    if not isinstance(value, str):
+        errors.append(
+            f"`{key}` parsed as {type(value).__name__} ({value!r}), not text — "
+            f"quote it (e.g. `{key}: \"{value}\"`); the spec's text fields must be strings"
+        )
+        return None
+    return " ".join(value.split())
 
 
 def check(skill: Path) -> tuple[list[str], list[str]]:
@@ -86,7 +103,7 @@ def check(skill: Path) -> tuple[list[str], list[str]]:
         # so nothing downstream is worth checking.
         return [str(e)], []
 
-    fm = {k: as_text(v) for k, v in raw.items() if not isinstance(v, (dict, list))}
+    fm = {k: text_field(raw, k, errors) for k in TEXT_FIELDS}
 
     name = fm.get("name")
     if not name:

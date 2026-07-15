@@ -55,6 +55,23 @@ with tempfile.TemporaryDirectory() as tmp:
     errors, warnings = validate_spec.check(good)
     check("validate_spec accepts valid frontmatter", not errors, f"got {errors}")
 
+    # Codex round-6 P2: YAML coerces unquoted scalars — `description: no` is the
+    # boolean False, `description: 123` an int. str()-ing them green-lit metadata
+    # the author never wrote. Require actual strings.
+    boolish = skill_at(root, "boolish", "name: boolish\ndescription: no")
+    errors, _ = validate_spec.check(boolish)
+    check("validate_spec rejects an unquoted boolean description",
+          any("not text" in e for e in errors), f"got {errors}")
+
+    numish = skill_at(root, "numish", "name: numish\ndescription: 123")
+    errors, _ = validate_spec.check(numish)
+    check("validate_spec rejects an unquoted numeric description",
+          any("not text" in e for e in errors), f"got {errors}")
+
+    quoted = skill_at(root, "quoted", 'name: quoted\ndescription: "no"')
+    errors, _ = validate_spec.check(quoted)
+    check("validate_spec accepts a quoted 'no' description", not errors, f"got {errors}")
+
     over = skill_at(root, "over", f"name: over\ndescription: {'x' * 1025}")
     errors, _ = validate_spec.check(over)
     check("validate_spec fails a description over the 1024 limit",
