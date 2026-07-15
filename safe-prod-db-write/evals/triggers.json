@@ -1,0 +1,8 @@
+[
+  { "query": "I need to generate 500 discount codes and insert them into the production database. write me a script and run it.", "should_trigger": true },
+  { "query": "we have 12k users with a null onboarding_completed_at. backfill them to their created_at value in prod.", "should_trigger": true },
+  { "query": "quick fix — one customer's subscription row has the wrong plan_id in prod. can you update it directly?", "should_trigger": true },
+  { "query": "I'm adding a Notification model to the Prisma schema. what else do I need to do besides the migration?", "should_trigger": true },
+  { "query": "our local seed script is broken, the foreign key on Client is failing. debug it.", "should_trigger": false },
+  { "query": "write a Prisma query that lists all resources for a given clientId, ordered by createdAt", "should_trigger": false }
+]

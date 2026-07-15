@@ -1,6 +1,7 @@
 ---
 name: safe-prod-db-write
 description: Safely run a one-off write, backfill, or data-mutating script against a PRODUCTION database — pull the connection from the platform, dry-run, get explicit human authorization, execute, verify, clean up. Use before running any script that inserts/updates/deletes prod data (generating codes, backfills, one-off fixes, seed data), when the user asks to write/mutate production data, or when a task needs a real prod DB connection. Also use when adding a DB model/table/migration or setting up a CI guard that enforces a per-table invariant (RLS enabled, tenant column, required index) — see "Enforce schema invariants in CI". Assumes a Neon/Vercel-style setup with the platform CLI, but the protocol generalizes.
+compatibility: Requires the deployment platform CLI (e.g. `vercel`) to pull the production connection string, and a database client (e.g. `psql`, `prisma`) to run the script against it.
 ---
 
 # Safe production DB write
