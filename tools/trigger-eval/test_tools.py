@@ -97,46 +97,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check("validate_spec fails when name does not match the directory",
           any("directory" in e for e in errors), f"got {errors}")
 
-# ── trigger_eval: a personal skill must not silently win the probe ──
-# Codex round-1 P2. Personal skills in ~/.claude/skills override project skills
-# of the same name, so a stale personal copy answers the probe while the harness
-# reports numbers for the working tree. Same silent failure, turned on the tool.
-
-with tempfile.TemporaryDirectory() as tmp:
-    root = Path(tmp)
-    home_skills = root / "home" / ".claude" / "skills"
-    under_test = skill_at(root / "repo", "widget", "name: widget\ndescription: A widget.")
-
-    real_home = Path.home
-    Path.home = staticmethod(lambda: root / "home")  # type: ignore[method-assign]
-    try:
-        # No personal skill of that name — nothing to shadow.
-        try:
-            trigger_eval.assert_not_shadowed("widget", under_test)
-            check("assert_not_shadowed allows an unshadowed skill", True)
-        except SystemExit as e:
-            check("assert_not_shadowed allows an unshadowed skill", False, str(e))
-
-        # Personal skill symlinked to the working tree: same file, probe is valid.
-        home_skills.mkdir(parents=True, exist_ok=True)
-        (home_skills / "widget").symlink_to(under_test)
-        try:
-            trigger_eval.assert_not_shadowed("widget", under_test)
-            check("assert_not_shadowed allows a symlink to the tree under test", True)
-        except SystemExit as e:
-            check("assert_not_shadowed allows a symlink to the tree under test", False, str(e))
-
-        # Personal skill is a DIFFERENT copy: it would win, so refuse.
-        (home_skills / "widget").unlink()
-        skill_at(home_skills, "widget", "name: widget\ndescription: A STALE widget.")
-        try:
-            trigger_eval.assert_not_shadowed("widget", under_test)
-            check("assert_not_shadowed refuses a differing personal copy", False,
-                  "should have raised SystemExit")
-        except SystemExit:
-            check("assert_not_shadowed refuses a differing personal copy", True)
-    finally:
-        Path.home = real_home  # type: ignore[method-assign]
+# (The assert_not_shadowed preflight and its tests were removed once the probe
+# became fully isolated — personal skills are no longer loaded into the measured
+# session, so a same-name personal skill cannot win and there is nothing to guard.
+# See the note in trigger_eval.py.)
 
 # ── trigger_eval: the Read check must anchor to the copy under test ──
 
