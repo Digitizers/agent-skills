@@ -130,10 +130,20 @@ with tempfile.TemporaryDirectory() as tmp:
     check("Read of a same-named skill OUTSIDE the fixture does NOT count",
           not trigger_eval._is_trigger(read_event(elsewhere), "widget", project))
 
+    # A real Skill tool_use carries the name in input.skill (verified against a
+    # live `claude -p` stream: {"skill": "gha-optimizer", "args": "..."}).
+    # Codex round-3 claimed the field was `command`; it is not — `command`
+    # belongs to the Bash tool. This pins the actual format so that refuted
+    # finding can't quietly come back.
     skill_event = {"message": {"content": [{"type": "tool_use", "name": "Skill",
-                                            "input": {"skill": "widget"}}]}}
-    check("Skill tool call counts as a trigger",
+                                            "input": {"skill": "widget", "args": "..."}}]}}
+    check("Skill tool_use with input.skill counts as a trigger",
           trigger_eval._is_trigger(skill_event, "widget", project))
+
+    bash_event = {"message": {"content": [{"type": "tool_use", "name": "Bash",
+                                           "input": {"command": "widget --run"}}]}}
+    check("a Bash call whose command mentions the name does NOT count",
+          not trigger_eval._is_trigger(bash_event, "widget", project))
 
 print()
 if FAILURES:

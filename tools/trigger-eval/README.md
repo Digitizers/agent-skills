@@ -19,10 +19,15 @@ Both matter. A perfect body behind a description that never fires is dead code.
 ```bash
 python3 tools/trigger-eval/trigger_eval.py \
     --skill gha-optimizer \
-    --eval-set gha-optimizer/evals/triggers.json
+    --eval-set gha-optimizer/evals/triggers.json \
+    --git   # gha-optimizer declares a git/GitHub precondition — see --git below
 ```
 
 Exits non-zero if any case fails, so it drops into CI as-is.
+
+`--git` is in the example on purpose: `gha-optimizer`'s `compatibility` requires a
+git repo with a GitHub remote, and per the flag table a preconditioned skill must
+be probed with `--git` or you measure the empty fixture, not the description.
 
 | Flag | Default | Why |
 |---|---|---|
