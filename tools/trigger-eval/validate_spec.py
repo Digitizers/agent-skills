@@ -149,8 +149,20 @@ def check(skill: Path) -> tuple[list[str], list[str]]:
 
     # Optional non-text fields the spec still constrains. A skill that adds one
     # malformed shouldn't pass a validator that claims to enforce the spec.
-    if "metadata" in raw and raw["metadata"] is not None and not isinstance(raw["metadata"], dict):
-        errors.append(f"`metadata` must be a mapping, got {type(raw['metadata']).__name__}")
+    meta = raw.get("metadata")
+    if meta is not None:
+        if not isinstance(meta, dict):
+            errors.append(f"`metadata` must be a mapping, got {type(meta).__name__}")
+        else:
+            # Spec: a map of string keys to string values. YAML coerces `version:
+            # 1.0` to a float, `count: 3` to an int — reject those.
+            for k, v in meta.items():
+                if not isinstance(k, str) or not isinstance(v, str):
+                    errors.append(
+                        f"`metadata` entries must be string key/value pairs; "
+                        f"{k!r}: {v!r} has a {type(k).__name__} key / {type(v).__name__} value "
+                        f"(quote it, e.g. `{k}: \"{v}\"`)"
+                    )
     if "allowed-tools" in raw and raw["allowed-tools"] is not None \
             and not isinstance(raw["allowed-tools"], str):
         errors.append("`allowed-tools` must be a space-separated string, got "

@@ -143,6 +143,20 @@ with tempfile.TemporaryDirectory() as tmp:
     check("validate_spec rejects a whitespace-only description",
           any("description" in e for e in errors), f"got {errors}")
 
+    # Codex round-13 P3: metadata values must be strings; YAML coerces `version: 1.0`.
+    coerced_meta = skill_at(root, "coercedmeta",
+                            'name: coercedmeta\ndescription: Fine desc. Use when testing.\n'
+                            'metadata:\n  version: 1.0')
+    errors, _ = validate_spec.check(coerced_meta)
+    check("validate_spec rejects a non-string metadata value",
+          any("metadata" in e for e in errors), f"got {errors}")
+
+    str_meta = skill_at(root, "strmeta",
+                        'name: strmeta\ndescription: Fine desc. Use when testing.\n'
+                        'metadata:\n  version: "1.0"')
+    errors, _ = validate_spec.check(str_meta)
+    check("validate_spec accepts string metadata values", not errors, f"got {errors}")
+
 # (The assert_not_shadowed preflight and its tests were removed once the probe
 # became fully isolated — personal skills are no longer loaded into the measured
 # session, so a same-name personal skill cannot win and there is nothing to guard.
