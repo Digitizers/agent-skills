@@ -88,7 +88,11 @@ def text_field(raw: dict, key: str, errors: list[str]) -> str | None:
             f"quote it (e.g. `{key}: \"{value}\"`); the spec's text fields must be strings"
         )
         return None
-    return " ".join(value.split())
+    # Return the parsed string as-is. The character limits apply to the value the
+    # runtime loads — collapsing whitespace here first would measure a shorter
+    # string than the runtime sees and could pass an over-budget description.
+    # Normalize only at the point of display, never before a length check.
+    return value
 
 
 def check(skill: Path) -> tuple[list[str], list[str]]:

@@ -72,6 +72,16 @@ with tempfile.TemporaryDirectory() as tmp:
     errors, _ = validate_spec.check(quoted)
     check("validate_spec accepts a quoted 'no' description", not errors, f"got {errors}")
 
+    # Codex round-7 P3: length was measured after collapsing whitespace, so a
+    # description that is over-budget raw but under-budget collapsed slipped
+    # through. The runtime sees the raw parsed value; validate against that.
+    padded = skill_at(root, "padded",
+                      'name: padded\ndescription: "' + "a" * 1000 + " " * 40 + 'b"')
+    errors, _ = validate_spec.check(padded)
+    check("validate_spec measures length on the raw value, not the collapsed one",
+          any("1024" in e for e in errors),
+          f"raw len {1041}, collapsed {1002}; got {errors}")
+
     over = skill_at(root, "over", f"name: over\ndescription: {'x' * 1025}")
     errors, _ = validate_spec.check(over)
     check("validate_spec fails a description over the 1024 limit",
