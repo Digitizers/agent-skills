@@ -107,6 +107,14 @@ def probe(skill_dir: Path, skill_name: str, query: str, timeout: int, model: str
             "--output-format", "stream-json",
             "--verbose",
             "--include-partial-messages",
+            # Load only project settings. Without this the probe runs against the
+            # developer's full session — every personal skill in ~/.claude/skills
+            # — so a differently-named personal skill in the same domain can win
+            # routing and the harness reports a false negative for the skill under
+            # test. The temp project holds only the skill under test, so
+            # project-only sources isolate it. (assert_not_shadowed handles the
+            # same-name case; this handles the different-name case.)
+            "--setting-sources", "project",
         ]
         if model:
             cmd += ["--model", model]

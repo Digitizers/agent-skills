@@ -99,6 +99,22 @@ Isolating the skill is deliberate. Testing it alongside its neighbours would
 measure the routing contest between them, not this description's own pulling
 power — worth measuring, but a different question.
 
+Isolation takes **two** mechanisms, because a temp project alone is not enough:
+
+1. The throwaway project holds only the skill under test — this drops other
+   *project* skills.
+2. `--setting-sources project` is passed to every `claude -p` — this drops the
+   developer's *personal* skills (`~/.claude/skills/`), which otherwise load in
+   every session regardless of the working directory and compete for routing.
+
+Without (2) the probe silently measures "does this description win against
+everything I happen to have installed" — non-reproducible, and a source of false
+negatives when a same-domain personal skill grabs the query. With it, the tool
+measures what this file claims: the description's pulling power in isolation.
+This mattered in practice — several `gha-optimizer` negative cases that "failed"
+against a full session passed once the session was isolated; the interference
+was other skills, not this description.
+
 ## Writing an eval set
 
 A JSON list of `{"query", "should_trigger"}`.
