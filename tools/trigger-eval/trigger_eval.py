@@ -31,6 +31,34 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def assert_not_shadowed(skill_name: str, skill_dir: Path) -> None:
+    """Refuse to probe a skill that a personal skill of the same name overrides.
+
+    Personal skills in ~/.claude/skills apply to every project and take
+    precedence over a project skill with the same name. So a stale personal
+    copy silently wins the probe, and the harness reports confident numbers for
+    a description that is not the one in the working tree — the exact silent
+    failure this tool exists to catch, turned on itself.
+
+    The common case is benign: the personal skill is a symlink to the working
+    tree under test, so both names resolve to the same file and the probe is
+    valid. Resolve and compare rather than banning the setup outright.
+    """
+    personal = Path.home() / ".claude" / "skills" / skill_name
+    if not personal.exists():
+        return
+    if personal.resolve() == skill_dir.resolve():
+        return  # same file by another name — the probe measures what we think
+    raise SystemExit(
+        f"refusing to probe {skill_name!r}: a personal skill shadows it and would win.\n"
+        f"  personal: {personal} -> {personal.resolve()}\n"
+        f"  under test: {skill_dir.resolve()}\n"
+        f"Personal skills override project skills of the same name, so these results "
+        f"would describe the personal copy, not the working tree.\n"
+        f"Remove or re-point the personal skill, or pass --allow-shadow if you accept that."
+    )
+
+
 def make_git_fixture(project: Path) -> None:
     """Turn the scratch project into a plausible git + GitHub repo.
 
@@ -100,7 +128,7 @@ def probe(skill_dir: Path, skill_name: str, query: str, timeout: int, model: str
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if _is_trigger(event, skill_name):
+                if _is_trigger(event, skill_name, project):
                     return True
             return False
         except Exception:
@@ -111,10 +139,14 @@ def probe(skill_dir: Path, skill_name: str, query: str, timeout: int, model: str
             proc.wait(timeout=10)
 
 
-def _is_trigger(event: dict, skill_name: str) -> bool:
+def _is_trigger(event: dict, skill_name: str, project: Path) -> bool:
     content = (event.get("message") or {}).get("content") or []
     if not isinstance(content, list):
         return False
+    # Anchor to the copy under test. Matching a bare "/<name>/SKILL.md" would
+    # also count a Read of ~/.claude/skills/<name>/SKILL.md — crediting the
+    # probe to a file we are not testing.
+    under_test = str((project / ".claude" / "skills" / skill_name / "SKILL.md").resolve())
     for block in content:
         if not isinstance(block, dict) or block.get("type") != "tool_use":
             continue
@@ -123,8 +155,10 @@ def _is_trigger(event: dict, skill_name: str) -> bool:
         if name == "Skill" and skill_name in str(args.get("skill", "")):
             return True
         # A direct Read of the skill file is a load by another route.
-        if name == "Read" and f"/{skill_name}/SKILL.md" in str(args.get("file_path", "")):
-            return True
+        if name == "Read":
+            path = str(args.get("file_path", ""))
+            if path and Path(path).resolve(strict=False) == Path(under_test):
+                return True
     return False
 
 
@@ -132,7 +166,11 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--skill", required=True, help="Skill directory name, e.g. gha-optimizer")
     p.add_argument("--eval-set", required=True, help="Path to the eval set JSON")
-    p.add_argument("--runs", type=int, default=3, help="Runs per query; triggering is stochastic")
+    p.add_argument("--runs", type=int, default=5,
+                   help="Runs per query. Triggering is stochastic and borderline queries have "
+                        "high variance — a rate that reads 100%% at 3 runs can be 15%% at 7. "
+                        "5 is a floor for a read, not a verdict; use more to characterize a "
+                        "borderline case.")
     p.add_argument("--threshold", type=float, default=0.5, help="Trigger rate that counts as a pass")
     p.add_argument("--workers", type=int, default=6)
     p.add_argument("--timeout", type=int, default=90)
@@ -141,12 +179,19 @@ def main() -> int:
                    help="Probe inside a git repo with a GitHub remote. Required for any skill "
                         "whose description states a git/GitHub precondition — without it you "
                         "measure the empty fixture, not the description.")
+    p.add_argument("--allow-shadow", action="store_true",
+                   help="Probe even when a differing personal skill of the same name would "
+                        "override the one under test. The numbers then describe the personal "
+                        "copy; you almost never want this.")
     args = p.parse_args()
 
     skill_dir = REPO_ROOT / args.skill
     if not (skill_dir / "SKILL.md").is_file():
         print(f"no SKILL.md in {skill_dir}", file=sys.stderr)
         return 2
+
+    if not args.allow_shadow:
+        assert_not_shadowed(args.skill, skill_dir)
 
     eval_set = json.loads(Path(args.eval_set).read_text())
 

@@ -26,11 +26,38 @@ Exits non-zero if any case fails, so it drops into CI as-is.
 
 | Flag | Default | Why |
 |---|---|---|
-| `--runs` | 3 | Triggering is stochastic. One run tells you almost nothing. |
+| `--runs` | 5 | Triggering is stochastic. See the variance note below. |
 | `--threshold` | 0.5 | Fire rate that counts as a pass. |
 | `--timeout` | 90 | Per query. A query that doesn't trigger has no natural end. |
 | `--workers` | 6 | Parallel probes. |
 | `--git` | off | Probe inside a git repo with a GitHub remote. **Required** for any skill with a git/GitHub precondition — see below. |
+
+## Variance: a single run is a rumor, not a reading
+
+Triggering is stochastic, and **borderline queries have high variance**. A rate
+that reads 100% over 3 runs can read 15% over 7 — same query, same description,
+same model. Observed on `gha-optimizer`:
+
+| Query | 3 runs | 7 runs |
+|---|---|---|
+| `"I think our CI builds twice"` | 100% | 14% |
+| `"fix the eslint config"` (negative) | 0% | 86% |
+
+Both flipped verdict between run counts. Nothing changed but the sample size.
+
+Consequences worth internalizing:
+
+- **`--runs` defaults to 5, a floor for a read — not a verdict.** Treat a rate
+  near the threshold as "unknown", not as a pass or a fail. Re-run a borderline
+  case at `--runs 15+` before you touch the description over it.
+- **Don't tune against noise.** A "failing" case that flips to passing on the
+  next run had no defect to fix — editing the description to chase it just
+  spends the character budget on nothing. A real trigger defect is stable
+  across run counts (e.g. `pr-first-workflow` firing 0% on marketing copy, every
+  time). Confirm stability before you call it a defect.
+- **A pass/fail count is a summary, not the data.** `29/30` at `--runs 3` hides
+  which cases were 50/50 coin flips. Read the per-query rates, not just the
+  total.
 
 ## `--git`, and why the fixture can lie
 

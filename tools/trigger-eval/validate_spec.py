@@ -21,6 +21,12 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    import yaml
+except ImportError:
+    sys.exit("validate_spec.py needs PyYAML — the spec's frontmatter is YAML and a regex "
+             "approximation would pass files the runtime rejects. Install it: pip install pyyaml")
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 NAME_MAX = 64
@@ -34,25 +40,53 @@ NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 DESC_WARN = int(DESC_MAX * 0.90)
 
 
-def parse_frontmatter(text: str) -> dict[str, str]:
+class FrontmatterError(Exception):
+    """The frontmatter is not loadable as YAML."""
+
+
+def parse_frontmatter(text: str) -> dict[str, object]:
+    """Parse the frontmatter as real YAML.
+
+    A regex approximation is worse than useless here: it happily accepts input
+    that a real YAML loader rejects (`description: [unterminated`), and Claude
+    Code loads malformed frontmatter as *empty metadata* — so the skill ships
+    with no description at all and can never trigger. A validator that green-
+    lights that has inverted its own purpose. Parse it the way the runtime does.
+    """
     m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
     if not m:
-        return {}
-    fields: dict[str, str] = {}
-    for raw in re.finditer(
-        r"^([a-z][a-z-]*):\s*(?:>-?|\|)?[ \t]*\n?((?:.|\n)*?)(?=\n[a-z][a-z-]*:|\Z)",
-        m.group(1),
-        re.M,
-    ):
-        fields[raw.group(1)] = " ".join(raw.group(2).split())
-    return fields
+        raise FrontmatterError("no YAML frontmatter block (`---` ... `---`) at the top of the file")
+    try:
+        loaded = yaml.safe_load(m.group(1))
+    except yaml.YAMLError as e:
+        raise FrontmatterError(f"frontmatter is not valid YAML: {e}") from e
+    if loaded is None:
+        raise FrontmatterError("frontmatter is empty")
+    if not isinstance(loaded, dict):
+        raise FrontmatterError(f"frontmatter must be a mapping, got {type(loaded).__name__}")
+    return loaded
+
+
+def as_text(value: object) -> str | None:
+    """Collapse a scalar frontmatter value to a single line, or None if absent."""
+    if value is None:
+        return None
+    return " ".join(str(value).split())
 
 
 def check(skill: Path) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     text = (skill / "SKILL.md").read_text()
-    fm = parse_frontmatter(text)
+
+    try:
+        raw = parse_frontmatter(text)
+    except FrontmatterError as e:
+        # Fatal on its own: the runtime would load this skill with empty metadata,
+        # so nothing downstream is worth checking.
+        return [str(e)], []
+
+    fm = {k: as_text(v) for k, v in raw.items() if not isinstance(v, (dict, list))}
 
     name = fm.get("name")
     if not name:
