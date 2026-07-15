@@ -120,13 +120,12 @@ def probe(skill_dir: Path, skill_name: str, query: str, timeout: int, model: str
             "--output-format", "stream-json",
             "--verbose",
             "--include-partial-messages",
-            # Load only project settings. Without this the probe runs against the
-            # developer's full session — every personal skill in ~/.claude/skills
-            # — so a differently-named personal skill in the same domain can win
-            # routing and the harness reports a false negative for the skill under
-            # test. The temp project holds only the skill under test, so
-            # project-only sources isolate it. (assert_not_shadowed handles the
-            # same-name case; this handles the different-name case.)
+            # Drops the *personal* skills — the second of the three isolation
+            # cuts described at the top of this function. This flag alone is not
+            # the whole story: it excludes the user source but not bundled
+            # built-ins, which is why disableBundledSkills is also set above.
+            # Verified: with both, a probe session sees ONLY the skill under test
+            # even when ~/.claude/skills is full of overlapping personal skills.
             "--setting-sources", "project",
         ]
         if model:
