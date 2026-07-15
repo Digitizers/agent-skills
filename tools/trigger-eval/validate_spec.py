@@ -143,6 +143,15 @@ def check(skill: Path) -> tuple[list[str], list[str]]:
         elif isinstance(val, str) and len(val) > COMPAT_MAX:
             errors.append(f"`compatibility` is {len(val)} chars, limit {COMPAT_MAX}")
 
+    # Optional non-text fields the spec still constrains. A skill that adds one
+    # malformed shouldn't pass a validator that claims to enforce the spec.
+    if "metadata" in raw and raw["metadata"] is not None and not isinstance(raw["metadata"], dict):
+        errors.append(f"`metadata` must be a mapping, got {type(raw['metadata']).__name__}")
+    if "allowed-tools" in raw and raw["allowed-tools"] is not None \
+            and not isinstance(raw["allowed-tools"], str):
+        errors.append("`allowed-tools` must be a space-separated string, got "
+                      f"{type(raw['allowed-tools']).__name__}")
+
     lines = len(text.splitlines())
     if lines > BODY_MAX_LINES:
         warnings.append(f"SKILL.md is {lines} lines; spec recommends under {BODY_MAX_LINES} — move detail to REFERENCE.md")

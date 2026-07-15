@@ -116,6 +116,26 @@ with tempfile.TemporaryDirectory() as tmp:
     errors, _ = validate_spec.check(ok_compat)
     check("validate_spec accepts a filled compatibility", not errors, f"got {errors}")
 
+    # Codex round-11 P3: the spec also constrains metadata (mapping) and
+    # allowed-tools (space-separated string).
+    bad_meta = skill_at(root, "badmeta",
+                        'name: badmeta\ndescription: Fine desc. Use when testing.\nmetadata: just a string')
+    errors, _ = validate_spec.check(bad_meta)
+    check("validate_spec rejects non-mapping metadata",
+          any("metadata" in e for e in errors), f"got {errors}")
+
+    bad_tools = skill_at(root, "badtools",
+                         'name: badtools\ndescription: Fine desc. Use when testing.\nallowed-tools:\n  - Read\n  - Bash')
+    errors, _ = validate_spec.check(bad_tools)
+    check("validate_spec rejects list-valued allowed-tools",
+          any("allowed-tools" in e for e in errors), f"got {errors}")
+
+    ok_opt = skill_at(root, "okopt",
+                      'name: okopt\ndescription: Fine desc. Use when testing.\n'
+                      'metadata:\n  author: me\nallowed-tools: Read Bash')
+    errors, _ = validate_spec.check(ok_opt)
+    check("validate_spec accepts a mapping metadata + string allowed-tools", not errors, f"got {errors}")
+
 # (The assert_not_shadowed preflight and its tests were removed once the probe
 # became fully isolated — personal skills are no longer loaded into the measured
 # session, so a same-name personal skill cannot win and there is nothing to guard.
