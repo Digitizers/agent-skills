@@ -97,6 +97,25 @@ with tempfile.TemporaryDirectory() as tmp:
     check("validate_spec fails when name does not match the directory",
           any("directory" in e for e in errors), f"got {errors}")
 
+    # Codex round-10 P3: an empty compatibility is malformed — the spec requires
+    # 1–500 chars if the field is provided.
+    empty_compat = skill_at(root, "emptycompat",
+                            'name: emptycompat\ndescription: Fine desc. Use when testing.\ncompatibility: ""')
+    errors, _ = validate_spec.check(empty_compat)
+    check("validate_spec rejects an empty compatibility",
+          any("compatibility" in e and "empty" in e for e in errors), f"got {errors}")
+
+    null_compat = skill_at(root, "nullcompat",
+                           'name: nullcompat\ndescription: Fine desc. Use when testing.\ncompatibility:')
+    errors, _ = validate_spec.check(null_compat)
+    check("validate_spec rejects a null compatibility",
+          any("compatibility" in e and "empty" in e for e in errors), f"got {errors}")
+
+    ok_compat = skill_at(root, "okcompat",
+                         'name: okcompat\ndescription: Fine desc. Use when testing.\ncompatibility: Requires git and jq.')
+    errors, _ = validate_spec.check(ok_compat)
+    check("validate_spec accepts a filled compatibility", not errors, f"got {errors}")
+
 # (The assert_not_shadowed preflight and its tests were removed once the probe
 # became fully isolated — personal skills are no longer loaded into the measured
 # session, so a same-name personal skill cannot win and there is nothing to guard.

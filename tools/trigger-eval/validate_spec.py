@@ -131,9 +131,17 @@ def check(skill: Path) -> tuple[list[str], list[str]]:
             f"to absorb a trigger fix"
         )
 
-    compat = fm.get("compatibility")
-    if compat and len(compat) > COMPAT_MAX:
-        errors.append(f"`compatibility` is {len(compat)} chars, limit {COMPAT_MAX}")
+    if "compatibility" in raw:
+        val = raw["compatibility"]
+        # Present-but-empty is malformed: the spec requires 1–500 chars *if the
+        # field is provided*. A falsy check would skip it and green-light
+        # `compatibility:` or `compatibility: ""`. (A non-string value already
+        # errored in text_field, so it falls through here without a double report.)
+        if val is None or (isinstance(val, str) and not val.strip()):
+            errors.append("`compatibility` is present but empty — the spec requires "
+                          "1–500 chars when the field is provided; omit it or fill it in")
+        elif isinstance(val, str) and len(val) > COMPAT_MAX:
+            errors.append(f"`compatibility` is {len(val)} chars, limit {COMPAT_MAX}")
 
     lines = len(text.splitlines())
     if lines > BODY_MAX_LINES:
