@@ -94,6 +94,15 @@ def probe(skill_dir: Path, skill_name: str, query: str, timeout: int, model: str
     with tempfile.TemporaryDirectory(prefix=f"trigeval-{skill_name}-") as tmp:
         project = Path(tmp)
         shutil.copytree(skill_dir, project / ".claude" / "skills" / skill_name)
+        # True isolation needs three cuts, not one. The temp project drops other
+        # *project* skills; --setting-sources project (below) drops *personal*
+        # skills; and disableBundledSkills drops the built-ins (/code-review,
+        # /loop, /review, …) that load in every session regardless. Without this
+        # last one a bundled skill can win the routing contest and the probe
+        # reports a false negative for the skill under test.
+        (project / ".claude" / "settings.json").write_text(
+            json.dumps({"disableBundledSkills": True})
+        )
         if git:
             make_git_fixture(project)
 
@@ -147,6 +156,18 @@ def probe(skill_dir: Path, skill_name: str, query: str, timeout: int, model: str
             proc.wait(timeout=10)
 
 
+def _same_skill(emitted: object, skill_name: str) -> bool:
+    """Exact-match the emitted skill name against the one under test.
+
+    A substring test (`skill_name in emitted`) is wrong: probing a skill named
+    `review` would count a fire of the bundled `code-review`, and `deploy` would
+    count `apps/web:deploy`. Compare the leaf name exactly, after dropping any
+    `plugin:` / directory namespace prefix Claude Code may attach.
+    """
+    leaf = str(emitted).split(":")[-1].strip()
+    return leaf == skill_name
+
+
 def _is_trigger(event: dict, skill_name: str, project: Path) -> bool:
     content = (event.get("message") or {}).get("content") or []
     if not isinstance(content, list):
@@ -160,7 +181,7 @@ def _is_trigger(event: dict, skill_name: str, project: Path) -> bool:
             continue
         name = block.get("name")
         args = block.get("input") or {}
-        if name == "Skill" and skill_name in str(args.get("skill", "")):
+        if name == "Skill" and _same_skill(args.get("skill", ""), skill_name):
             return True
         # A direct Read of the skill file is a load by another route.
         if name == "Read":

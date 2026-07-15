@@ -145,6 +145,18 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a Bash call whose command mentions the name does NOT count",
           not trigger_eval._is_trigger(bash_event, "widget", project))
 
+# ── trigger_eval: skill-name match must be exact, not a substring ──
+# Codex round-4 P2. `skill_name in emitted` counted a fire of bundled `code-review`
+# as a trigger for a skill named `review`, and `apps/web:deploy` for `deploy`.
+
+check("exact name matches", trigger_eval._same_skill("review", "review"))
+check("substring does NOT match (code-review vs review)",
+      not trigger_eval._same_skill("code-review", "review"))
+check("namespaced leaf matches (apps/web:deploy vs deploy)",
+      trigger_eval._same_skill("apps/web:deploy", "deploy"))
+check("namespaced leaf substring does NOT match (apps/web:deploy vs epl)",
+      not trigger_eval._same_skill("apps/web:deploy", "epl"))
+
 print()
 if FAILURES:
     print(f"  {len(FAILURES)} failed\n")
