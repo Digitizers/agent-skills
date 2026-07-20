@@ -36,6 +36,25 @@ def load_key() -> str:
     sys.exit(f"FREEPIK_API_KEY not set (env or {ENV_FILE})")
 
 
+def save_unique(out_dir: str, base: str, blob: bytes) -> str:
+    """Write blob under a collision-proof name.
+
+    O_EXCL ("xb") makes creation atomic, so two invocations landing in the
+    same second in the same directory can never overwrite each other —
+    the loser bumps the suffix and retries.
+    """
+    n = 0
+    while True:
+        suffix = "" if n == 0 else f"-{n}"
+        path = os.path.join(out_dir, f"{base}{suffix}.png")
+        try:
+            with open(path, "xb") as f:
+                f.write(blob)
+            return path
+        except FileExistsError:
+            n += 1
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--prompt", required=True)
@@ -74,9 +93,7 @@ def main() -> None:
         b64 = im.get("base64")
         if not b64:
             continue
-        path = os.path.join(a.out, f"freepik-{stamp}-{i}.png")
-        with open(path, "wb") as f:
-            f.write(base64.b64decode(b64))
+        path = save_unique(a.out, f"freepik-{stamp}-{i}", base64.b64decode(b64))
         saved.append(path)
     if not saved:
         sys.exit("Response had no base64 image data")

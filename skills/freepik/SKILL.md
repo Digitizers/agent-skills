@@ -39,6 +39,20 @@ banner backgrounds add `no text, no letters, no words` (overlay text in
 HTML/CSS afterwards), and steer composition (`subject on the right, left side
 dark negative space`) so headline text stays legible.
 
+## Upscale (Magnific, async)
+
+```bash
+python3 <skill-dir>/scripts/upscale.py \
+  --image /path/to/input.png \
+  --scale 2x \
+  --out /path/to/output-dir
+```
+
+- `--scale`: `2x` / `4x` / `8x` / `16x` (engine-dependent; default `2x`).
+- Async under the hood: submits a task and polls until done (`--timeout`
+  seconds, default 300). Writes `upscaled-<timestamp>-<i>.png` to `--out` and
+  prints the saved paths.
+
 ## Compose into a banner
 
 Generate the background → set it as a full-bleed `background-image` in an HTML

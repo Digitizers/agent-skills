@@ -30,6 +30,25 @@ def load_key() -> str:
     sys.exit(f"FREEPIK_API_KEY not set (env or {ENV_FILE})")
 
 
+def save_unique(out_dir: str, base: str, blob: bytes) -> str:
+    """Write blob under a collision-proof name.
+
+    O_EXCL ("xb") makes creation atomic, so two invocations landing in the
+    same second in the same directory can never overwrite each other —
+    the loser bumps the suffix and retries.
+    """
+    n = 0
+    while True:
+        suffix = "" if n == 0 else f"-{n}"
+        path = os.path.join(out_dir, f"{base}{suffix}.png")
+        try:
+            with open(path, "xb") as f:
+                f.write(blob)
+            return path
+        except FileExistsError:
+            n += 1
+
+
 def api(method, url, key, body=None):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
@@ -74,9 +93,9 @@ def main():
                 sys.exit(f"Completed but no output URL: {json.dumps(d)[:300]}")
             stamp = int(time.time())
             for i, u in enumerate(urls):
-                out = os.path.join(a.out, f"upscaled-{stamp}-{i}.png")
-                urllib.request.urlretrieve(u, out)
-                print(out)
+                with urllib.request.urlopen(u, timeout=120) as r:
+                    blob = r.read()
+                print(save_unique(a.out, f"upscaled-{stamp}-{i}", blob))
             return
         if status in ("FAILED", "ERROR"):
             sys.exit(f"Upscale failed: {json.dumps(d)[:300]}")
