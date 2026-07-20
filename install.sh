@@ -17,7 +17,7 @@ TARGET="${1:-$HOME/.claude/skills}"
 mkdir -p "$TARGET"
 echo "Installing skills from $REPO → $TARGET"
 
-for dir in "$REPO"/*/; do
+for dir in "$REPO"/skills/*/; do
   name="$(basename "$dir")"
   [ -f "$dir/SKILL.md" ] || continue          # only real skill folders
   link="$TARGET/$name"

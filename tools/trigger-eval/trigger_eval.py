@@ -12,7 +12,7 @@ is as broken as one that never fires.
 
     python3 tools/trigger-eval/trigger_eval.py \
         --skill gha-optimizer \
-        --eval-set gha-optimizer/evals/triggers.json
+        --eval-set skills/gha-optimizer/evals/triggers.json
 """
 
 from __future__ import annotations
@@ -229,7 +229,7 @@ def main() -> int:
                         "measure the empty fixture, not the description.")
     args = p.parse_args()
 
-    skill_dir = REPO_ROOT / args.skill
+    skill_dir = REPO_ROOT / "skills" / args.skill
     if not (skill_dir / "SKILL.md").is_file():
         print(f"no SKILL.md in {skill_dir}", file=sys.stderr)
         return 2

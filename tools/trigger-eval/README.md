@@ -19,7 +19,7 @@ Both matter. A perfect body behind a description that never fires is dead code.
 ```bash
 python3 tools/trigger-eval/trigger_eval.py \
     --skill gha-optimizer \
-    --eval-set gha-optimizer/evals/triggers.json \
+    --eval-set skills/gha-optimizer/evals/triggers.json \
     --git   # gha-optimizer declares a git/GitHub precondition — see --git below
 ```
 

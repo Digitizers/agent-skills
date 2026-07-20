@@ -1,0 +1,25 @@
+{
+  "name": "digitizer-skills",
+  "owner": {
+    "name": "Ben Kalsky",
+    "email": "benkalsky@gmail.com"
+  },
+  "metadata": {
+    "description": "Ben's personal skill marketplace — engineering workflow skills plus the private Digitizer strategic brain, synced to every device from git."
+  },
+  "plugins": [
+    {
+      "name": "agent-skills",
+      "source": "./",
+      "description": "Portable developer-workflow skills (codex-review-loop, fable-mode, gha-optimizer, pr-first-workflow, safe-prod-db-write)."
+    },
+    {
+      "name": "digitizer",
+      "source": {
+        "source": "github",
+        "repo": "Digitizers/digitizer-os"
+      },
+      "description": "Digitizer Internal Strategic Brain — deals, pricing, services, market analysis, growth strategy."
+    }
+  ]
+}
