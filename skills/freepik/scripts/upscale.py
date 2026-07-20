@@ -49,12 +49,12 @@ def save_unique(out_dir: str, base: str, blob: bytes) -> str:
             n += 1
 
 
-def api(method, url, key, body=None):
+def api(method, url, key, body=None, timeout=60):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
                                  headers={"x-freepik-api-key": key, "Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.load(r)
     except urllib.error.HTTPError as e:
         sys.exit(f"Freepik API {method} {url} -> {e.code}: {e.read().decode()[:300]}")
@@ -80,9 +80,17 @@ def main():
     print(f"task {task_id} submitted; polling…", file=sys.stderr)
 
     deadline = time.time() + a.timeout
-    while time.time() < deadline:
-        time.sleep(5)
-        st = api("GET", f"{BASE}/{task_id}", key)
+    while True:
+        # Never sleep or block past the deadline: cap the sleep to the time
+        # remaining, re-check after waking, and bound the GET the same way.
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        time.sleep(min(5, remaining))
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        st = api("GET", f"{BASE}/{task_id}", key, timeout=min(60, max(1, remaining)))
         d = st.get("data") or {}
         status = (d.get("status") or "").upper()
         if status in ("COMPLETED", "SUCCESS", "DONE"):
