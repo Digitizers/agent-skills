@@ -92,9 +92,17 @@ skips any real directory of the same name. Updates arrive via `git pull`.
 ## Adding a skill
 
 Drop a new `skills/skill-name/SKILL.md` folder in, keep `SKILL.md` under ~100
-lines, give the `description` a clear "Use when …" trigger, and commit. Split
-detail into `REFERENCE.md` when it grows. Machines with the plugin installed
-pick it up on the next marketplace refresh — no re-install.
+lines, give the `description` a clear "Use when …" trigger, **and add the
+cloud symlink** so web/mobile sessions load it too:
+
+```bash
+ln -s ../../skills/skill-name .claude/skills/skill-name
+```
+
+Then commit both. `tools/trigger-eval/validate_spec.py` fails if the symlink
+is missing or points at the wrong skill, so a forgotten link can't slip
+through. Split detail into `REFERENCE.md` when it grows. Machines with the
+plugin installed pick it up on the next marketplace refresh — no re-install.
 
 ## License
 
