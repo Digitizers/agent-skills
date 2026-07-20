@@ -51,8 +51,11 @@ needs git auth for GitHub (it already does if you can clone them).
 ### Claude Code on the web / mobile (claude.ai/code)
 
 Cloud sessions in the environment that has `agent-skills` + `digitizer-os` as
-sources load the skills automatically. For sessions in **other** repos, commit
-this to that repo's `.claude/settings.json`:
+sources load the skills automatically: `digitizer-os` via its root `SKILL.md`,
+and this repo via `.claude/skills/` — committed relative symlinks into
+`skills/`, so the plugin layout stays the single source of truth. Sessions
+clone fresh from `main`, so they're always current. For sessions in **other**
+repos, commit this to that repo's `.claude/settings.json`:
 
 ```json
 {
