@@ -21,11 +21,12 @@ def load_key() -> str:
     if key:
         return key
     try:
-        for line in open(ENV_FILE):
-            if line.strip().startswith("FREEPIK_API_KEY="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
+        with open(ENV_FILE) as f:
+            for line in f:
+                if line.strip().startswith("FREEPIK_API_KEY="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
     except FileNotFoundError:
-        pass
+        pass  # no env file — fall through to the error below
     sys.exit(f"FREEPIK_API_KEY not set (env or {ENV_FILE})")
 
 
@@ -50,7 +51,8 @@ def main():
     os.makedirs(a.out, exist_ok=True)
     key = load_key()
 
-    img_b64 = base64.b64encode(open(a.image, "rb").read()).decode()
+    with open(a.image, "rb") as f:
+        img_b64 = base64.b64encode(f.read()).decode()
     submit = api("POST", BASE, key, {"image": img_b64, "scale_factor": a.scale})
     task = (submit.get("data") or {})
     task_id = task.get("task_id") or task.get("id")

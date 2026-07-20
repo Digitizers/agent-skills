@@ -26,12 +26,13 @@ def load_key() -> str:
     if key:
         return key
     try:
-        for line in open(ENV_FILE):
-            line = line.strip()
-            if line.startswith("FREEPIK_API_KEY="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
+        with open(ENV_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("FREEPIK_API_KEY="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
     except FileNotFoundError:
-        pass
+        pass  # no env file — fall through to the error below
     sys.exit(f"FREEPIK_API_KEY not set (env or {ENV_FILE})")
 
 

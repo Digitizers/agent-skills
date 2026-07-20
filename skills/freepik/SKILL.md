@@ -19,7 +19,10 @@ without an MCP server. The API key lives once in `~/.claude/freepik.env` as
 ## Generate (text-to-image, synchronous)
 
 ```bash
-python3 ~/.claude/skills/freepik/scripts/generate.py \
+# <skill-dir> = this skill's base directory, announced when the skill loads.
+# Plugin installs live in the plugin cache; only the install.sh symlink flow
+# uses ~/.claude/skills/freepik — so never hardcode that path.
+python3 <skill-dir>/scripts/generate.py \
   --prompt "abstract teal and indigo network mesh on dark navy, cinematic, no text" \
   --size widescreen_16_9 --num 2 \
   --out /path/to/output-dir
