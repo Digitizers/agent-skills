@@ -176,7 +176,7 @@ def check(skill: Path) -> tuple[list[str], list[str]]:
 
 
 def main() -> int:
-    skills = sorted(p for p in REPO_ROOT.iterdir() if (p / "SKILL.md").is_file())
+    skills = sorted(p for p in (REPO_ROOT / "skills").iterdir() if (p / "SKILL.md").is_file())
     if not skills:
         print("no skills found", file=sys.stderr)
         return 2

@@ -1,0 +1,10 @@
+{
+  "name": "agent-skills",
+  "displayName": "Agent Skills",
+  "description": "Portable developer-workflow skills: codex-review-loop, fable-mode, gha-optimizer, pr-first-workflow, safe-prod-db-write.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Ben Kalsky",
+    "email": "benkalsky@gmail.com"
+  }
+}
