@@ -181,12 +181,16 @@ def check_cloud_link(repo_root: Path, skill: Path) -> list[str]:
     a skill without one ships in the plugin but is silently absent on
     web/mobile."""
     link = repo_root / ".claude" / "skills" / skill.name
+    expected = Path("../..") / "skills" / skill.name
     if not link.is_symlink():
         return [f".claude/skills/{skill.name} symlink is missing — cloud sessions won't load "
-                f"this skill (create it: ln -s ../../skills/{skill.name} .claude/skills/{skill.name})"]
-    if link.resolve(strict=False) != skill.resolve():
+                f"this skill (create it: ln -s {expected} .claude/skills/{skill.name})"]
+    # Compare the recorded target, not the resolved path: an absolute target
+    # resolves fine on the machine that created it but is committed verbatim,
+    # so it dangles in every other clone — exactly the failure checked here.
+    if link.readlink() != expected:
         return [f".claude/skills/{skill.name} points to {link.readlink()}, "
-                f"expected ../../skills/{skill.name}"]
+                f"expected exactly {expected} (absolute or variant paths break other clones)"]
     return []
 
 

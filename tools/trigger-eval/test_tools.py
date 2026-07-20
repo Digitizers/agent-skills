@@ -97,6 +97,16 @@ with tempfile.TemporaryDirectory() as tmp:
     check("check_cloud_link flags a symlink pointing at the wrong skill",
           bool(errors), f"got {errors}")
 
+    # Codex #12 round-2 P2: an absolute target resolves on the machine that
+    # created it but is committed verbatim, so it dangles in every other clone.
+    # Resolved-path comparison green-lit exactly that; require the literal
+    # relative target instead.
+    absw = skill_at(root / "skills", "absw", "name: absw\ndescription: Abs thing.")
+    (cloud / "absw").symlink_to(root / "skills" / "absw")   # absolute, resolves locally
+    errors = validate_spec.check_cloud_link(root, absw)
+    check("check_cloud_link flags an absolute symlink even though it resolves",
+          bool(errors), f"got {errors}")
+
     # Codex round-7 P3: length was measured after collapsing whitespace, so a
     # description that is over-budget raw but under-budget collapsed slipped
     # through. The runtime sees the raw parsed value; validate against that.
