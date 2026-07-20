@@ -175,6 +175,25 @@ def check(skill: Path) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
+def check_cloud_link(repo_root: Path, skill: Path) -> list[str]:
+    """Cloud sessions (claude.ai/code) auto-load skills only from
+    .claude/skills/, so every skills/<name> needs a committed symlink there —
+    a skill without one ships in the plugin but is silently absent on
+    web/mobile."""
+    link = repo_root / ".claude" / "skills" / skill.name
+    expected = Path("../..") / "skills" / skill.name
+    if not link.is_symlink():
+        return [f".claude/skills/{skill.name} symlink is missing — cloud sessions won't load "
+                f"this skill (create it: ln -s {expected} .claude/skills/{skill.name})"]
+    # Compare the recorded target, not the resolved path: an absolute target
+    # resolves fine on the machine that created it but is committed verbatim,
+    # so it dangles in every other clone — exactly the failure checked here.
+    if link.readlink() != expected:
+        return [f".claude/skills/{skill.name} points to {link.readlink()}, "
+                f"expected exactly {expected} (absolute or variant paths break other clones)"]
+    return []
+
+
 def main() -> int:
     skills = sorted(p for p in (REPO_ROOT / "skills").iterdir() if (p / "SKILL.md").is_file())
     if not skills:
@@ -184,6 +203,7 @@ def main() -> int:
     total_errors = 0
     for skill in skills:
         errors, warnings = check(skill)
+        errors += check_cloud_link(REPO_ROOT, skill)
         total_errors += len(errors)
         status = "FAIL" if errors else ("warn" if warnings else "ok")
         print(f"  {status:>4}  {skill.name}")

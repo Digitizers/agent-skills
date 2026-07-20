@@ -72,6 +72,41 @@ with tempfile.TemporaryDirectory() as tmp:
     errors, _ = validate_spec.check(quoted)
     check("validate_spec accepts a quoted 'no' description", not errors, f"got {errors}")
 
+# ── validate_spec: every skill needs its .claude/skills cloud symlink ──
+# Codex #12 round-1 P2. Cloud sessions auto-load only .claude/skills/, so a
+# skill added under skills/ without a matching symlink ships in the plugin but
+# is silently absent on web/mobile — the exact drift this check pins.
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    widget = skill_at(root / "skills", "widget", "name: widget\ndescription: Does a thing.")
+
+    errors = validate_spec.check_cloud_link(root, widget)
+    check("check_cloud_link flags a skill with no .claude/skills symlink",
+          any("missing" in e for e in errors), f"got {errors}")
+
+    cloud = root / ".claude" / "skills"
+    cloud.mkdir(parents=True)
+    (cloud / "widget").symlink_to("../../skills/widget")
+    errors = validate_spec.check_cloud_link(root, widget)
+    check("check_cloud_link accepts a correct relative symlink", not errors, f"got {errors}")
+
+    other = skill_at(root / "skills", "other", "name: other\ndescription: Another thing.")
+    (cloud / "other").symlink_to("../../skills/widget")   # wrong target
+    errors = validate_spec.check_cloud_link(root, other)
+    check("check_cloud_link flags a symlink pointing at the wrong skill",
+          bool(errors), f"got {errors}")
+
+    # Codex #12 round-2 P2: an absolute target resolves on the machine that
+    # created it but is committed verbatim, so it dangles in every other clone.
+    # Resolved-path comparison green-lit exactly that; require the literal
+    # relative target instead.
+    absw = skill_at(root / "skills", "absw", "name: absw\ndescription: Abs thing.")
+    (cloud / "absw").symlink_to(root / "skills" / "absw")   # absolute, resolves locally
+    errors = validate_spec.check_cloud_link(root, absw)
+    check("check_cloud_link flags an absolute symlink even though it resolves",
+          bool(errors), f"got {errors}")
+
     # Codex round-7 P3: length was measured after collapsing whitespace, so a
     # description that is over-budget raw but under-budget collapsed slipped
     # through. The runtime sees the raw parsed value; validate against that.

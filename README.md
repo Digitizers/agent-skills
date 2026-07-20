@@ -51,8 +51,11 @@ needs git auth for GitHub (it already does if you can clone them).
 ### Claude Code on the web / mobile (claude.ai/code)
 
 Cloud sessions in the environment that has `agent-skills` + `digitizer-os` as
-sources load the skills automatically. For sessions in **other** repos, commit
-this to that repo's `.claude/settings.json`:
+sources load the skills automatically: `digitizer-os` via its root `SKILL.md`,
+and this repo via `.claude/skills/` — committed relative symlinks into
+`skills/`, so the plugin layout stays the single source of truth. Sessions
+clone fresh from `main`, so they're always current. For sessions in **other**
+repos, commit this to that repo's `.claude/settings.json`:
 
 ```json
 {
@@ -89,9 +92,17 @@ skips any real directory of the same name. Updates arrive via `git pull`.
 ## Adding a skill
 
 Drop a new `skills/skill-name/SKILL.md` folder in, keep `SKILL.md` under ~100
-lines, give the `description` a clear "Use when …" trigger, and commit. Split
-detail into `REFERENCE.md` when it grows. Machines with the plugin installed
-pick it up on the next marketplace refresh — no re-install.
+lines, give the `description` a clear "Use when …" trigger, **and add the
+cloud symlink** so web/mobile sessions load it too:
+
+```bash
+ln -s ../../skills/skill-name .claude/skills/skill-name
+```
+
+Then commit both. `tools/trigger-eval/validate_spec.py` fails if the symlink
+is missing or points at the wrong skill, so a forgotten link can't slip
+through. Split detail into `REFERENCE.md` when it grows. Machines with the
+plugin installed pick it up on the next marketplace refresh — no re-install.
 
 ## License
 
