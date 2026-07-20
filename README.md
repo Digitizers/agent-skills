@@ -3,9 +3,9 @@
 Portable, project-agnostic skills for **Claude Code** and **OpenClaw** — small,
 reusable developer-workflow tools that work in any repo. This repo is both a
 **Claude Code plugin** (all skills under [`skills/`](skills/)) and a **plugin
-marketplace** (`digitizer-skills`) that also serves the private
-[`digitizer`](https://github.com/Digitizers/digitizer-os) skill — so every
-device installs from one place and stays up to date from git.
+marketplace** (`digitizer-skills`) that also serves operational guides for the
+hosting, WordPress, ads, and billing tools we run — so every device installs
+from one place and stays up to date from git.
 
 Each skill is a self-contained folder with a `SKILL.md` (the agent reads its
 frontmatter `description` to decide when to load it) and optional
@@ -22,21 +22,35 @@ frontmatter `description` to decide when to load it) and optional
 | [`pr-first-workflow`](skills/pr-first-workflow/) | Default to a branch + PR for every change (code and docs); branch → commit → PR → review → merge → return to the default branch; direct-to-main only on an explicit OK. Pairs with `codex-review-loop`. |
 | [`safe-prod-db-write`](skills/safe-prod-db-write/) | Run one-off writes/backfills against a production DB safely — pull the connection into an `mktemp` file, dry-run, get explicit human authorization, execute, verify counts/invariants, clean up. |
 
-The marketplace also serves one plugin from outside this repo:
+The marketplace also serves operational-guide plugins from outside this repo,
+one per tool we run:
 
 | Plugin | Source | What it does |
 |---|---|---|
-| `digitizer` | [`Digitizers/digitizer-os`](https://github.com/Digitizers/digitizer-os) (private) | Digitizer Internal Strategic Brain — deals, pricing, services, market analysis, growth strategy. |
+| `cloudways-mcp` | [`Digitizers/cloudways-mcp`](https://github.com/Digitizers/cloudways-mcp) | Cloudways hosted-MCP operational guide. |
+| `hostinger-mcp` | [`Digitizers/hostinger-mcp`](https://github.com/Digitizers/hostinger-mcp) | Hostinger MCP operational guide. |
+| `aura-mcp` | [`Digitizers/aura-mcp`](https://github.com/Digitizers/aura-mcp) | Aura control-plane skill — approvals, snapshots, restores. |
+| `wordpress-api-pro` | [`Digitizers/wordpress-api-pro`](https://github.com/Digitizers/wordpress-api-pro) | WordPress REST management — posts, media, Elementor, ACF, Woo, SEO. |
+| `siteagent-elementor-studio` | [`Digitizers/siteagent-elementor-studio`](https://github.com/Digitizers/siteagent-elementor-studio) | Build WordPress sites via the Elementor MCP. |
+| `meta-ads-mcp` | [`Digitizers/meta-ads-mcp`](https://github.com/Digitizers/meta-ads-mcp) | Meta Ads MCP operational guide. |
+| `sumit-mcp` | [`Digitizers/sumit-mcp`](https://github.com/Digitizers/sumit-mcp) | SUMIT (OfficeGuy) billing MCP + skill. |
 
 ## Install — Claude Code (recommended)
 
-One-time per machine, inside any Claude Code session (needs Claude Code
-v2.1.142+ for the `digitizer` root-level skill):
+One-time per machine, inside any Claude Code session. See
+[`ONBOARDING.md`](ONBOARDING.md) for the full first-time device setup
+(GitHub auth, install commands, optional env vars):
 
 ```
 /plugin marketplace add Digitizers/agent-skills
 /plugin install agent-skills@digitizer-skills
-/plugin install digitizer@digitizer-skills
+/plugin install cloudways-mcp@digitizer-skills
+/plugin install hostinger-mcp@digitizer-skills
+/plugin install aura-mcp@digitizer-skills
+/plugin install wordpress-api-pro@digitizer-skills
+/plugin install siteagent-elementor-studio@digitizer-skills
+/plugin install meta-ads-mcp@digitizer-skills
+/plugin install sumit-mcp@digitizer-skills
 ```
 
 Then open `/plugin`, find the `digitizer-skills` marketplace, and **enable
@@ -46,14 +60,12 @@ edit a skill here, and every machine picks it up. Manual refresh:
 `/plugin marketplace update digitizer-skills`.
 
 The CLI and the IDE extensions (VS Code / JetBrains) share the same `~/.claude`
-user scope, so one install covers both. These repos are private, so the machine
-needs git auth for GitHub (it already does if you can clone them).
+user scope, so one install covers both.
 
 ### Claude Code on the web / mobile (claude.ai/code)
 
-Cloud sessions in the environment that has `agent-skills` + `digitizer-os` as
-sources load the skills automatically: `digitizer-os` via its root `SKILL.md`,
-and this repo via `.claude/skills/` — committed relative symlinks into
+Cloud sessions in an environment that has `agent-skills` as a source load its
+skills automatically via `.claude/skills/` — committed relative symlinks into
 `skills/`, so the plugin layout stays the single source of truth. Sessions
 clone fresh from `main`, so they're always current. For sessions in **other**
 repos, commit this to that repo's `.claude/settings.json`:
@@ -67,7 +79,13 @@ repos, commit this to that repo's `.claude/settings.json`:
   },
   "enabledPlugins": {
     "agent-skills@digitizer-skills": true,
-    "digitizer@digitizer-skills": true
+    "cloudways-mcp@digitizer-skills": true,
+    "hostinger-mcp@digitizer-skills": true,
+    "aura-mcp@digitizer-skills": true,
+    "wordpress-api-pro@digitizer-skills": true,
+    "siteagent-elementor-studio@digitizer-skills": true,
+    "meta-ads-mcp@digitizer-skills": true,
+    "sumit-mcp@digitizer-skills": true
   }
 }
 ```
