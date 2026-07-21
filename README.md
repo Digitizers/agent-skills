@@ -67,8 +67,12 @@ user scope, so one install covers both.
 Cloud sessions in an environment that has `agent-skills` as a source load its
 skills automatically via `.claude/skills/` — committed relative symlinks into
 `skills/`, so the plugin layout stays the single source of truth. Sessions
-clone fresh from `main`, so they're always current. For sessions in **other**
-repos, commit this to that repo's `.claude/settings.json`:
+clone fresh from `main`, so they're always current. The **tool connections**
+(Cloudways, Hostinger, Aura, SUMIT, Elementor) come up the same way: each tool
+repo commits a placeholder-only `.mcp.json`, and the tokens are injected as
+env vars in the cloud environment's configuration — see
+[`ONBOARDING.md`](ONBOARDING.md) §5 for the variable list. For sessions in
+**other** repos, commit this to that repo's `.claude/settings.json`:
 
 ```json
 {
