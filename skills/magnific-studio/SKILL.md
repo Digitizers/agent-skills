@@ -1,13 +1,15 @@
 ---
-name: freepik
-description: Generate AI images and upscale via the Freepik / Magnific REST API. Use when the user wants to generate an AI image, hero visual, banner background, illustration, or texture from a text prompt, or to upscale/enhance an existing image. Triggers on "Freepik", "Magnific", "generate an image", "AI background", "AI hero visual", "text-to-image", "upscale this image". Reads the API key from ~/.claude/freepik.env (FREEPIK_API_KEY) so it works across all sessions.
+name: magnific-studio
+description: Magnific Studio — generate AI images and upscale via the Freepik / Magnific REST API. Use when the user wants to generate an AI image, hero visual, banner background, illustration, or texture from a text prompt, or to upscale/enhance an existing image. Triggers on "Magnific", "Freepik", "generate an image", "AI background", "AI hero visual", "text-to-image", "upscale this image". Not for branded social posts or presentations (canva-studio) and not for UI mockups (figma-studio). Reads the API key from ~/.claude/freepik.env (FREEPIK_API_KEY) so it works across all sessions.
 ---
 
-# Freepik image generation
+# Magnific Studio — AI image generation & upscaling
 
-Wraps the Freepik REST API so any Claude Code session can generate AI imagery
-without an MCP server. The API key lives once in `~/.claude/freepik.env` as
-`FREEPIK_API_KEY=...` (perms 600) and the script reads it automatically.
+Wraps the Freepik / Magnific REST API so any Claude Code session can generate
+AI imagery without an MCP server. The API key lives once in
+`~/.claude/freepik.env` as `FREEPIK_API_KEY=...` (perms 600) and the script
+reads it automatically. (The env file keeps the `freepik` name on purpose —
+the key really is a Freepik API key, and existing machines already have it.)
 
 ## When to use
 
@@ -21,7 +23,7 @@ without an MCP server. The API key lives once in `~/.claude/freepik.env` as
 ```bash
 # <skill-dir> = this skill's base directory, announced when the skill loads.
 # Plugin installs live in the plugin cache; only the install.sh symlink flow
-# uses ~/.claude/skills/freepik — so never hardcode that path.
+# uses ~/.claude/skills/magnific-studio — so never hardcode that path.
 python3 <skill-dir>/scripts/generate.py \
   --prompt "abstract teal and indigo network mesh on dark navy, cinematic, no text" \
   --size widescreen_16_9 --num 2 \
@@ -57,8 +59,7 @@ python3 <skill-dir>/scripts/upscale.py \
 
 Generate the background → set it as a full-bleed `background-image` in an HTML
 banner → add a dark side-gradient overlay for text legibility → screenshot with
-headless Chrome at exact dimensions. See the `banner-design` skill for the
-HTML→PNG export pattern.
+headless Chrome at exact dimensions (HTML→PNG export).
 
 ## Notes
 

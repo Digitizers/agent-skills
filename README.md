@@ -15,10 +15,12 @@ frontmatter `description` to decide when to load it) and optional
 
 | Skill | What it does |
 |---|---|
+| [`canva-studio`](skills/canva-studio/) | Operate the Canva MCP for branded design work — create from brand templates with autofill, generate freeform designs, export with approval guardrails. For social posts, presentations, and marketing collateral. |
 | [`codex-review-loop`](skills/codex-review-loop/) | Drive a PR to convergence through the Codex AI reviewer — build → PR → `@codex review` → verify each finding against HEAD → fix the real ones with regression tests → re-trigger until clean → human reviews last. |
 | [`fable-mode`](skills/fable-mode/) | Strict judgment/planning/verification/inference discipline — verified-vs-inferred-vs-assumed labeling, rival hypotheses before diagnosis, premise checks, confirm-before-irreversible (a criterion is a filter, not an authorization), and proportionally short answers on trivia. Triggers on "fable-mode" / "מצב פייבל" and proactively on high-stakes tasks. |
-| [`freepik`](skills/freepik/) | Generate and upscale AI imagery via the Freepik / Magnific REST API without an MCP server. Reads `FREEPIK_API_KEY` from `~/.claude/freepik.env`, so it works in any session. |
+| [`figma-studio`](skills/figma-studio/) | Route design work through the Figma MCP — client-site mockups, design-to-code, FigJam diagrams — loading Figma's official `/figma-use` skill before editing and keeping Digitizer conventions. |
 | [`gha-optimizer`](skills/gha-optimizer/) | Audit and cut GitHub Actions minutes — measure real usage, hunt redundant work before optimizing (does the job need to run at all? at this frequency? only then cache/tune), detect double-builds vs. deploy platforms (Vercel/Netlify/Cloudways), output exact diffs grouped by delete/reduce-frequency/optimize. Read-only until explicitly approved. |
+| [`magnific-studio`](skills/magnific-studio/) | Generate and upscale AI imagery via the Freepik / Magnific REST API without an MCP server. Reads `FREEPIK_API_KEY` from `~/.claude/freepik.env`, so it works in any session. |
 | [`pr-first-workflow`](skills/pr-first-workflow/) | Default to a branch + PR for every change (code and docs); branch → commit → PR → review → merge → return to the default branch; direct-to-main only on an explicit OK. Pairs with `codex-review-loop`. |
 | [`safe-prod-db-write`](skills/safe-prod-db-write/) | Run one-off writes/backfills against a production DB safely — pull the connection into an `mktemp` file, dry-run, get explicit human authorization, execute, verify counts/invariants, clean up. |
 
