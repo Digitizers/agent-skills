@@ -228,6 +228,59 @@ with tempfile.TemporaryDirectory() as tmp:
     size = gc.dir_size_mb(target)
     check("dir_size_mb ignores content behind a symlink", size < 0.1, f"got {size:.2f}MB")
 
+# ── mid-loop promotion: per-item manifest re-read prevents deleting a fresh live ──
+# Codex round-3 P1. The round-2 fix re-read the manifest once before the loop; a
+# promotion landing DURING the loop still lost the install. Liveness is now read
+# per candidate. Simulated by swapping the manifest between two candidates.
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    cache, manifest = build(root, tree={"m": {"p": ["1.0.0", "2.0.0", "3.0.0"]}},
+                            installed={"p@m": "m/p/3.0.0"})
+    live0 = gc.live_install_paths(manifest)
+    orphans, _ = gc.orphan_dirs(cache, live0)   # 1.0.0, 2.0.0
+    check("two orphans under the initial snapshot", len(orphans) == 2)
+
+    deleted, skipped = [], []
+    for i, o in enumerate(orphans):
+        if i == 1:
+            # updater rolls back to 2.0.0 between the two deletions
+            manifest.write_text(json.dumps(
+                {"plugins": {"p@m": [{"installPath": str(cache / "m" / "p" / "2.0.0")}]}}))
+        # the tool's per-item check
+        if gc.norm(o) in gc.live_install_paths(manifest):
+            skipped.append(o)
+            continue
+        shutil.rmtree(o)
+        deleted.append(o)
+
+    check("the version promoted mid-loop is skipped, not deleted",
+          any(o.name == "2.0.0" for o in skipped) and (cache / "m" / "p" / "2.0.0").is_dir(),
+          f"deleted={[o.name for o in deleted]} skipped={[o.name for o in skipped]}")
+    check("the still-dead version was deleted", any(o.name == "1.0.0" for o in deleted))
+
+# ── freed is accumulated from actual deletions, not derived from the pre-scan ──
+# Codex round-3 P2 + comment. total-minus-remaining drifts when candidates are
+# skipped or fail, and can go negative across a rollback. Count what was removed.
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    cache, manifest = build(root, tree={"m": {"p": ["1.0.0", "2.0.0", "3.0.0"]}},
+                            installed={"p@m": "m/p/3.0.0"})
+    (cache / "m" / "p" / "1.0.0" / "big.bin").write_bytes(b"x" * 1_000_000)  # ~1MB
+    (cache / "m" / "p" / "2.0.0" / "big.bin").write_bytes(b"x" * 1_000_000)  # ~1MB
+
+    orphans, _ = gc.orphan_dirs(cache, gc.live_install_paths(manifest))
+    freed = 0.0
+    for i, o in enumerate(orphans):
+        size = gc.dir_size_mb(o)
+        if i == 1:
+            continue  # simulate a skip (promotion) — its size must NOT count
+        shutil.rmtree(o)
+        freed += size
+    check("freed counts only what was actually removed (one of two ~1MB dirs)",
+          0.8 < freed < 1.2, f"got {freed:.2f}MB")
+
 # ── refuse to run against an already-inconsistent manifest ──
 
 with tempfile.TemporaryDirectory() as tmp:

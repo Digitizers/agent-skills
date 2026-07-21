@@ -238,36 +238,40 @@ def main() -> int:
         print(f"\n  {total:.0f}MB reclaimable. Re-run with --delete to remove.\n")
         return 0
 
-    # Re-read the manifest immediately before deleting. A plugin update running
-    # concurrently can promote a previously stale version to current while we were
-    # measuring sizes; deleting from the older snapshot would then remove a live
-    # install. Re-validating here shrinks that window to the loop below — it is
-    # not a lock, but it turns "delete what was dead a moment ago" into "delete
-    # what is still dead now".
-    live_now = live_install_paths(MANIFEST)
-    promoted = [o for o in orphans if norm(o) in live_now]
-    if promoted:
-        for p in promoted:
-            print(f"  skipping {norm(p).relative_to(cache_root)} — became live during the scan",
-                  file=sys.stderr)
-        orphans = [o for o in orphans if norm(o) not in live_now]
-
-    # No ignore_errors: a delete that fails on permissions, a busy file, or a
-    # symlink must not be swallowed and then reported as reclaimed space.
+    # Liveness is re-read from the manifest FOR EACH candidate, immediately before
+    # its rmtree. A concurrent plugin update can promote a stale version to current
+    # at any point — checking once before the loop (the round-2 fix) still lost a
+    # live install when the promotion landed mid-loop. Per-item re-reads shrink the
+    # window to the instant between one manifest read and one rmtree; without OS
+    # advisory locks on the manifest, that is as small as this window gets.
+    #
+    # `freed` accumulates from directories actually deleted, measured just before
+    # their removal — never derived from the pre-scan total, which drifts when
+    # candidates are skipped (promotion) or fail (permissions), and can even go
+    # negative across a rollback that swaps which version is the orphan.
     failures: list[str] = []
+    skipped_live: list[Path] = []
+    freed = 0.0
     for o in orphans:
         resolved = norm(o)
-        if resolved in live_now or not is_within(resolved, cache_root):
-            continue  # re-checked per item; never delete outside the cache
+        if not is_within(resolved, cache_root):
+            continue  # never hand rmtree a path outside the cache
+        if resolved in live_install_paths(MANIFEST):
+            skipped_live.append(o)
+            print(f"  skipping {resolved.relative_to(cache_root)} — became live during the scan",
+                  file=sys.stderr)
+            continue
+        size = dir_size_mb(o)
         try:
             shutil.rmtree(o)
+            freed += size
         except OSError as e:
             failures.append(f"{resolved.relative_to(cache_root)}: {e}")
     prune_empty(CACHE_DIR)
 
+    live_now = live_install_paths(MANIFEST)
     still_missing = assert_installs_present(MANIFEST)
     remaining, _ = orphan_dirs(CACHE_DIR, live_now)
-    freed = total - sum(dir_size_mb(o) for o in remaining if o.exists())
 
     print(f"\n  freed {freed:.0f}MB · "
           f"{plugins - len(set(still_missing))}/{plugins} plugins intact · "

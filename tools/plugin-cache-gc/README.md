@@ -58,9 +58,23 @@ unreachable. Special-casing the upper levels is what produced the miss.
   plugin's directory disappeared. A sweep that damaged a live install must not
   exit 0.
 - **Deletion failures are never swallowed.** No `ignore_errors`: a permission
-  error, busy file, or symlink surfaces, and the tool exits non-zero rather than
-  printing reclaimed space it did not reclaim. It also exits non-zero if the
-  final scan still finds orphans, even when nothing raised.
+  error or busy file surfaces, and the tool exits non-zero rather than printing
+  reclaimed space it did not reclaim. It also exits non-zero if the final scan
+  still finds orphans, even when nothing raised.
+- **Symlinks are refused, not deleted and not failed on.** A symlinked
+  marketplace, plugin, or version directory is skipped with a warning on stderr
+  and does not by itself change the exit code — following it could resolve
+  outside the cache, and deleting "through" it would destroy the target. Every
+  candidate is additionally verified to resolve beneath the cache root before
+  `rmtree` sees it.
+- **Freed space is measured from what was actually deleted** — each directory is
+  sized immediately before its removal and counted only if the removal succeeds.
+  Skipped or failed candidates never inflate the number.
+- **Per-item liveness re-check.** The manifest is re-read for each candidate
+  immediately before its deletion, so a plugin update that promotes a stale
+  version mid-run causes a skip, not a lost install. Not a lock — the window is
+  one manifest read to one `rmtree` — but that is as small as it gets without
+  file locking.
 - **Container-only pruning.** Empty `<marketplace>/<plugin>` and `<marketplace>`
   directories are removed after their versions go — but pruning never descends
   into a version directory. See below.
