@@ -64,31 +64,18 @@ user scope, so one install covers both.
 
 ### Claude Code on the web / mobile (claude.ai/code)
 
-Cloud sessions in an environment that has `agent-skills` as a source load its
-skills automatically via `.claude/skills/` — committed relative symlinks into
-`skills/`, so the plugin layout stays the single source of truth. Sessions
-clone fresh from `main`, so they're always current. For sessions in **other**
-repos, commit this to that repo's `.claude/settings.json`:
+Cloud sessions never run plugin installs — a session loads the skills of the
+repos listed as **sources** of its cloud environment, cloned fresh from `main`
+on session start (this repo's skills load via `.claude/skills/`, committed
+relative symlinks into `skills/`, so the plugin layout stays the single source
+of truth). Do the one-time environment setup in
+[`ONBOARDING.md`](ONBOARDING.md) §6, which lists every toolbox repo to add as
+a source.
 
-```json
-{
-  "extraKnownMarketplaces": {
-    "digitizer-skills": {
-      "source": { "source": "github", "repo": "Digitizers/agent-skills" }
-    }
-  },
-  "enabledPlugins": {
-    "agent-skills@digitizer-skills": true,
-    "cloudways-mcp@digitizer-skills": true,
-    "hostinger-mcp@digitizer-skills": true,
-    "aura-mcp@digitizer-skills": true,
-    "wordpress-api-pro@digitizer-skills": true,
-    "siteagent-elementor-studio@digitizer-skills": true,
-    "meta-ads-mcp@digitizer-skills": true,
-    "sumit-mcp@digitizer-skills": true
-  }
-}
-```
+A repo-level `.claude/settings.json` (this repo carries one) enables the
+toolbox plugins for **desktop** sessions opened inside that repo — handy in a
+work repo on a machine without the user-scope install. It has no effect on
+cloud sessions; environment sources are the only cloud mechanism.
 
 ## Install — OpenClaw / plain symlinks (fallback)
 
