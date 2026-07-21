@@ -43,7 +43,7 @@ WSL need nothing.
 
 | Tool | Vars | Where |
 |---|---|---|
-| freepik (in agent-skills) | `FREEPIK_API_KEY` | `~/.claude/freepik.env`, perms 600 |
+| magnific-studio (in agent-skills) | `FREEPIK_API_KEY` | `~/.claude/freepik.env`, perms 600 (Freepik API key — file name kept for compatibility) |
 | sumit-mcp | `SUMIT_DEFAULT_ACCOUNT`, `SUMIT_MAIN_COMPANY_ID`, `SUMIT_MAIN_API_KEY`, `SUMIT_ALLOW_CHARGE`, `SUMIT_MAX_CHARGE`, `SUMIT_CONFIRM_SECRET` | shell env / launchd; see the repo's references/installation.md |
 | Cloudways hosted MCP | per-account server URL | provision from the Cloudways dashboard (URL embeds your token — never share or commit it) |
 

@@ -1,0 +1,11 @@
+[
+  { "query": "generate a hero image for the new landing page — dark tech vibe, no text", "should_trigger": true },
+  { "query": "I need an abstract AI background for the webinar banner", "should_trigger": true },
+  { "query": "upscale this logo scan to 4x, it's too pixelated", "should_trigger": true },
+  { "query": "use magnific to sharpen the client's product photo", "should_trigger": true },
+  { "query": "צור לי תמונת רקע לבאנר של הקמפיין", "should_trigger": true },
+  { "query": "design an Instagram post from our brand template in Canva", "should_trigger": false },
+  { "query": "mock up the pricing page in Figma", "should_trigger": false },
+  { "query": "find me a stock photo of a laptop on a desk", "should_trigger": false },
+  { "query": "compress these PNGs so the page loads faster", "should_trigger": false }
+]

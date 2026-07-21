@@ -11,7 +11,7 @@
     {
       "name": "agent-skills",
       "source": "./",
-      "description": "Portable developer-workflow skills (codex-review-loop, fable-mode, freepik, gha-optimizer, pr-first-workflow, safe-prod-db-write)."
+      "description": "Portable developer-workflow and design skills (canva-studio, codex-review-loop, fable-mode, figma-studio, gha-optimizer, magnific-studio, pr-first-workflow, safe-prod-db-write)."
     },
     {
       "name": "cloudways-mcp",
