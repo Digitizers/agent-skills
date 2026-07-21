@@ -3,7 +3,7 @@
 
 Plugin caches are append-only in practice: every marketplace auto-update writes a
 new version directory and leaves the previous one behind. Nothing garbage-collects
-them, so the cache grows without bound — one repo here had accumulated five
+them, so the cache grows without bound — one machine here had accumulated five
 versions of a single plugin.
 
 Authority is `installed_plugins.json`: each installed plugin records an exact
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -31,37 +32,69 @@ CACHE_DIR = CLAUDE_DIR / "plugins" / "cache"
 MANIFEST = CLAUDE_DIR / "plugins" / "installed_plugins.json"
 
 
+def norm(p: Path | str) -> Path:
+    """Canonical form for comparing paths.
+
+    The manifest stores `installPath` as a string written by another program; the
+    cache walk builds paths itself. Those can name the same directory in different
+    ways (`~`, a symlinked home, `/private/var` vs `/var` on macOS). Comparing raw
+    strings would classify a live install as an orphan — and then delete it — so
+    both sides are normalized before they ever meet.
+    """
+    return Path(p).expanduser().resolve(strict=False)
+
+
+def is_within(candidate: Path, root: Path) -> bool:
+    """True if `candidate` resolves to something inside `root`."""
+    try:
+        return os.path.commonpath([str(root), str(candidate)]) == str(root)
+    except ValueError:  # different drives / not comparable
+        return False
+
+
+def read_manifest(manifest: Path) -> dict:
+    return json.loads(manifest.read_text())
+
+
 def live_install_paths(manifest: Path) -> set[Path]:
-    """Every path an installed plugin currently resolves to."""
-    data = json.loads(manifest.read_text())
-    paths: set[Path] = set()
-    for installs in data.get("plugins", {}).values():
-        for install in installs:
-            p = install.get("installPath")
-            if p:
-                paths.add(Path(p))
-    return paths
+    """Every normalized path an installed plugin currently resolves to."""
+    data = read_manifest(manifest)
+    return {
+        norm(install["installPath"])
+        for installs in data.get("plugins", {}).values()
+        for install in installs
+        if install.get("installPath")
+    }
+
+
+def plugin_count(manifest: Path) -> int:
+    """Number of installed plugins — not the number of installPath entries.
+
+    A plugin can record several installs, and distinct plugins can resolve to the
+    same path, so the size of the live-path set is not a plugin count. Reporting
+    one as the other misstates how much of the install base survived a sweep.
+    """
+    return len(read_manifest(manifest).get("plugins", {}))
 
 
 def assert_installs_present(manifest: Path) -> list[str]:
-    """Return plugins whose installPath is already missing from disk.
+    """Names of plugins whose installPath is already missing from disk.
 
     Run BEFORE deleting anything. If the manifest already disagrees with the disk,
     the cache is in a state this tool did not create and should not compound — the
     safe move is to stop and let a human look, not to delete more.
     """
-    data = json.loads(manifest.read_text())
-    missing = []
-    for name, installs in data.get("plugins", {}).items():
-        for install in installs:
-            p = install.get("installPath")
-            if p and not Path(p).exists():
-                missing.append(name)
-    return missing
+    data = read_manifest(manifest)
+    return [
+        name
+        for name, installs in data.get("plugins", {}).items()
+        for install in installs
+        if install.get("installPath") and not norm(install["installPath"]).exists()
+    ]
 
 
-def orphan_dirs(cache: Path, live: set[Path]) -> list[Path]:
-    """Version directories under cache/<marketplace>/<plugin>/<version> not in `live`.
+def orphan_dirs(cache: Path, live: set[Path]) -> tuple[list[Path], list[str]]:
+    """Unreachable `cache/<marketplace>/<plugin>/<version>` dirs, plus any warnings.
 
     Orphans occur at three levels and an early version of this walk missed two of
     them, leaving directories behind:
@@ -73,31 +106,61 @@ def orphan_dirs(cache: Path, live: set[Path]) -> list[Path]:
 
     Collecting leaf version dirs and filtering by `live` covers all three uniformly:
     a dead plugin or marketplace is simply one whose every leaf is unreachable.
-    Special-casing the upper levels is what produced the miss.
+
+    Symlinked containers are refused, not followed. `Path.is_dir()` follows a
+    symlink, so a symlinked marketplace or plugin directory would yield "cache"
+    paths whose real targets live elsewhere on disk — and rmtree would then delete
+    those external directories. Only a symlink at the *version* level fails loudly
+    on its own, so the containers must be rejected explicitly.
     """
     orphans: list[Path] = []
-    if not cache.is_dir():
-        return orphans
-    for marketplace in sorted(cache.iterdir()):
+    warnings: list[str] = []
+    cache_root = norm(cache)
+    if not cache_root.is_dir():
+        return orphans, warnings
+
+    for marketplace in sorted(cache_root.iterdir()):
+        if marketplace.is_symlink():
+            warnings.append(f"skipped symlinked marketplace: {marketplace.name}")
+            continue
         if not marketplace.is_dir():
             continue
         for plugin in sorted(marketplace.iterdir()):
+            if plugin.is_symlink():
+                warnings.append(f"skipped symlinked plugin dir: {plugin.relative_to(cache_root)}")
+                continue
             if not plugin.is_dir():
                 continue
             for version in sorted(plugin.iterdir()):
-                if version.is_dir() and version not in live:
-                    orphans.append(version)
-    return orphans
+                if version.is_symlink():
+                    warnings.append(
+                        f"skipped symlinked version dir: {version.relative_to(cache_root)}")
+                    continue
+                if not version.is_dir():
+                    continue
+                resolved = norm(version)
+                if resolved in live:
+                    continue
+                # Belt and braces: never hand rmtree a path that escapes the cache.
+                if not is_within(resolved, cache_root):
+                    warnings.append(f"skipped out-of-cache path: {version}")
+                    continue
+                orphans.append(version)
+    return orphans, warnings
 
 
 def dir_size_mb(path: Path) -> float:
+    """Size of a directory, never following symlinks out of it."""
     total = 0
-    for f in path.rglob("*"):
-        try:
-            if f.is_file() and not f.is_symlink():
-                total += f.stat().st_size
-        except OSError:
-            pass
+    for root, dirs, files in os.walk(path, followlinks=False):
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
+        for f in files:
+            fp = os.path.join(root, f)
+            try:
+                if not os.path.islink(fp):
+                    total += os.path.getsize(fp)
+            except OSError:
+                pass
     return total / (1024 * 1024)
 
 
@@ -107,8 +170,8 @@ def prune_empty(cache: Path) -> None:
     Only ever touches the two container levels — cache/<marketplace>/<plugin> and
     cache/<marketplace>. It must NOT walk inside a version directory: live plugins
     legitimately contain empty directories (git keeps `.git/refs/tags` and
-    `.git/objects/info` empty, and two live installs on the machine this was
-    written for had exactly those), and deleting them corrupts a working install.
+    `.git/objects/info` empty, and a live install on the machine this was written
+    for had exactly those), and deleting them corrupts a working install.
 
     An earlier version used `cache.rglob("*")`, which recursed into live versions
     and would have removed those git internals — invisibly, because the
@@ -117,13 +180,17 @@ def prune_empty(cache: Path) -> None:
     if not cache.is_dir():
         return
     for marketplace in list(cache.iterdir()):          # plugin level
-        if not marketplace.is_dir():
+        if marketplace.is_symlink() or not marketplace.is_dir():
             continue
         for plugin in list(marketplace.iterdir()):
-            if plugin.is_dir() and not any(plugin.iterdir()):
+            if plugin.is_symlink() or not plugin.is_dir():
+                continue
+            if not any(plugin.iterdir()):
                 plugin.rmdir()
     for marketplace in list(cache.iterdir()):          # marketplace level
-        if marketplace.is_dir() and not any(marketplace.iterdir()):
+        if marketplace.is_symlink() or not marketplace.is_dir():
+            continue
+        if not any(marketplace.iterdir()):
             marketplace.rmdir()
 
 
@@ -148,41 +215,63 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
+    plugins = plugin_count(MANIFEST)
     live = live_install_paths(MANIFEST)
-    orphans = orphan_dirs(CACHE_DIR, live)
+    orphans, warnings = orphan_dirs(CACHE_DIR, live)
+
+    for w in warnings:
+        print(f"  warning: {w}", file=sys.stderr)
 
     if not orphans:
-        print(f"  {len(live)} plugins live, 0 orphans — nothing to do")
+        print(f"  {plugins} plugins live, 0 orphans — nothing to do")
         return 0
 
     total = 0.0
-    print(f"  {len(live)} plugins live, {len(orphans)} orphan version dir(s):\n")
+    print(f"  {plugins} plugins live, {len(orphans)} orphan version dir(s):\n")
+    cache_root = norm(CACHE_DIR)
     for o in orphans:
         mb = dir_size_mb(o)
         total += mb
-        print(f"    {mb:7.1f}MB  {o.relative_to(CACHE_DIR)}")
+        print(f"    {mb:7.1f}MB  {norm(o).relative_to(cache_root)}")
 
     if not args.delete:
         print(f"\n  {total:.0f}MB reclaimable. Re-run with --delete to remove.\n")
         return 0
 
+    # Re-read the manifest immediately before deleting. A plugin update running
+    # concurrently can promote a previously stale version to current while we were
+    # measuring sizes; deleting from the older snapshot would then remove a live
+    # install. Re-validating here shrinks that window to the loop below — it is
+    # not a lock, but it turns "delete what was dead a moment ago" into "delete
+    # what is still dead now".
+    live_now = live_install_paths(MANIFEST)
+    promoted = [o for o in orphans if norm(o) in live_now]
+    if promoted:
+        for p in promoted:
+            print(f"  skipping {norm(p).relative_to(cache_root)} — became live during the scan",
+                  file=sys.stderr)
+        orphans = [o for o in orphans if norm(o) not in live_now]
+
     # No ignore_errors: a delete that fails on permissions, a busy file, or a
     # symlink must not be swallowed and then reported as reclaimed space.
     failures: list[str] = []
     for o in orphans:
+        resolved = norm(o)
+        if resolved in live_now or not is_within(resolved, cache_root):
+            continue  # re-checked per item; never delete outside the cache
         try:
             shutil.rmtree(o)
         except OSError as e:
-            failures.append(f"{o.relative_to(CACHE_DIR)}: {e}")
+            failures.append(f"{resolved.relative_to(cache_root)}: {e}")
     prune_empty(CACHE_DIR)
 
-    # Re-read: the delete must not have touched anything still installed.
     still_missing = assert_installs_present(MANIFEST)
-    remaining = orphan_dirs(CACHE_DIR, live)
+    remaining, _ = orphan_dirs(CACHE_DIR, live_now)
     freed = total - sum(dir_size_mb(o) for o in remaining if o.exists())
 
-    print(f"\n  freed {freed:.0f}MB · {len(live) - len(set(still_missing))}/{len(live)} "
-          f"plugins intact · {len(remaining)} orphans left")
+    print(f"\n  freed {freed:.0f}MB · "
+          f"{plugins - len(set(still_missing))}/{plugins} plugins intact · "
+          f"{len(remaining)} orphans left")
 
     if still_missing:
         print("\n  ERROR: an installed plugin's directory is gone after pruning:",
@@ -203,7 +292,7 @@ def main() -> int:
         print(f"\n  ERROR: {len(remaining)} orphan(s) still present after deletion:",
               file=sys.stderr)
         for r in remaining:
-            print(f"    {r.relative_to(CACHE_DIR)}", file=sys.stderr)
+            print(f"    {norm(r).relative_to(cache_root)}", file=sys.stderr)
         return 1
 
     print()
