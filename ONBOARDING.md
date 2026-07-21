@@ -51,7 +51,7 @@ WSL need nothing.
 If you were added to the Digitizers GitHub org, your team lead will point you
 at one additional internal install step.
 
-## 6. Phone / web (claude.ai)
+## 6. Phone / web (claude.ai/code)
 
 The marketplace only reaches machines — cloud sessions never run plugin
 installs. What a cloud session *does* load is the skills of every repo listed
