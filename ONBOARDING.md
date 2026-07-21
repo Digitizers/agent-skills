@@ -14,7 +14,8 @@ machine without registered SSH keys fails with `Permission denied (publickey)`.
 
 ## 2. Install the toolbox
 
-Inside any Claude Code session:
+Inside a Claude Code session **on the machine itself** (CLI/desktop/IDE —
+cloud sessions don't run plugin installs; phone/web is covered in §6):
 
 ```
 /plugin marketplace add Digitizers/agent-skills
@@ -61,7 +62,8 @@ so always current). One-time setup:
 1. claude.ai → Settings → Connectors → connect GitHub and grant it the
    Digitizers repos you can read (separate from `gh auth login`).
 2. In Claude Code, open the environment picker → ⚙️ on your cloud environment
-   (keep a single environment so there's one to maintain) → add the toolbox
+   — create one first via "Add cloud environment…" if you don't have any.
+   Keep a single environment so there's one to maintain. Add the toolbox
    repos as sources:
 
    ```
