@@ -51,8 +51,33 @@ WSL need nothing.
 If you were added to the Digitizers GitHub org, your team lead will point you
 at one additional internal install step.
 
-Phone/web (claude.ai) sessions need a one-time GitHub connection — separate
-from `gh auth login`: claude.ai → Settings → Connectors → connect GitHub and
-grant it the Digitizers repos you can read, then create a Claude Code web
-environment listing the repos you work in as sources. After that, repos carry
-the config.
+## 6. Phone / web (claude.ai)
+
+The marketplace only reaches machines — cloud sessions never run plugin
+installs. What a cloud session *does* load is the skills of every repo listed
+as a **source** of its environment (cloned fresh from `main` on session start,
+so always current). One-time setup:
+
+1. claude.ai → Settings → Connectors → connect GitHub and grant it the
+   Digitizers repos you can read (separate from `gh auth login`).
+2. In Claude Code, open the environment picker → ⚙️ on your cloud environment
+   (keep a single environment so there's one to maintain) → add the toolbox
+   repos as sources:
+
+   ```
+   Digitizers/agent-skills
+   Digitizers/cloudways-mcp
+   Digitizers/hostinger-mcp
+   Digitizers/aura-mcp
+   Digitizers/wordpress-api-pro
+   Digitizers/siteagent-elementor-studio
+   Digitizers/meta-ads-mcp
+   Digitizers/sumit-mcp
+   ```
+
+   …plus any internal repos from step 5.
+
+Every **new** phone/web session then opens with all toolbox skills loaded —
+open sessions don't refresh. This works because each repo commits a
+`.claude/skills/<name>` symlink alongside its plugin layout; keep that
+dual-path pattern in any new tool repo.
