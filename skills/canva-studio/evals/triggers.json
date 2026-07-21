@@ -1,0 +1,10 @@
+[
+  { "query": "make an Instagram post announcing the new WooCommerce package, use our brand template", "should_trigger": true },
+  { "query": "עצב לי מצגת קצרה בקאנבה להצעת המחיר של הלקוח", "should_trigger": true },
+  { "query": "resize the launch post design for stories and export it as PNG", "should_trigger": true },
+  { "query": "create a one-pager flyer for the hosting migration service", "should_trigger": true },
+  { "query": "generate a photorealistic hero image of a server room", "should_trigger": false },
+  { "query": "mock up the new dashboard screen before we build it", "should_trigger": false },
+  { "query": "build me a pptx deck file I can email to the client", "should_trigger": false },
+  { "query": "upscale this old logo file so it's not blurry", "should_trigger": false }
+]
