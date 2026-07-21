@@ -14,7 +14,8 @@ machine without registered SSH keys fails with `Permission denied (publickey)`.
 
 ## 2. Install the toolbox
 
-Inside any Claude Code session:
+Inside a Claude Code session **on the machine itself** (CLI/desktop/IDE —
+cloud sessions don't run plugin installs; phone/web is covered in §6):
 
 ```
 /plugin marketplace add Digitizers/agent-skills
@@ -46,11 +47,50 @@ WSL need nothing.
 | sumit-mcp | `SUMIT_DEFAULT_ACCOUNT`, `SUMIT_MAIN_COMPANY_ID`, `SUMIT_MAIN_API_KEY`, `SUMIT_ALLOW_CHARGE`, `SUMIT_MAX_CHARGE`, `SUMIT_CONFIRM_SECRET` | shell env / launchd; see the repo's references/installation.md |
 | Cloudways hosted MCP | per-account server URL | provision from the Cloudways dashboard (URL embeds your token — never share or commit it) |
 
-## 5. Cloud environments (claude.ai/code) — connecting the tools
+## 5. Team members
 
-Cloud/phone sessions load each toolbox repo's committed `.mcp.json` from the clone.
+If you were added to the Digitizers GitHub org, your team lead will point you
+at one additional internal install step.
+
+## 6. Phone / web (claude.ai/code)
+
+The marketplace only reaches machines — cloud sessions never run plugin
+installs. What a cloud session *does* load is the skills of every repo listed
+as a **source** of its environment (cloned fresh from `main` on session start,
+so always current). One-time setup:
+
+1. claude.ai → Settings → Connectors → connect GitHub and grant it the
+   Digitizers repos you can read (separate from `gh auth login`).
+2. In Claude Code, open the environment picker → ⚙️ on your cloud environment
+   — create one first via "Add cloud environment…" if you don't have any.
+   Keep a single environment so there's one to maintain. Add the toolbox
+   repos as sources:
+
+   ```
+   Digitizers/agent-skills
+   Digitizers/cloudways-mcp
+   Digitizers/hostinger-mcp
+   Digitizers/aura-mcp
+   Digitizers/wordpress-api-pro
+   Digitizers/siteagent-elementor-studio
+   Digitizers/meta-ads-mcp
+   Digitizers/sumit-mcp
+   ```
+
+   …plus any internal repos from step 5.
+
+Every **new** phone/web session then opens with all toolbox skills loaded —
+open sessions don't refresh. This works because each repo commits a
+`.claude/skills/<name>` symlink alongside its plugin layout; keep that
+dual-path pattern in any new tool repo. To make the sessions actually
+**operate** the tools (not just know them), add the env vars in §7.
+
+## 7. Cloud environment variables — connecting the tools
+
+Skills make a cloud session *know* the tools; the connections themselves come up from
+env vars. Cloud/phone sessions load each toolbox repo's committed `.mcp.json` from the clone.
 Those files keep secrets as `${VAR:-}` env placeholders — the real values come from the
-cloud environment's **environment variables** (claude.ai/code → your environment → edit →
+cloud environment's **environment variables** (the §6 environment → edit →
 Environment variables). The `:-` defaults keep the configs valid when a variable is
 unset; that tool's connection then just shows as unavailable in `/mcp` (it can't
 authenticate) until you set the variable — harmless, so set only what you use. The one
@@ -59,7 +99,7 @@ means Claude Code refuses the config and the billing server never launches (fail
 
 | Tool | Env vars |
 |---|---|
-| cloudways-mcp | `CLOUDWAYS_ACCESS_TOKEN` (Access Token from platform.cloudways.com → API; minimum role that works). Connection name: `cloudways-env` — never shadows user-scope `cloudways-<client>` connections |
+| cloudways-mcp | `CLOUDWAYS_ACCESS_TOKEN` (Access Token from platform.cloudways.com → API; minimum role that works). Connection name: `cloudways-env` — avoids shadowing the documented user-scope names (`cloudways`, `cloudways-<client>`) |
 | hostinger-mcp | `HOSTINGER_API_TOKEN` (hPanel → API); optional `HOSTINGER_MCP_BINARY` to load one category binary (e.g. `hostinger-vps-mcp`) instead of all 127 tools |
 | aura-mcp | `AURA_MCP_TOKEN` (`aura_…` management token from Aura → Fleet → Agent Tokens) |
 | sumit-mcp | the `SUMIT_*` set from §4 |
@@ -74,14 +114,3 @@ Notes:
   npm registry (the Hostinger and Elementor connections launch via `npx`).
 - The same `.mcp.json` files work on devices too — export the vars in your shell and the
   connections come up without any `claude mcp add`.
-
-## 6. Team members
-
-If you were added to the Digitizers GitHub org, your team lead will point you
-at one additional internal install step.
-
-Phone/web (claude.ai) sessions need a one-time GitHub connection — separate
-from `gh auth login`: claude.ai → Settings → Connectors → connect GitHub and
-grant it the Digitizers repos you can read, then create a Claude Code web
-environment listing the repos you work in as sources. After that, repos carry
-the config.
