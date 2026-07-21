@@ -1,0 +1,9 @@
+[
+  { "query": "mock up a homepage concept for the dental clinic lead before the proposal call", "should_trigger": true },
+  { "query": "implement this design as a React component: https://www.figma.com/design/abc123/landing", "should_trigger": true },
+  { "query": "תכין מוקאפ של מסך הדשבורד החדש בפיגמה", "should_trigger": true },
+  { "query": "draw the onboarding flow as a diagram in FigJam", "should_trigger": true },
+  { "query": "design an Instagram carousel for the campaign from our brand kit", "should_trigger": false },
+  { "query": "generate an AI background image for the hero section", "should_trigger": false },
+  { "query": "build the landing page in Elementor on the staging site", "should_trigger": false }
+]
