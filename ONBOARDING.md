@@ -49,14 +49,17 @@ WSL need nothing.
 ## 5. Cloud environments (claude.ai/code) — connecting the tools
 
 Cloud/phone sessions load each toolbox repo's committed `.mcp.json` from the clone.
-Those files hold `${VAR}` placeholders only — the real values come from the cloud
-environment's **environment variables** (claude.ai/code → your environment → edit →
-Environment variables). A server whose variable is unset is skipped silently, so set
-only what you use:
+Those files keep secrets as `${VAR:-}` env placeholders — the real values come from the
+cloud environment's **environment variables** (claude.ai/code → your environment → edit →
+Environment variables). The `:-` defaults keep the configs valid when a variable is
+unset; that tool's connection then just shows as unavailable in `/mcp` (it can't
+authenticate) until you set the variable — harmless, so set only what you use. The one
+exception is sumit-mcp, whose required `SUMIT_*` placeholders are deliberately bare: unset
+means Claude Code refuses the config and the billing server never launches (fail closed).
 
 | Tool | Env vars |
 |---|---|
-| cloudways-mcp | `CLOUDWAYS_ACCESS_TOKEN` (Access Token from platform.cloudways.com → API; minimum role that works) |
+| cloudways-mcp | `CLOUDWAYS_ACCESS_TOKEN` (Access Token from platform.cloudways.com → API; minimum role that works). Connection name: `cloudways-env` — never shadows user-scope `cloudways-<client>` connections |
 | hostinger-mcp | `HOSTINGER_API_TOKEN` (hPanel → API); optional `HOSTINGER_MCP_BINARY` to load one category binary (e.g. `hostinger-vps-mcp`) instead of all 127 tools |
 | aura-mcp | `AURA_MCP_TOKEN` (`aura_…` management token from Aura → Fleet → Agent Tokens) |
 | sumit-mcp | the `SUMIT_*` set from §4 |
