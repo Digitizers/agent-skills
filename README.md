@@ -74,8 +74,11 @@ a source.
 
 A repo-level `.claude/settings.json` (this repo carries one) enables the
 toolbox plugins for **desktop** sessions opened inside that repo — handy in a
-work repo on a machine without the user-scope install. It has no effect on
-cloud sessions; environment sources are the only cloud mechanism.
+work repo on a machine without the user-scope install. Note that this repo's
+own file intentionally omits `agent-skills@digitizer-skills` (its skills
+already load from the repo itself); when copying the file into another repo,
+add that entry too or you'll get the tools without the workflow skills. It has
+no effect on cloud sessions; environment sources are the only cloud mechanism.
 
 ## Install — OpenClaw / plain symlinks (fallback)
 
