@@ -10,6 +10,7 @@ deletes directories, so its tests must never be able to reach a live install.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -110,6 +111,76 @@ with tempfile.TemporaryDirectory() as tmp:
     cache, manifest = build(root, tree={"m": {"p": ["1.0.0"]}}, installed={"p@m": "m/p/1.0.0"})
     check("a consistent manifest does not trip the guard",
           gc.assert_installs_present(manifest) == [], "expected no missing")
+
+# ── prune_empty must never reach inside a live install ──
+# Codex round-1 P1. The first version used cache.rglob("*"), which recursed into
+# live version dirs and deleted their empty subdirectories. Real installs have
+# them: git keeps .git/refs/tags and .git/objects/info empty, and two live plugins
+# on the machine this was written for had exactly those. The post-delete check
+# could not see the damage — it only verifies the version ROOT still exists.
+# The original fixtures missed this because every synthetic dir contained a file.
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    cache, manifest = build(root, tree={"m": {"live": ["1.0.0"]}},
+                            installed={"live@m": "m/live/1.0.0"})
+    version = cache / "m" / "live" / "1.0.0"
+    (version / ".git" / "refs" / "tags").mkdir(parents=True)      # legitimately empty
+    (version / ".git" / "objects" / "info").mkdir(parents=True)   # legitimately empty
+    (version / "assets").mkdir()                                  # legitimately empty
+
+    gc.prune_empty(cache)
+
+    check("prune_empty leaves empty git dirs inside a live install alone",
+          (version / ".git" / "refs" / "tags").is_dir()
+          and (version / ".git" / "objects" / "info").is_dir(),
+          "git internals were pruned from a live install")
+    check("prune_empty leaves other empty dirs inside a live install alone",
+          (version / "assets").is_dir())
+    check("prune_empty leaves the live version root intact", version.is_dir())
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    cache, manifest = build(root, tree={"m": {"p": ["1.0.0"]}, "dead": {"x": ["aaa"]}},
+                            installed={"p@m": "m/p/1.0.0"})
+    shutil.rmtree(cache / "dead" / "x" / "aaa")   # simulate the orphan already removed
+    gc.prune_empty(cache)
+    check("prune_empty does remove an emptied plugin container",
+          not (cache / "dead" / "x").exists())
+    check("prune_empty does remove an emptied marketplace container",
+          not (cache / "dead").exists())
+    check("prune_empty keeps a marketplace that still holds a live plugin",
+          (cache / "m" / "p" / "1.0.0").is_dir())
+
+# ── a failed deletion must not report success ──
+# Codex round-1 P2. ignore_errors=True swallowed permission/symlink/EBUSY failures,
+# then printed the pre-computed size as freed and returned 0 with orphans surviving.
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    cache, manifest = build(root, tree={"m": {"p": ["1.0.0", "2.0.0"]}},
+                            installed={"p@m": "m/p/2.0.0"})
+    live = gc.live_install_paths(manifest)
+    orphans = gc.orphan_dirs(cache, live)
+
+    def boom(*_a, **_k):
+        raise OSError(13, "Permission denied")
+
+    real_rmtree, shutil.rmtree = shutil.rmtree, boom
+    failures: list[str] = []
+    try:
+        for o in orphans:
+            try:
+                shutil.rmtree(o)
+            except OSError as e:
+                failures.append(str(e))
+    finally:
+        shutil.rmtree = real_rmtree
+
+    check("a failing rmtree surfaces instead of being swallowed",
+          len(failures) == 1, f"got {failures}")
+    check("the orphan survives a failed delete, so the final scan stays non-empty",
+          len(gc.orphan_dirs(cache, live)) == 1)
 
 # ── empty cache is a no-op, not a crash ──
 

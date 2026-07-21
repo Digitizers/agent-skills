@@ -57,7 +57,32 @@ unreachable. Special-casing the upper levels is what produced the miss.
 - **Post-delete:** re-reads the manifest and fails loudly if any installed
   plugin's directory disappeared. A sweep that damaged a live install must not
   exit 0.
-- Empty plugin/marketplace directories are pruned after their versions go.
+- **Deletion failures are never swallowed.** No `ignore_errors`: a permission
+  error, busy file, or symlink surfaces, and the tool exits non-zero rather than
+  printing reclaimed space it did not reclaim. It also exits non-zero if the
+  final scan still finds orphans, even when nothing raised.
+- **Container-only pruning.** Empty `<marketplace>/<plugin>` and `<marketplace>`
+  directories are removed after their versions go — but pruning never descends
+  into a version directory. See below.
+
+## Never prune inside a live install
+
+Live plugins legitimately contain empty directories. Git keeps `.git/refs/tags`
+and `.git/objects/info` empty, and two live installs on the machine this was
+written for had exactly those.
+
+The first implementation pruned with `cache.rglob("*")`, which walked into live
+version directories and deleted those empty git dirs — corrupting a working
+install's repository. The post-delete check could not see it: that only verifies
+the version *root* still exists, and it did.
+
+So pruning is restricted to the two container levels and never recurses. The
+regression test builds a live version containing `.git/refs/tags`,
+`.git/objects/info`, and an empty `assets/`, and asserts all three survive.
+
+The original fixtures missed this because every synthetic directory contained a
+file, so no empty directory ever existed inside a "live" install — the fixture
+was too clean to expose the bug.
 
 ## Tests
 

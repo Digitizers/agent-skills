@@ -102,11 +102,29 @@ def dir_size_mb(path: Path) -> float:
 
 
 def prune_empty(cache: Path) -> None:
-    """Drop plugin/marketplace dirs left empty once their versions are gone."""
-    for _ in range(2):  # plugin level, then marketplace level
-        for d in sorted(cache.rglob("*"), key=lambda p: -len(p.parts)):
-            if d.is_dir() and not any(d.iterdir()):
-                d.rmdir()
+    """Drop plugin/marketplace containers left empty once their versions are gone.
+
+    Only ever touches the two container levels — cache/<marketplace>/<plugin> and
+    cache/<marketplace>. It must NOT walk inside a version directory: live plugins
+    legitimately contain empty directories (git keeps `.git/refs/tags` and
+    `.git/objects/info` empty, and two live installs on the machine this was
+    written for had exactly those), and deleting them corrupts a working install.
+
+    An earlier version used `cache.rglob("*")`, which recursed into live versions
+    and would have removed those git internals — invisibly, because the
+    post-delete check only verifies the version root still exists.
+    """
+    if not cache.is_dir():
+        return
+    for marketplace in list(cache.iterdir()):          # plugin level
+        if not marketplace.is_dir():
+            continue
+        for plugin in list(marketplace.iterdir()):
+            if plugin.is_dir() and not any(plugin.iterdir()):
+                plugin.rmdir()
+    for marketplace in list(cache.iterdir()):          # marketplace level
+        if marketplace.is_dir() and not any(marketplace.iterdir()):
+            marketplace.rmdir()
 
 
 def main() -> int:
@@ -148,12 +166,24 @@ def main() -> int:
         print(f"\n  {total:.0f}MB reclaimable. Re-run with --delete to remove.\n")
         return 0
 
+    # No ignore_errors: a delete that fails on permissions, a busy file, or a
+    # symlink must not be swallowed and then reported as reclaimed space.
+    failures: list[str] = []
     for o in orphans:
-        shutil.rmtree(o, ignore_errors=True)
+        try:
+            shutil.rmtree(o)
+        except OSError as e:
+            failures.append(f"{o.relative_to(CACHE_DIR)}: {e}")
     prune_empty(CACHE_DIR)
 
     # Re-read: the delete must not have touched anything still installed.
     still_missing = assert_installs_present(MANIFEST)
+    remaining = orphan_dirs(CACHE_DIR, live)
+    freed = total - sum(dir_size_mb(o) for o in remaining if o.exists())
+
+    print(f"\n  freed {freed:.0f}MB · {len(live) - len(set(still_missing))}/{len(live)} "
+          f"plugins intact · {len(remaining)} orphans left")
+
     if still_missing:
         print("\n  ERROR: an installed plugin's directory is gone after pruning:",
               file=sys.stderr)
@@ -161,9 +191,22 @@ def main() -> int:
             print(f"    {m}", file=sys.stderr)
         return 1
 
-    remaining = orphan_dirs(CACHE_DIR, live)
-    print(f"\n  freed {total:.0f}MB · {len(live)}/{len(live)} plugins intact · "
-          f"{len(remaining)} orphans left\n")
+    if failures:
+        print(f"\n  ERROR: {len(failures)} orphan(s) could not be removed:", file=sys.stderr)
+        for f in failures:
+            print(f"    {f}", file=sys.stderr)
+        return 1
+
+    if remaining:
+        # Nothing raised, yet orphans survive — report it rather than exit 0 on a
+        # cleanup that silently did not finish.
+        print(f"\n  ERROR: {len(remaining)} orphan(s) still present after deletion:",
+              file=sys.stderr)
+        for r in remaining:
+            print(f"    {r.relative_to(CACHE_DIR)}", file=sys.stderr)
+        return 1
+
+    print()
     return 0
 
 
