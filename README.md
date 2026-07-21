@@ -70,7 +70,10 @@ on session start (this repo's skills load via `.claude/skills/`, committed
 relative symlinks into `skills/`, so the plugin layout stays the single source
 of truth). Do the one-time environment setup in
 [`ONBOARDING.md`](ONBOARDING.md) §6, which lists every toolbox repo to add as
-a source.
+a source. The **tool connections** (Cloudways, Hostinger, Aura, SUMIT,
+Elementor) ride the same clones: each tool repo commits a placeholder-only
+`.mcp.json`, and the tokens are injected as env vars in the cloud
+environment's configuration — ONBOARDING §7 has the variable list.
 
 A repo-level `.claude/settings.json` (this repo carries one) enables the
 toolbox plugins for **desktop** sessions opened inside that repo — handy in a

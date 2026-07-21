@@ -82,4 +82,35 @@ so always current). One-time setup:
 Every **new** phone/web session then opens with all toolbox skills loaded —
 open sessions don't refresh. This works because each repo commits a
 `.claude/skills/<name>` symlink alongside its plugin layout; keep that
-dual-path pattern in any new tool repo.
+dual-path pattern in any new tool repo. To make the sessions actually
+**operate** the tools (not just know them), add the env vars in §7.
+
+## 7. Cloud environment variables — connecting the tools
+
+Skills make a cloud session *know* the tools; the connections themselves come up from
+env vars. Cloud/phone sessions load each toolbox repo's committed `.mcp.json` from the clone.
+Those files keep secrets as `${VAR:-}` env placeholders — the real values come from the
+cloud environment's **environment variables** (the §6 environment → edit →
+Environment variables). The `:-` defaults keep the configs valid when a variable is
+unset; that tool's connection then just shows as unavailable in `/mcp` (it can't
+authenticate) until you set the variable — harmless, so set only what you use. The one
+exception is sumit-mcp, whose required `SUMIT_*` placeholders are deliberately bare: unset
+means Claude Code refuses the config and the billing server never launches (fail closed).
+
+| Tool | Env vars |
+|---|---|
+| cloudways-mcp | `CLOUDWAYS_ACCESS_TOKEN` (Access Token from platform.cloudways.com → API; minimum role that works). Connection name: `cloudways-env` — avoids shadowing the documented user-scope names (`cloudways`, `cloudways-<client>`) |
+| hostinger-mcp | `HOSTINGER_API_TOKEN` (hPanel → API); optional `HOSTINGER_MCP_BINARY` to load one category binary (e.g. `hostinger-vps-mcp`) instead of all 127 tools |
+| aura-mcp | `AURA_MCP_TOKEN` (`aura_…` management token from Aura → Fleet → Agent Tokens) |
+| sumit-mcp | the `SUMIT_*` set from §4 |
+| siteagent-elementor-studio (Elementor MCP) | `WP_URL`, `WP_USERNAME`, `WP_APP_PASSWORD` — same trio wordpress-api-pro reads, so one environment targets one client site with both toolkits |
+
+Notes:
+
+- **Environment variables are visible to anyone who can edit the environment** (there is
+  no dedicated secrets store yet) — use minimum-role, revocable tokens, one per purpose.
+- Restricted network policies must allow the tool endpoints: `mcp.cloudways.com`,
+  `app.my-aura.app`, `api.hostinger.com`, `api.sumit.co.il`, your WordPress site, and the
+  npm registry (the Hostinger and Elementor connections launch via `npx`).
+- The same `.mcp.json` files work on devices too — export the vars in your shell and the
+  connections come up without any `claude mcp add`.
