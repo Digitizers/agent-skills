@@ -12,7 +12,7 @@ Claude develops, Codex reviews, Claude fixes — **in a loop** — the human rev
 
 1. Build on a branch → tests green → open PR.
 2. Trigger: `gh pr comment <PR> -R <owner>/<repo> --body "@codex review"`.
-3. Pull findings from **all three surfaces** (see REFERENCE). **Verify each against HEAD** — Codex re-posts stale + false-positive findings every round.
+3. Pull findings from **all three surfaces** (see REFERENCE) — and from **every reviewer bot on the PR, not just Codex** (Copilot and friends post to the same surfaces; see "Other reviewer bots"). **Verify each against HEAD** — Codex re-posts stale + false-positive findings every round.
 4. Fix the **real** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed).
 5. Re-trigger and repeat 2–4 until Codex says **"Didn't find any major issues"** *against the current HEAD*.
 6. **Human reviews once**, at the end. Never auto-merge a substantial PR without a nod.
@@ -74,6 +74,25 @@ The reviewer is not an oracle — three failure modes will mislead the loop if y
 
 - **Codex contradicts its own earlier verdict (flip-flop).** It can flag a value one round, and the *next* round flag the fix you just made — sometimes reversing itself outright (e.g. "change 1 → 5", then "change 5 → 1"). **A reversal is not automatically correct.** Re-verify against the code at HEAD, not Codex's newest claim; if the current value is what the code actually enforces, it's a false positive — 👎 with a one-line rationale and hold. Do **not** ping-pong the value to appease successive reviews.
 - **Transient errors are not verdicts.** `Codex Review: Something went wrong. Try again later…` (and similar) means the review **didn't run** — it is neither "clean" nor a finding. Re-trigger with `@codex review`; never count it toward convergence, and don't conclude Codex is down after one. Your convergence match must require the actual clean-verdict text, so a transient message can't be mistaken for either outcome.
+
+## Other reviewer bots (Copilot etc.) — sweep them, don't gate on them
+
+A repo often has more than one reviewer bot. **Filter your polls by nothing narrower than "every bot that commented"** — enumerate the distinct `user.login` values on the PR's comment surfaces and triage each bot's live findings. Observed: a poll filtered to `codex|chatgpt` silently ignored **24 live Copilot comments** across a 19-round loop, including one that refuted a convergence argument the fixes relied on; several (a stderr-corrupts-JSON class, a doctrine hole) would have saved whole rounds had they been read when posted.
+
+Division of roles:
+
+- **Codex is the only convergence gate.** Its explicit clean verdict at HEAD ends the loop — nothing else does.
+- **Copilot (and similar) are findings sources, never gates.** They emit no clean-verdict signal — silence is indistinguishable from "hasn't reviewed" — so they cannot prove convergence. But every live finding of theirs must be triaged (fix / 👍 / 👎-with-rationale) **before merge**, same as a Codex finding. Add their triage to the convergence checklist, not to the convergence definition.
+
+## Design the evidence model before the code (distributed-state work)
+
+When the change orchestrates **distributed state** — an external registry with no state query, suppressed webhook/event delivery, cancellations, re-runs — the review loop will grind through every hole in an improvised design one round at a time. Observed: a release-pipeline PR spent ~8 of 19 rounds retrofitting what an upfront hour would have specified. Before writing such code, write down:
+
+- **What durable artifact proves each state?** ("a release exists" proved nothing; a marker written only after the irreversible step did.)
+- **Which evidence classes may trigger an irreversible action?** Deterministic proof only; a failed command is *not* proof the remote didn't commit (two-generals).
+- **What does ambiguity do?** Always preserve, never delete; sticky across retries — a later guard-failure never launders an earlier ambiguous attempt.
+
+And the escalation trigger, sharpened from "Fix the RULE" above: **the moment you notice a second round patching the same invariant, stop and ask whether the *proof mechanism* is wrong — and put the redesign decision to the human by round 3–4, not round 7.** Patching an unsound invariant converges slowly or never; replacing it converges in one commit.
 
 ## Polling cadence
 

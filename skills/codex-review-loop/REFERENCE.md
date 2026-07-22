@@ -7,6 +7,22 @@ explicitly in every git/gh command if you rely on the working directory.
 Codex's bot login matches `codex|chatgpt` — the filters below select its
 comments regardless of the exact bot handle.
 
+**Codex is not the only bot on the PR.** Once per loop (and again before
+merge), enumerate every reviewer login and sweep the other bots' live
+findings too — a `codex|chatgpt`-only poll has silently missed dozens of live
+Copilot comments:
+
+```bash
+# Who has commented at all (any surface)?
+gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments --jq '[.[].user.login] | unique'
+
+# Live findings from every OTHER bot (triage before merge; they never gate
+# convergence — Copilot has no clean-verdict signal, silence proves nothing):
+gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
+  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) | select((.line//null)!=null) |
+    "id="+(.id|tostring)+" by="+.user.login+" raised_at="+(.original_commit_id[0:8])+" ["+.path+":"+((.line)|tostring)+"] "+(.body[0:200])'
+```
+
 ---
 
 ## 1. Trigger a review
@@ -206,6 +222,7 @@ A round isn't done until CI is green AND Codex is clean on that HEAD.
 
 - [ ] Codex's **latest** review commit == PR **HEAD**.
 - [ ] Zero open inline findings (all `line:null`/re-anchored/verified-FP) at P0/P1/P2.
+- [ ] **Every OTHER reviewer bot's live findings triaged** (fixed / 👍 / 👎-with-rationale) — they don't gate convergence, but merging over an untriaged one ships it unexamined.
 - [ ] CI green on HEAD.
 - [ ] Any owner-decision findings escalated to the human, not guessed.
 - [ ] → human review (once, at the end of the batch — not per round).
