@@ -7,6 +7,43 @@ explicitly in every git/gh command if you rely on the working directory.
 Codex's bot login matches `codex|chatgpt` — the filters below select its
 comments regardless of the exact bot handle.
 
+**Codex is not the only bot on the PR.** Once per loop (and again before
+merge), enumerate every reviewer login and sweep the other bots' live
+findings too — a `codex|chatgpt`-only poll has silently missed dozens of live
+Copilot comments:
+
+```bash
+# Who has commented at all — across ALL THREE surfaces? A bot that posts only
+# a review body or a top-level issue comment is invisible to pulls/N/comments.
+{ gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments  --jq '.[].user.login';
+  gh api --paginate repos/<owner>/<repo>/pulls/<PR>/reviews   --jq '.[].user.login';
+  gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments --jq '.[].user.login'; } | sort -u
+
+# Live INLINE + FILE-LEVEL findings from every OTHER bot (triage before merge;
+# they never gate convergence — Copilot has no clean-verdict signal, silence
+# proves nothing). line:null only marks a LINE comment as outdated; a
+# file-level comment (subject_type == "file") has no line by design and is
+# live. Bodies printed in full — a truncated finding reads as "nothing here".
+gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
+  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) | select(((.line//null)!=null) or (.subject_type=="file")) |
+    "==== id="+(.id|tostring)+" by="+.user.login+" raised_at="+(.original_commit_id[0:8])+" ["+.path+":"+((.line // "file")|tostring)+"] ====\n"+(.body // "")'
+
+# ...and their ISSUE-COMMENT findings (some bots put whole reviews here) — full
+# bodies with an id line and a separator, so multi-line bodies stay attributable
+# and reactable (react via: gh api -X POST .../issues/comments/<id>/reactions):
+gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments \
+  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) |
+    "==== id="+(.id|tostring)+" by="+.user.login+" at="+.created_at+" ====\n"+(.body // "")'
+
+# Review BODIES from other bots (usually wrappers, occasionally substantive) —
+# same bot filter as above, so human reviews keep their separate semantics;
+# body can be null on approvals/wrappers, hence the // "" and the emptiness
+# test on the coerced value:
+gh api --paginate repos/<owner>/<repo>/pulls/<PR>/reviews \
+  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) | select((.body // "") != "") |
+    "==== review by="+.user.login+" commit="+(.commit_id[0:8])+" ====\n"+(.body // "")'
+```
+
 ---
 
 ## 1. Trigger a review
@@ -206,6 +243,7 @@ A round isn't done until CI is green AND Codex is clean on that HEAD.
 
 - [ ] Codex's **latest** review commit == PR **HEAD**.
 - [ ] Zero open inline findings (all `line:null`/re-anchored/verified-FP) at P0/P1/P2.
+- [ ] **Every OTHER reviewer bot's live findings triaged** (fixed / 👍 / 👎-with-rationale) — they don't gate convergence, but merging over an untriaged one ships it unexamined.
 - [ ] CI green on HEAD.
 - [ ] Any owner-decision findings escalated to the human, not guessed.
 - [ ] → human review (once, at the end of the batch — not per round).
