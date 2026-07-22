@@ -26,19 +26,22 @@ Copilot comments:
 # live. Bodies printed in full — a truncated finding reads as "nothing here".
 gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
   --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) | select(((.line//null)!=null) or (.subject_type=="file")) |
-    "id="+(.id|tostring)+" by="+.user.login+" raised_at="+(.original_commit_id[0:8])+" ["+.path+":"+((.line // "file")|tostring)+"] "+.body'
+    "==== id="+(.id|tostring)+" by="+.user.login+" raised_at="+(.original_commit_id[0:8])+" ["+.path+":"+((.line // "file")|tostring)+"] ====\n"+(.body // "")'
 
 # ...and their ISSUE-COMMENT findings (some bots put whole reviews here) — full
-# bodies, same reason:
+# bodies with an id line and a separator, so multi-line bodies stay attributable
+# and reactable (react via: gh api -X POST .../issues/comments/<id>/reactions):
 gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments \
   --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) |
-    "by="+.user.login+" at="+.created_at+" :: "+.body'
+    "==== id="+(.id|tostring)+" by="+.user.login+" at="+.created_at+" ====\n"+(.body // "")'
 
 # Review BODIES from other bots (usually wrappers, occasionally substantive) —
-# same bot filter as above, so human reviews keep their separate semantics:
+# same bot filter as above, so human reviews keep their separate semantics;
+# body can be null on approvals/wrappers, hence the // "" and the emptiness
+# test on the coerced value:
 gh api --paginate repos/<owner>/<repo>/pulls/<PR>/reviews \
-  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) | select(.body != "") |
-    "by="+.user.login+" commit="+(.commit_id[0:8])+" :: "+.body'
+  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) | select((.body // "") != "") |
+    "==== review by="+.user.login+" commit="+(.commit_id[0:8])+" ====\n"+(.body // "")'
 ```
 
 ---
