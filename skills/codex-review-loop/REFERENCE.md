@@ -13,14 +13,27 @@ findings too — a `codex|chatgpt`-only poll has silently missed dozens of live
 Copilot comments:
 
 ```bash
-# Who has commented at all (any surface)?
-gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments --jq '[.[].user.login] | unique'
+# Who has commented at all — across ALL THREE surfaces? A bot that posts only
+# a review body or a top-level issue comment is invisible to pulls/N/comments.
+{ gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments  --jq '.[].user.login';
+  gh api --paginate repos/<owner>/<repo>/pulls/<PR>/reviews   --jq '.[].user.login';
+  gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments --jq '.[].user.login'; } | sort -u
 
-# Live findings from every OTHER bot (triage before merge; they never gate
-# convergence — Copilot has no clean-verdict signal, silence proves nothing):
+# Live INLINE findings from every OTHER bot (triage before merge; they never
+# gate convergence — Copilot has no clean-verdict signal, silence proves nothing):
 gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
   --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) | select((.line//null)!=null) |
     "id="+(.id|tostring)+" by="+.user.login+" raised_at="+(.original_commit_id[0:8])+" ["+.path+":"+((.line)|tostring)+"] "+(.body[0:200])'
+
+# ...and their ISSUE-COMMENT findings (some bots put whole reviews here):
+gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments \
+  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) |
+    "by="+.user.login+" at="+.created_at+" :: "+(.body[0:200])'
+
+# Review BODIES from other bots (usually wrappers, occasionally substantive):
+gh api --paginate repos/<owner>/<repo>/pulls/<PR>/reviews \
+  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.body != "") |
+    "by="+.user.login+" commit="+(.commit_id[0:8])+" :: "+(.body[0:200])'
 ```
 
 ---
