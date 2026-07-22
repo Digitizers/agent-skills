@@ -19,21 +19,26 @@ Copilot comments:
   gh api --paginate repos/<owner>/<repo>/pulls/<PR>/reviews   --jq '.[].user.login';
   gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments --jq '.[].user.login'; } | sort -u
 
-# Live INLINE findings from every OTHER bot (triage before merge; they never
-# gate convergence — Copilot has no clean-verdict signal, silence proves nothing):
+# Live INLINE + FILE-LEVEL findings from every OTHER bot (triage before merge;
+# they never gate convergence — Copilot has no clean-verdict signal, silence
+# proves nothing). line:null only marks a LINE comment as outdated; a
+# file-level comment (subject_type == "file") has no line by design and is
+# live. Bodies printed in full — a truncated finding reads as "nothing here".
 gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
-  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) | select((.line//null)!=null) |
-    "id="+(.id|tostring)+" by="+.user.login+" raised_at="+(.original_commit_id[0:8])+" ["+.path+":"+((.line)|tostring)+"] "+(.body[0:200])'
+  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) | select(((.line//null)!=null) or (.subject_type=="file")) |
+    "id="+(.id|tostring)+" by="+.user.login+" raised_at="+(.original_commit_id[0:8])+" ["+.path+":"+((.line // "file")|tostring)+"] "+.body'
 
-# ...and their ISSUE-COMMENT findings (some bots put whole reviews here):
+# ...and their ISSUE-COMMENT findings (some bots put whole reviews here) — full
+# bodies, same reason:
 gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments \
   --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) |
-    "by="+.user.login+" at="+.created_at+" :: "+(.body[0:200])'
+    "by="+.user.login+" at="+.created_at+" :: "+.body'
 
-# Review BODIES from other bots (usually wrappers, occasionally substantive):
+# Review BODIES from other bots (usually wrappers, occasionally substantive) —
+# same bot filter as above, so human reviews keep their separate semantics:
 gh api --paginate repos/<owner>/<repo>/pulls/<PR>/reviews \
-  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.body != "") |
-    "by="+.user.login+" commit="+(.commit_id[0:8])+" :: "+(.body[0:200])'
+  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) | select(.body != "") |
+    "by="+.user.login+" commit="+(.commit_id[0:8])+" :: "+.body'
 ```
 
 ---
