@@ -44,18 +44,41 @@ The reason it slips past step 5 is that it splits two things a single read confl
 Verify both, separately:
 
 1. **The change is really in the catalog.** Introspect for the specific thing you altered, don't infer it from "the tool returned success" — e.g. `select pg_get_functiondef(oid) ...`, `pg_class.relrowsecurity`, `pg_indexes`.
-2. **The ledger's tail matches the repo's filenames.** Normalize both sides first — they disagree on *two* axes even when the ledger is perfectly healthy. The ledger splits `version` and `name` into columns while the repo carries them as one filename plus a `.sql` suffix, and the default orders are opposite (`order by … desc` is newest-first; `ls | tail` is oldest-first). Make each side emit the same string:
+2. **The row you just wrote carries the version you intended.** Query it **by name** — the identity you control — and compare against the version in your filename:
 
    ```sql
-   select version || '_' || name from <ledger> order by version desc limit 5;
-   ```
-   ```bash
-   ls migrations/*.sql | sed 's|.*/||; s|\.sql$||' | sort -r | head -5
+   select version from <ledger> where name = '<the migration you just applied>';
    ```
 
-   Now a line-for-line difference means drift and nothing else. Comparing the raw forms instead is worse than not checking: it reports drift on a healthy ledger, and the remedy this section prescribes is a **production `UPDATE`** — so a false positive here writes to prod for no reason (Codex P1 + Copilot on #22).
+   Do **not** check this by comparing the newest N of each side. A stamped version can sort *below* migrations already present (the wall clock is behind your filename's timestamp), so the drifted row and its repo file can both fall outside their respective windows — the two tails then match and the check passes on a drifted ledger. Any positional window has this hole; keying on the name does not.
 
-Fix drift immediately with an `UPDATE` on the ledger's version — it is a label, and the catalog is already correct, so nothing needs re-running. Leaving it costs more than it looks: nothing reads the ledger until someone runs a schema diff or a `db push`, and *that* person sees one orphan version and one apparently-unapplied file, with no way to tell whether the DDL ran. A recorded version that sorts *before* migrations applied earlier makes that read even worse.
+For a whole-ledger reconciliation, diff the complete **sets**, never tails. Order stops mattering once nothing is truncated:
+
+```bash
+diff <(psql -Atc "select version || '_' || name from <ledger> order by 1") \
+     <(ls migrations/*.sql | sed 's|.*/||; s|\.sql$||' | sort)
+```
+
+### Before you `UPDATE` the ledger, prove it is only a label
+
+A version mismatch has several causes and **only one of them is fixed by relabelling.** The catalog check proves a schema object exists; it does *not* establish which ledger row corresponds to which file. Rewriting a version on a wrong assumption marks unrelated DDL as applied and corrupts every future diff and push — a worse state than the drift, and harder to see.
+
+| The mismatch means | Correct action |
+|---|---|
+| Same migration, wrong version label (name matches, its DDL is in the catalog) | Relabel — below |
+| A repo file genuinely never applied | Apply it. **Never** relabel to hide it |
+| Ledger rows from another branch or environment | Reconcile the branches; not a local fix |
+| The migration was renamed | Fix the name, and decide which side is authoritative first |
+
+Only in the first row, and only after confirming the name matches *and* its DDL is present in the catalog, relabel. The **"least blast radius" rule applies in full** — it is easy to skip here precisely because the change feels clerical:
+
+```sql
+update <ledger> set version = '<version from the repo filename>'
+ where version = '<the stamped version>' and name = '<migration name>';
+-- expect exactly: UPDATE 1
+```
+
+Nothing needs re-running: the catalog is already correct, and the label is all that moves. Leaving drift costs more than it looks — nothing reads the ledger until someone runs a schema diff or a `db push`, and *that* person sees one orphan version beside one apparently-unapplied file, with no way to tell whether the DDL ran.
 
 ## Enforce schema invariants in CI, not by memory
 
