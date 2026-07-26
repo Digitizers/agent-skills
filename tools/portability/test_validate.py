@@ -83,6 +83,30 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("reference" in error for error in errors), errors)
 
+    def test_validates_reference_style_links(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "[Reference][details]\n\n[details]: MISSING.md\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(any("does not resolve" in error for error in errors))
+
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "[Reference][details]\n\n[details]: REFERENCE.md\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("reference" in error for error in errors), errors)
+
     def test_rejects_skill_directory_without_skill_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -104,6 +128,19 @@ class PortabilityValidationTests(unittest.TestCase):
                 repo, visibility="private", require_cloud_links=True
             )
             self.assertTrue(any("expected symlink target" in error for error in errors))
+
+    def test_rejects_extra_cloud_skill_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            links = repo / ".claude" / "skills"
+            links.mkdir(parents=True)
+            (links / "widget").symlink_to("../../skills/widget")
+            (links / "removed-skill").mkdir()
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=True
+            )
+            self.assertTrue(any("noncanonical cloud skill entry" in error for error in errors))
 
     def test_rejects_malformed_trigger_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -147,6 +184,26 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(any("LICENSE" in error and "absolute path" in error for error in errors))
             self.assertTrue(any(".env.local" in error and "environment file" in error for error in errors))
+
+    def test_public_boundary_allows_placeholder_env_templates_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            template = repo / ".env.example"
+            template.write_text(
+                "API_TOKEN=<replace-me>\nAPI_URL=${API_URL}\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertFalse(any(".env.example" in error for error in errors), errors)
+
+            template.write_text("API_TOKEN=real-looking-value\n", encoding="utf-8")
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("non-placeholder env value" in error for error in errors))
 
     def test_public_boundary_rejects_windows_home_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
