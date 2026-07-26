@@ -22,7 +22,6 @@ except ImportError:
 
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-LINK_START_RE = re.compile(r"!?\[[^\]]*\]\(")
 REFERENCE_USE_RE = re.compile(r"!?\[([^\]]+)\]\[([^\]]*)\]")
 REFERENCE_DEF_RE = re.compile(
     r"^[ \t]{0,3}\[([^\]]+)\]:[ \t]*(.+)$",
