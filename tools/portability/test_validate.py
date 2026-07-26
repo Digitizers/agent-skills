@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -206,7 +207,8 @@ class PortabilityValidationTests(unittest.TestCase):
             (skill / "SKILL.md").write_text(
                 "---\nname: widget\ndescription: Fine.\n---\n\n"
                 "`[inline](not-real.md)`\n\n"
-                "```markdown\n[example](also-not-real.md)\n```\n",
+                "```markdown\n[example](also-not-real.md)\n```\n\n"
+                "    [indented](also-not-real.md)\n",
                 encoding="utf-8",
             )
             errors = VALIDATOR.validate_repo(
@@ -254,6 +256,7 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(any("missing SKILL.md" in error for error in errors))
 
+    @unittest.skipUnless(shutil.which("git"), "git binary is required for this test")
     def test_git_repo_ignores_untracked_skill_directories(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -373,6 +376,30 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(any("absolute path" in error for error in errors), errors)
 
+    def test_public_boundary_rejects_credential_values_in_config_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / ".mcp.json").write_text(
+                '{"API_TOKEN": "sk-live-secret-value"}\n',
+                encoding="utf-8",
+            )
+            (repo / "config.yml").write_text(
+                "client_secret: <replace-me>\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(
+                any(".mcp.json" in error and "credential value" in error for error in errors),
+                errors,
+            )
+            self.assertFalse(
+                any("config.yml" in error and "credential value" in error for error in errors),
+                errors,
+            )
+
     def test_public_boundary_scans_suffixless_files_and_rejects_env_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -399,6 +426,7 @@ class PortabilityValidationTests(unittest.TestCase):
             self.assertTrue(any(".envrc" in error for error in errors))
             self.assertTrue(any("prod.env" in error for error in errors))
 
+    @unittest.skipUnless(shutil.which("git"), "git binary is required for this test")
     def test_public_boundary_ignores_untracked_local_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -507,6 +535,20 @@ class PortabilityValidationTests(unittest.TestCase):
                 repo, visibility="public", require_cloud_links=False
             )
             self.assertTrue(any("symlink target escapes" in error for error in errors))
+
+    def test_git_tracked_paths_decodes_filesystem_bytes(self) -> None:
+        original_run = VALIDATOR.subprocess.run
+
+        class Result:
+            stdout = b"skills/\xff/SKILL.md\0"
+
+        try:
+            VALIDATOR.subprocess.run = lambda *args, **kwargs: Result()
+            paths = VALIDATOR.git_tracked_paths(Path("/repo"))
+        finally:
+            VALIDATOR.subprocess.run = original_run
+
+        self.assertEqual([Path("/repo") / "skills" / "\udcff" / "SKILL.md"], paths)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,17 @@ ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 FENCED_CODE_START_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1")
 ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
+TEXT_CREDENTIAL_SUFFIXES = (".json", ".md", ".toml", ".yaml", ".yml")
+CREDENTIAL_NAME_RE = re.compile(
+    r"(?i)(?:api[_-]?key|token|secret|password|credential|database[_-]?url|access[_-]?key|client[_-]?secret)"
+)
+CREDENTIAL_ASSIGNMENT_RE = re.compile(
+    r"""(?ix)
+    (?P<name>["']?[A-Za-z_][A-Za-z0-9_.-]*["']?)
+    \s*(?:=|:)\s*
+    (?P<value>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,}\]]+)
+    """
+)
 PRIVATE_MARKERS = (
     "Digitizers/" + "marketing-skills",
     "Digitizers/" + "digitizer-os",
@@ -66,6 +77,19 @@ def contains_machine_specific_path(text: str) -> bool:
         POSIX_HOME_RE.search(text)
         or WINDOWS_HOME_RE.search(text)
         or LOCAL_ABSOLUTE_RE.search(text)
+    )
+
+
+def is_placeholder_value(value: str) -> bool:
+    value = value.strip().strip("\"'")
+    folded = value.casefold()
+    return (
+        not value
+        or value == "..."
+        or re.fullmatch(r"\$\{[A-Z][A-Z0-9_]*\}", value) is not None
+        or re.fullmatch(r"<[^>\r\n]+>", value) is not None
+        or folded in {"changeme", "example", "placeholder", "redacted", "replace_me", "xxx"}
+        or folded.startswith(("your-", "your_"))
     )
 
 
@@ -206,6 +230,27 @@ def strip_fenced_code(text: str) -> str:
     return "".join(kept)
 
 
+def strip_indented_code(text: str) -> str:
+    kept: list[str] = []
+    for line in text.splitlines(keepends=True):
+        content = line.rstrip("\r\n")
+        if content.startswith(("    ", "\t")):
+            kept.append("\n" if line.endswith("\n") else "")
+        else:
+            kept.append(line)
+    return "".join(kept)
+
+
+def credential_scan_text(path: Path, text: str) -> str | None:
+    if path.suffix not in TEXT_CREDENTIAL_SUFFIXES:
+        return None
+    if path.suffix == ".md":
+        text = strip_fenced_code(text)
+        text = strip_indented_code(text)
+        text = INLINE_CODE_RE.sub("", text)
+    return text
+
+
 def validate_one_link(
     repo: Path, path: Path, raw: str, errors: list[str]
 ) -> None:
@@ -248,6 +293,7 @@ def validate_one_link(
 def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
     text = path.read_text(encoding="utf-8")
     text = strip_fenced_code(text)
+    text = strip_indented_code(text)
     text = INLINE_CODE_RE.sub("", text)
     for raw in inline_link_targets(text):
         raw = raw.strip()
@@ -321,7 +367,7 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
             fail(errors, relative, f"private identifier exposed: {marker}")
         if path.is_symlink():
             target = path.readlink()
-            target_text = target.as_posix()
+            target_text = "\n".join((target.as_posix(), str(target)))
             resolved = (path.parent / target).resolve()
             escapes_repo = False
             try:
@@ -370,17 +416,21 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
                 name, value = stripped.split("=", 1)
                 if not ENV_NAME_RE.fullmatch(name):
                     fail(errors, relative, f"invalid env name on line {number}")
-                placeholder = value.strip()
-                allowed_placeholder = (
-                    not placeholder
-                    or re.fullmatch(r"\$\{[A-Z][A-Z0-9_]*\}", placeholder)
-                    or re.fullmatch(r"<[^>\r\n]+>", placeholder)
-                    or placeholder.casefold()
-                    in {"changeme", "example", "placeholder", "replace_me", "xxx"}
-                    or placeholder.casefold().startswith(("your-", "your_"))
-                )
-                if not allowed_placeholder:
+                if not is_placeholder_value(value):
                     fail(errors, relative, f"non-placeholder env value on line {number}")
+        credential_text = credential_scan_text(relative, text)
+        if credential_text is not None:
+            for number, line in enumerate(credential_text.splitlines(), 1):
+                for match in CREDENTIAL_ASSIGNMENT_RE.finditer(line):
+                    name = match.group("name").strip("\"'")
+                    if CREDENTIAL_NAME_RE.search(name) and not is_placeholder_value(
+                        match.group("value")
+                    ):
+                        fail(
+                            errors,
+                            relative,
+                            f"credential value is not a placeholder on line {number}",
+                        )
         marker = contains_private_marker(text)
         if marker is not None:
             fail(errors, relative, f"private identifier exposed: {marker}")
@@ -399,7 +449,7 @@ def git_tracked_paths(repo: Path) -> list[Path] | None:
     except (FileNotFoundError, subprocess.CalledProcessError):
         return None
     return sorted(
-        repo / item.decode("utf-8")
+        repo / os.fsdecode(item)
         for item in result.stdout.split(b"\0")
         if item
     )
