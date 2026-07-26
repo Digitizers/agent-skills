@@ -224,6 +224,27 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(any("missing SKILL.md" in error for error in errors))
 
+    def test_git_repo_ignores_untracked_skill_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+            subprocess.run(["git", "add", "skills/widget"], cwd=repo, check=True)
+
+            unfinished = repo / "skills" / "unfinished"
+            unfinished.mkdir()
+            (unfinished / "README.md").write_text("# Local draft\n", encoding="utf-8")
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("missing SKILL.md" in error for error in errors), errors)
+
+            subprocess.run(["git", "add", "skills/unfinished"], cwd=repo, check=True)
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(any("missing SKILL.md" in error for error in errors), errors)
+
     def test_rejects_absolute_or_wrong_cloud_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

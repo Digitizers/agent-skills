@@ -360,7 +360,7 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
             fail(errors, relative, "machine-specific absolute path exposed")
 
 
-def public_boundary_paths(repo: Path) -> list[Path]:
+def git_tracked_paths(repo: Path) -> list[Path] | None:
     try:
         result = subprocess.run(
             ["git", "-C", str(repo), "ls-files", "-z"],
@@ -369,13 +369,19 @@ def public_boundary_paths(repo: Path) -> list[Path]:
             text=False,
         )
     except (FileNotFoundError, subprocess.CalledProcessError):
-        return fallback_public_boundary_paths(repo)
-    tracked = [
+        return None
+    return sorted(
         repo / item.decode("utf-8")
         for item in result.stdout.split(b"\0")
         if item
-    ]
-    return sorted(tracked)
+    )
+
+
+def public_boundary_paths(repo: Path) -> list[Path]:
+    tracked = git_tracked_paths(repo)
+    if tracked is not None:
+        return tracked
+    return fallback_public_boundary_paths(repo)
 
 
 def fallback_public_boundary_paths(repo: Path) -> list[Path]:
@@ -387,19 +393,28 @@ def fallback_public_boundary_paths(repo: Path) -> list[Path]:
     return sorted(paths)
 
 
+def skill_directories(repo: Path, skills_root: Path) -> list[Path]:
+    if not skills_root.is_dir():
+        return []
+    tracked = git_tracked_paths(repo)
+    if tracked is None:
+        return sorted(path for path in skills_root.iterdir() if path.is_dir())
+    directories: set[Path] = set()
+    for path in tracked:
+        relative = path.relative_to(repo)
+        if len(relative.parts) >= 2 and relative.parts[0] == "skills":
+            directories.add(repo / "skills" / relative.parts[1])
+    return sorted(path for path in directories if path.is_dir())
+
+
 def validate_repo(
     repo: Path, *, visibility: str, require_cloud_links: bool
 ) -> list[str]:
     repo = repo.resolve()
     errors: list[str] = []
     skills_root = repo / "skills"
-    skill_directories = (
-        sorted(path for path in skills_root.iterdir() if path.is_dir())
-        if skills_root.is_dir()
-        else []
-    )
     skills: list[Path] = []
-    for path in skill_directories:
+    for path in skill_directories(repo, skills_root):
         if not (path / "SKILL.md").is_file():
             fail(
                 errors,
@@ -474,8 +489,10 @@ def main() -> int:
         return 1
     count = sum(
         1
-        for path in (args.repo / "skills").iterdir()
-        if path.is_dir() and (path / "SKILL.md").is_file()
+        for path in skill_directories(
+            args.repo.resolve(), args.repo.resolve() / "skills"
+        )
+        if (path / "SKILL.md").is_file()
     )
     print(f"portability OK: {count} skills ({args.visibility})")
     return 0
