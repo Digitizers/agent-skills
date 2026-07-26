@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -39,6 +41,18 @@ def make_skill(repo: Path, name: str = "widget") -> Path:
 
 
 class PortabilityValidationTests(unittest.TestCase):
+    def test_missing_pyyaml_has_actionable_error(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "-S", str(HERE / "validate.py"), "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("needs PyYAML", result.stderr)
+        self.assertIn("pip install pyyaml", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_valid_public_repo_with_cloud_link(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -154,6 +168,21 @@ class PortabilityValidationTests(unittest.TestCase):
                 repo, visibility="private", require_cloud_links=False
             )
             self.assertTrue(any("positive and negative" in error for error in errors))
+            self.assertTrue(all(tmp not in error for error in errors))
+
+    def test_frontmatter_errors_use_repository_relative_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: [unterminated\n---\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(any("invalid YAML frontmatter" in error for error in errors))
+            self.assertTrue(all(tmp not in error for error in errors))
 
     def test_public_boundary_rejects_private_identifiers_and_absolute_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

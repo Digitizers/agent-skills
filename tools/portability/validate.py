@@ -10,7 +10,13 @@ import sys
 from pathlib import Path
 from urllib.parse import unquote
 
-import yaml
+try:
+    import yaml
+except ImportError:
+    sys.exit(
+        "validate.py needs PyYAML to parse skill frontmatter. "
+        "Install it with: pip install pyyaml"
+    )
 
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -39,24 +45,26 @@ def fail(errors: list[str], path: Path, message: str) -> None:
     errors.append(f"{path.as_posix()}: {message}")
 
 
-def frontmatter(path: Path, errors: list[str]) -> dict[str, object] | None:
+def frontmatter(
+    path: Path, display_path: Path, errors: list[str]
+) -> dict[str, object] | None:
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
     if not lines or lines[0] != "---":
-        fail(errors, path, "missing opening frontmatter delimiter")
+        fail(errors, display_path, "missing opening frontmatter delimiter")
         return None
     try:
         end = lines[1:].index("---") + 1
     except ValueError:
-        fail(errors, path, "missing standalone closing frontmatter delimiter")
+        fail(errors, display_path, "missing standalone closing frontmatter delimiter")
         return None
     try:
         parsed = yaml.safe_load("\n".join(lines[1:end]))
     except yaml.YAMLError as exc:
-        fail(errors, path, f"invalid YAML frontmatter: {exc}")
+        fail(errors, display_path, f"invalid YAML frontmatter: {exc}")
         return None
     if not isinstance(parsed, dict):
-        fail(errors, path, "frontmatter must be an object")
+        fail(errors, display_path, "frontmatter must be an object")
         return None
     return parsed
 
@@ -123,28 +131,46 @@ def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
             )
 
 
-def validate_triggers(path: Path, errors: list[str]) -> None:
+def validate_triggers(
+    path: Path, display_path: Path, errors: list[str]
+) -> None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        fail(errors, path, f"invalid JSON: {exc}")
+        fail(errors, display_path, f"invalid JSON: {exc}")
         return
     if not isinstance(payload, list) or not payload:
-        fail(errors, path, "trigger spec must be a non-empty array")
+        fail(errors, display_path, "trigger spec must be a non-empty array")
         return
     outcomes: set[bool] = set()
     for index, item in enumerate(payload):
         if not isinstance(item, dict) or set(item) != {"query", "should_trigger"}:
-            fail(errors, path, f"item {index} must contain only query and should_trigger")
+            fail(
+                errors,
+                display_path,
+                f"item {index} must contain only query and should_trigger",
+            )
             continue
         if not isinstance(item["query"], str) or not item["query"].strip():
-            fail(errors, path, f"item {index} query must be a non-empty string")
+            fail(
+                errors,
+                display_path,
+                f"item {index} query must be a non-empty string",
+            )
         if not isinstance(item["should_trigger"], bool):
-            fail(errors, path, f"item {index} should_trigger must be boolean")
+            fail(
+                errors,
+                display_path,
+                f"item {index} should_trigger must be boolean",
+            )
         else:
             outcomes.add(item["should_trigger"])
     if outcomes != {False, True}:
-        fail(errors, path, "trigger spec must include positive and negative examples")
+        fail(
+            errors,
+            display_path,
+            "trigger spec must include positive and negative examples",
+        )
 
 
 def validate_public_boundary(repo: Path, errors: list[str]) -> None:
@@ -222,7 +248,9 @@ def validate_repo(
         relative_skill = skill.relative_to(repo)
         if not NAME_RE.fullmatch(skill.name):
             fail(errors, relative_skill, "directory name is not a valid skill name")
-        metadata = frontmatter(skill / "SKILL.md", errors)
+        metadata = frontmatter(
+            skill / "SKILL.md", relative_skill / "SKILL.md", errors
+        )
         if metadata is not None:
             if metadata.get("name") != skill.name:
                 fail(errors, relative_skill / "SKILL.md", "frontmatter name must match directory")
@@ -234,7 +262,7 @@ def validate_repo(
             validate_links(repo, doc, errors)
         trigger_spec = skill / "evals" / "triggers.json"
         if trigger_spec.exists():
-            validate_triggers(trigger_spec, errors)
+            validate_triggers(trigger_spec, trigger_spec.relative_to(repo), errors)
 
         if require_cloud_links:
             link = repo / ".claude" / "skills" / skill.name
