@@ -21,12 +21,17 @@ except ImportError:
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
-REFERENCE_USE_RE = re.compile(r"(?<!!)\[([^\]]+)\]\[([^\]]*)\]")
+REFERENCE_USE_RE = re.compile(r"!?\[([^\]]+)\]\[([^\]]*)\]")
 REFERENCE_DEF_RE = re.compile(
     r"^[ \t]{0,3}\[([^\]]+)\]:[ \t]*(.+)$",
     re.MULTILINE,
 )
 ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+FENCED_CODE_RE = re.compile(
+    r"(?ms)^[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n.*?^[ \t]{0,3}\1[ \t]*$"
+)
+INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1")
+ENV_TEMPLATES = {".env.example", ".env.sample", ".env.template"}
 PRIVATE_MARKERS = (
     "Digitizers/" + "marketing-skills",
     "Digitizers/" + "digitizer-os",
@@ -111,6 +116,8 @@ def validate_one_link(
 
 def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
     text = path.read_text(encoding="utf-8")
+    text = FENCED_CODE_RE.sub("", text)
+    text = INLINE_CODE_RE.sub("", text)
     for raw in LINK_RE.findall(text):
         raw = raw.strip()
         validate_one_link(repo, path, raw, errors)
@@ -175,14 +182,41 @@ def validate_triggers(
 
 def validate_public_boundary(repo: Path, errors: list[str]) -> None:
     for path in sorted(repo.rglob("*")):
-        if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
+        if ".git" in path.parts or "__pycache__" in path.parts:
             continue
         relative = path.relative_to(repo)
-        env_templates = {".env.example", ".env.sample", ".env.template"}
-        if path.name == ".env" or (
-            path.name.startswith(".env.") and path.name not in env_templates
-        ):
-            fail(errors, relative, "committed environment file is forbidden in public repos")
+        if path.is_symlink():
+            target = path.readlink()
+            target_text = target.as_posix()
+            resolved = (path.parent / target).resolve()
+            escapes_repo = False
+            try:
+                resolved.relative_to(repo)
+            except ValueError:
+                escapes_repo = True
+            if (
+                target.is_absolute()
+                or escapes_repo
+                or any(marker in target_text for marker in PRIVATE_MARKERS)
+                or POSIX_HOME_RE.search(target_text)
+                or WINDOWS_HOME_RE.search(target_text)
+            ):
+                fail(errors, relative, "symlink target escapes public repository boundary")
+            continue
+        if not path.is_file():
+            continue
+        is_env_file = (
+            path.name == ".env"
+            or path.name == ".envrc"
+            or path.name.endswith(".env")
+            or path.name.startswith(".env.")
+        )
+        if is_env_file and path.name not in ENV_TEMPLATES:
+            fail(
+                errors,
+                relative,
+                "committed environment file is forbidden in public repos",
+            )
             continue
         raw = path.read_bytes()
         if b"\0" in raw:
@@ -191,7 +225,7 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
             continue
-        if path.name in env_templates:
+        if path.name in ENV_TEMPLATES:
             for number, line in enumerate(text.splitlines(), 1):
                 stripped = line.strip()
                 if not stripped or stripped.startswith("#"):

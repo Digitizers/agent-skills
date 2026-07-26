@@ -121,6 +121,35 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("reference" in error for error in errors), errors)
 
+    def test_validates_reference_style_image_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "![Diagram][architecture]\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(any("reference label is not defined" in error for error in errors))
+
+    def test_ignores_markdown_links_inside_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "`[inline](not-real.md)`\n\n"
+                "```markdown\n[example](also-not-real.md)\n```\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("does not resolve" in error for error in errors), errors)
+
     def test_rejects_skill_directory_without_skill_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -214,6 +243,18 @@ class PortabilityValidationTests(unittest.TestCase):
             self.assertTrue(any("LICENSE" in error and "absolute path" in error for error in errors))
             self.assertTrue(any(".env.local" in error and "environment file" in error for error in errors))
 
+    def test_public_boundary_rejects_common_environment_file_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / ".envrc").write_text("TOKEN=secret\n", encoding="utf-8")
+            (repo / "prod.env").write_text("TOKEN=secret\n", encoding="utf-8")
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any(".envrc" in error for error in errors))
+            self.assertTrue(any("prod.env" in error for error in errors))
+
     def test_public_boundary_allows_placeholder_env_templates_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -246,6 +287,16 @@ class PortabilityValidationTests(unittest.TestCase):
                 repo, visibility="public", require_cloud_links=False
             )
             self.assertTrue(any("absolute path" in error for error in errors))
+
+    def test_public_boundary_rejects_external_symlink_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / "external").symlink_to("/" "root/private-skills")
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("symlink target escapes" in error for error in errors))
 
 
 if __name__ == "__main__":
