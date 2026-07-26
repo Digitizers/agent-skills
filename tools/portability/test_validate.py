@@ -293,6 +293,35 @@ class PortabilityValidationTests(unittest.TestCase):
             self.assertTrue(any("private identifier" in error for error in errors))
             self.assertTrue(any("absolute path" in error for error in errors))
 
+    def test_public_boundary_rejects_private_markers_in_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            private_path = repo / "Digitizers" / "marketing-" "skills"
+            private_path.mkdir(parents=True)
+            (private_path / "README.md").write_text("# Private name\n", encoding="utf-8")
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(
+                any("Digitizers/marketing-" "skills" in error for error in errors),
+                errors,
+            )
+
+    def test_public_boundary_rejects_common_local_absolute_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "Local checkout: /work" "space/acme/private\n"
+                "Install dir: /o" "pt/acme/tool\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("absolute path" in error for error in errors), errors)
+
     def test_public_boundary_scans_suffixless_files_and_rejects_env_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -383,6 +412,27 @@ class PortabilityValidationTests(unittest.TestCase):
                 repo, visibility="public", require_cloud_links=False
             )
             self.assertTrue(any("private identifier" in error for error in errors))
+
+    def test_public_boundary_matches_private_markers_in_symlink_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / "skill-link").symlink_to("digitizers/marketing-" "skills")
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("symlink target" in error for error in errors), errors)
+
+    def test_fallback_public_boundary_walk_does_not_follow_symlink_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            external = Path(f"{tmp}-external")
+            external.mkdir()
+            (external / "leak.md").write_text("/work" "space/acme/private\n", encoding="utf-8")
+            (repo / "link").symlink_to(external, target_is_directory=True)
+            paths = VALIDATOR.fallback_public_boundary_paths(repo)
+            self.assertIn(repo / "link", paths)
+            self.assertNotIn(repo / "link" / "leak.md", paths)
 
     def test_public_boundary_rejects_windows_home_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

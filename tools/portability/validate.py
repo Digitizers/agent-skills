@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -43,10 +44,29 @@ WINDOWS_HOME_RE = re.compile(
     r"(?i)(?<![A-Za-z0-9])(?:[A-Z]:\\Users\\|\\\\[^\\\s]+\\Users\\)"
     r"[^\s`'\"]+"
 )
+LOCAL_ABSOLUTE_RE = re.compile(
+    r"(?<![A-Za-z0-9])/(?:workspace|workspaces|opt)/[^\s`'\"]+"
+)
 
 
 def fail(errors: list[str], path: Path, message: str) -> None:
     errors.append(f"{path.as_posix()}: {message}")
+
+
+def contains_private_marker(text: str) -> str | None:
+    folded = text.casefold()
+    for marker in PRIVATE_MARKERS:
+        if marker.casefold() in folded:
+            return marker
+    return None
+
+
+def contains_machine_specific_path(text: str) -> bool:
+    return bool(
+        POSIX_HOME_RE.search(text)
+        or WINDOWS_HOME_RE.search(text)
+        or LOCAL_ABSOLUTE_RE.search(text)
+    )
 
 
 def frontmatter(
@@ -269,6 +289,9 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
         if ".git" in path.parts or "__pycache__" in path.parts:
             continue
         relative = path.relative_to(repo)
+        marker = contains_private_marker(relative.as_posix())
+        if marker is not None:
+            fail(errors, relative, f"private identifier exposed: {marker}")
         if path.is_symlink():
             target = path.readlink()
             target_text = target.as_posix()
@@ -281,9 +304,8 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
             if (
                 target.is_absolute()
                 or escapes_repo
-                or any(marker in target_text for marker in PRIVATE_MARKERS)
-                or POSIX_HOME_RE.search(target_text)
-                or WINDOWS_HOME_RE.search(target_text)
+                or contains_private_marker(target_text) is not None
+                or contains_machine_specific_path(target_text)
             ):
                 fail(errors, relative, "symlink target escapes public repository boundary")
             continue
@@ -332,11 +354,10 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
                 )
                 if not allowed_placeholder:
                     fail(errors, relative, f"non-placeholder env value on line {number}")
-        folded_text = text.casefold()
-        for marker in PRIVATE_MARKERS:
-            if marker.casefold() in folded_text:
-                fail(errors, relative, f"private identifier exposed: {marker}")
-        if POSIX_HOME_RE.search(text) or WINDOWS_HOME_RE.search(text):
+        marker = contains_private_marker(text)
+        if marker is not None:
+            fail(errors, relative, f"private identifier exposed: {marker}")
+        if contains_machine_specific_path(text):
             fail(errors, relative, "machine-specific absolute path exposed")
 
 
@@ -349,13 +370,22 @@ def public_boundary_paths(repo: Path) -> list[Path]:
             text=False,
         )
     except (FileNotFoundError, subprocess.CalledProcessError):
-        return sorted(repo.rglob("*"))
+        return fallback_public_boundary_paths(repo)
     tracked = [
         repo / item.decode("utf-8")
         for item in result.stdout.split(b"\0")
         if item
     ]
     return sorted(tracked)
+
+
+def fallback_public_boundary_paths(repo: Path) -> list[Path]:
+    paths: list[Path] = []
+    for root, dirnames, filenames in os.walk(repo, followlinks=False):
+        current = Path(root)
+        paths.extend(current / name for name in dirnames)
+        paths.extend(current / name for name in filenames)
+    return sorted(paths)
 
 
 def validate_repo(
