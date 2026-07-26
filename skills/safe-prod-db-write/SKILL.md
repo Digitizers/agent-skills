@@ -44,7 +44,16 @@ The reason it slips past step 5 is that it splits two things a single read confl
 Verify both, separately:
 
 1. **The change is really in the catalog.** Introspect for the specific thing you altered, don't infer it from "the tool returned success" — e.g. `select pg_get_functiondef(oid) ...`, `pg_class.relrowsecurity`, `pg_indexes`.
-2. **The ledger's tail matches the repo's filenames.** `select version, name from <ledger> order by version desc limit 5` against `ls migrations/ | tail -5`. They should be identical, in the same order.
+2. **The ledger's tail matches the repo's filenames.** Normalize both sides first — they disagree on *two* axes even when the ledger is perfectly healthy. The ledger splits `version` and `name` into columns while the repo carries them as one filename plus a `.sql` suffix, and the default orders are opposite (`order by … desc` is newest-first; `ls | tail` is oldest-first). Make each side emit the same string:
+
+   ```sql
+   select version || '_' || name from <ledger> order by version desc limit 5;
+   ```
+   ```bash
+   ls migrations/*.sql | sed 's|.*/||; s|\.sql$||' | sort -r | head -5
+   ```
+
+   Now a line-for-line difference means drift and nothing else. Comparing the raw forms instead is worse than not checking: it reports drift on a healthy ledger, and the remedy this section prescribes is a **production `UPDATE`** — so a false positive here writes to prod for no reason (Codex P1 + Copilot on #22).
 
 Fix drift immediately with an `UPDATE` on the ledger's version — it is a label, and the catalog is already correct, so nothing needs re-running. Leaving it costs more than it looks: nothing reads the ledger until someone runs a schema diff or a `db push`, and *that* person sees one orphan version and one apparently-unapplied file, with no way to tell whether the DDL ran. A recorded version that sorts *before* migrations applied earlier makes that read even worse.
 
