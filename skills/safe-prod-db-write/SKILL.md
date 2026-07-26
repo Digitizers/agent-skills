@@ -56,7 +56,7 @@ For a whole-ledger reconciliation, diff the complete **sets**, never tails. Orde
 
 ```bash
 diff <(psql -Atc "select version || '_' || name from <ledger> order by 1") \
-     <(ls migrations/*.sql | sed 's|.*/||; s|\.sql$||' | sort)
+     <(ls <migrations dir>/*.sql | sed 's|.*/||; s|\.sql$||' | sort)
 ```
 
 ### Before you `UPDATE` the ledger, prove it is only a label
