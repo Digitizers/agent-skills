@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import unquote
@@ -27,9 +28,7 @@ REFERENCE_DEF_RE = re.compile(
     re.MULTILINE,
 )
 ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
-FENCED_CODE_RE = re.compile(
-    r"(?ms)^[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n.*?^[ \t]{0,3}\1[ \t]*$"
-)
+FENCED_CODE_START_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1")
 ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
 PRIVATE_MARKERS = (
@@ -106,6 +105,30 @@ def inline_link_targets(text: str) -> list[str]:
     return targets
 
 
+def strip_fenced_code(text: str) -> str:
+    lines = text.splitlines(keepends=True)
+    kept: list[str] = []
+    fence_marker: str | None = None
+    fence_length = 0
+    for line in lines:
+        if fence_marker is None:
+            match = FENCED_CODE_START_RE.match(line)
+            if match:
+                fence_marker = match.group(1)[0]
+                fence_length = len(match.group(1))
+                kept.append("\n" if line.endswith("\n") else "")
+                continue
+            kept.append(line)
+            continue
+        stripped = line.lstrip(" \t")
+        close = stripped.rstrip("\r\n")
+        if re.fullmatch(rf"{re.escape(fence_marker)}{{{fence_length},}}[ \t]*", close):
+            fence_marker = None
+            fence_length = 0
+        kept.append("\n" if line.endswith("\n") else "")
+    return "".join(kept)
+
+
 def validate_one_link(
     repo: Path, path: Path, raw: str, errors: list[str]
 ) -> None:
@@ -140,7 +163,7 @@ def validate_one_link(
 
 def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
     text = path.read_text(encoding="utf-8")
-    text = FENCED_CODE_RE.sub("", text)
+    text = strip_fenced_code(text)
     text = INLINE_CODE_RE.sub("", text)
     for raw in inline_link_targets(text):
         raw = raw.strip()
@@ -205,7 +228,7 @@ def validate_triggers(
 
 
 def validate_public_boundary(repo: Path, errors: list[str]) -> None:
-    for path in sorted(repo.rglob("*")):
+    for path in public_boundary_paths(repo):
         if ".git" in path.parts or "__pycache__" in path.parts:
             continue
         relative = path.relative_to(repo)
@@ -278,6 +301,24 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
                 fail(errors, relative, f"private identifier exposed: {marker}")
         if POSIX_HOME_RE.search(text) or WINDOWS_HOME_RE.search(text):
             fail(errors, relative, "machine-specific absolute path exposed")
+
+
+def public_boundary_paths(repo: Path) -> list[Path]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "-z"],
+            check=True,
+            capture_output=True,
+            text=False,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return sorted(repo.rglob("*"))
+    tracked = [
+        repo / item.decode("utf-8")
+        for item in result.stdout.split(b"\0")
+        if item
+    ]
+    return sorted(tracked)
 
 
 def validate_repo(

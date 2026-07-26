@@ -165,6 +165,20 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("does not resolve" in error for error in errors), errors)
 
+    def test_ignores_markdown_links_inside_longer_closing_fence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "````markdown\n[example](also-not-real.md)\n`````\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("does not resolve" in error for error in errors), errors)
+
     def test_rejects_skill_directory_without_skill_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -269,6 +283,24 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(any(".envrc" in error for error in errors))
             self.assertTrue(any("prod.env" in error for error in errors))
+
+    def test_public_boundary_ignores_untracked_local_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+            subprocess.run(["git", "add", "skills"], cwd=repo, check=True)
+            (repo / ".env.local").write_text("TOKEN=secret\n", encoding="utf-8")
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertFalse(any(".env.local" in error for error in errors), errors)
+
+            subprocess.run(["git", "add", ".env.local"], cwd=repo, check=True)
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any(".env.local" in error for error in errors), errors)
 
     def test_public_boundary_allows_placeholder_env_templates_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
