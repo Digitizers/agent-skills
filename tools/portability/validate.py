@@ -20,7 +20,7 @@ except ImportError:
 
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
+LINK_START_RE = re.compile(r"!?\[[^\]]*\]\(")
 REFERENCE_USE_RE = re.compile(r"!?\[([^\]]+)\]\[([^\]]*)\]")
 REFERENCE_DEF_RE = re.compile(
     r"^[ \t]{0,3}\[([^\]]+)\]:[ \t]*(.+)$",
@@ -31,7 +31,7 @@ FENCED_CODE_RE = re.compile(
     r"(?ms)^[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n.*?^[ \t]{0,3}\1[ \t]*$"
 )
 INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1")
-ENV_TEMPLATES = {".env.example", ".env.sample", ".env.template"}
+ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
 PRIVATE_MARKERS = (
     "Digitizers/" + "marketing-skills",
     "Digitizers/" + "digitizer-os",
@@ -82,6 +82,30 @@ def markdown_target(raw: str) -> str | None:
     return raw.split(maxsplit=1)[0] if raw else ""
 
 
+def inline_link_targets(text: str) -> list[str]:
+    targets: list[str] = []
+    for match in LINK_START_RE.finditer(text):
+        start = match.end()
+        depth = 1
+        escaped = False
+        for index in range(start, len(text)):
+            character = text[index]
+            if escaped:
+                escaped = False
+                continue
+            if character == "\\":
+                escaped = True
+                continue
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0:
+                    targets.append(text[start:index])
+                    break
+    return targets
+
+
 def validate_one_link(
     repo: Path, path: Path, raw: str, errors: list[str]
 ) -> None:
@@ -118,7 +142,7 @@ def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
     text = path.read_text(encoding="utf-8")
     text = FENCED_CODE_RE.sub("", text)
     text = INLINE_CODE_RE.sub("", text)
-    for raw in LINK_RE.findall(text):
+    for raw in inline_link_targets(text):
         raw = raw.strip()
         validate_one_link(repo, path, raw, errors)
 
@@ -205,13 +229,14 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
             continue
         if not path.is_file():
             continue
+        is_env_template = path.name.endswith(ENV_TEMPLATE_SUFFIXES)
         is_env_file = (
             path.name == ".env"
             or path.name == ".envrc"
             or path.name.endswith(".env")
-            or path.name.startswith(".env.")
+            or ".env." in path.name
         )
-        if is_env_file and path.name not in ENV_TEMPLATES:
+        if is_env_file and not is_env_template:
             fail(
                 errors,
                 relative,
@@ -225,7 +250,7 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
             continue
-        if path.name in ENV_TEMPLATES:
+        if is_env_template:
             for number, line in enumerate(text.splitlines(), 1):
                 stripped = line.strip()
                 if not stripped or stripped.startswith("#"):
@@ -247,8 +272,9 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
                 )
                 if not allowed_placeholder:
                     fail(errors, relative, f"non-placeholder env value on line {number}")
+        folded_text = text.casefold()
         for marker in PRIVATE_MARKERS:
-            if marker in text:
+            if marker.casefold() in folded_text:
                 fail(errors, relative, f"private identifier exposed: {marker}")
         if POSIX_HOME_RE.search(text) or WINDOWS_HOME_RE.search(text):
             fail(errors, relative, "machine-specific absolute path exposed")

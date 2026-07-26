@@ -97,6 +97,21 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("reference" in error for error in errors), errors)
 
+    def test_accepts_balanced_parentheses_in_inline_link_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE(old).md").write_text("# Old\n", encoding="utf-8")
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "[Old reference](REFERENCE(old).md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("reference" in error for error in errors), errors)
+
     def test_validates_reference_style_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -274,6 +289,33 @@ class PortabilityValidationTests(unittest.TestCase):
                 repo, visibility="public", require_cloud_links=False
             )
             self.assertTrue(any("non-placeholder env value" in error for error in errors))
+
+    def test_public_boundary_validates_prefixed_env_templates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            template = repo / "app.env.example"
+            template.write_text("API_TOKEN=real-looking-value\n", encoding="utf-8")
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(
+                any("app.env.example" in error and "non-placeholder" in error for error in errors)
+            )
+
+    def test_public_boundary_matches_private_markers_case_insensitively(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "https://github.com/digitizers/"
+                "marketing-skills\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("private identifier" in error for error in errors))
 
     def test_public_boundary_rejects_windows_home_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
