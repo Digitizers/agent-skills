@@ -112,6 +112,36 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("reference" in error for error in errors), errors)
 
+    def test_accepts_external_uri_schemes_case_insensitively(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "[Docs](HTTPS://example.com)\n"
+                "[Call](tel:+123)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("reference" in error for error in errors), errors)
+
+    def test_ignores_escaped_markdown_link_openers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "\\[literal](not-a-link.md)\n"
+                "\\[literal][missing-label]\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("reference" in error for error in errors), errors)
+
     def test_validates_inline_links_with_brackets_in_label(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

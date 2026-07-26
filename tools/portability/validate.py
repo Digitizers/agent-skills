@@ -22,7 +22,7 @@ except ImportError:
 
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-REFERENCE_USE_RE = re.compile(r"!?\[([^\]]+)\]\[([^\]]*)\]")
+REFERENCE_USE_RE = re.compile(r"(?<!\\)!?\[([^\]]+)\]\[([^\]]*)\]")
 REFERENCE_DEF_RE = re.compile(
     r"^[ \t]{0,3}\[([^\]]+)\]:[ \t]*(.+)$",
     re.MULTILINE,
@@ -46,6 +46,7 @@ WINDOWS_HOME_RE = re.compile(
 LOCAL_ABSOLUTE_RE = re.compile(
     r"(?<![A-Za-z0-9])/(?:workspace|workspaces|opt)/[^\s`'\"]+"
 )
+URI_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 
 def fail(errors: list[str], path: Path, message: str) -> None:
@@ -105,9 +106,20 @@ def inline_link_targets(text: str) -> list[str]:
     index = 0
     while index < len(text):
         if text[index] == "!":
-            label_start = index + 2 if index + 1 < len(text) and text[index + 1] == "[" else 0
+            bracket_index = index + 1
+            label_start = (
+                index + 2
+                if bracket_index < len(text)
+                and text[bracket_index] == "["
+                and not is_escaped(text, bracket_index)
+                else 0
+            )
         else:
-            label_start = index + 1 if text[index] == "[" else 0
+            label_start = (
+                index + 1
+                if text[index] == "[" and not is_escaped(text, index)
+                else 0
+            )
         if not label_start:
             index += 1
             continue
@@ -137,6 +149,15 @@ def inline_link_targets(text: str) -> list[str]:
                     break
         index += 1
     return targets
+
+
+def is_escaped(text: str, index: int) -> bool:
+    backslashes = 0
+    index -= 1
+    while index >= 0 and text[index] == "\\":
+        backslashes += 1
+        index -= 1
+    return backslashes % 2 == 1
 
 
 def closing_bracket(text: str, start: int) -> int:
@@ -196,7 +217,14 @@ def validate_one_link(
             f"angle-bracketed reference is not closed: {raw}",
         )
         return
-    if not target or target.startswith(("#", "http://", "https://", "mailto:")):
+    if not target or target.startswith("#"):
+        return
+    scheme = URI_SCHEME_RE.match(target)
+    if scheme and not (
+        len(scheme.group(0)) == 2
+        and len(target) > 2
+        and target[2] in ("\\", "/")
+    ):
         return
     decoded = unquote(target.split("#", 1)[0])
     candidate = (path.parent / decoded).resolve()
