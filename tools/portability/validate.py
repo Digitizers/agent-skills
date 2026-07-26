@@ -20,7 +20,13 @@ PRIVATE_MARKERS = (
     "Digitizers/" + "digitizer-os",
     "digitizer-" + "private",
 )
-TEXT_SUFFIXES = {".json", ".md", ".py", ".sh", ".txt", ".yaml", ".yml"}
+POSIX_HOME_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:/Users|/home|/root)/[^\s`'\"]+"
+)
+WINDOWS_HOME_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9])(?:[A-Z]:\\Users\\|\\\\[^\\\s]+\\Users\\)"
+    r"[^\s`'\"]+"
+)
 
 
 def fail(errors: list[str], path: Path, message: str) -> None:
@@ -52,7 +58,19 @@ def frontmatter(path: Path, errors: list[str]) -> dict[str, object] | None:
 def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
     text = path.read_text(encoding="utf-8")
     for raw in LINK_RE.findall(text):
-        target = raw.strip().split(maxsplit=1)[0].strip("<>")
+        raw = raw.strip()
+        if raw.startswith("<"):
+            closing = raw.find(">")
+            if closing < 0:
+                fail(
+                    errors,
+                    path.relative_to(repo),
+                    f"angle-bracketed reference is not closed: {raw}",
+                )
+                continue
+            target = raw[1:closing]
+        else:
+            target = raw.split(maxsplit=1)[0]
         if not target or target.startswith(("#", "http://", "https://", "mailto:")):
             continue
         decoded = unquote(target.split("#", 1)[0])
@@ -60,10 +78,18 @@ def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
         try:
             candidate.relative_to(repo)
         except ValueError:
-            fail(errors, path, f"reference escapes repository: {target}")
+            fail(
+                errors,
+                path.relative_to(repo),
+                f"reference escapes repository: {target}",
+            )
             continue
         if not candidate.exists():
-            fail(errors, path, f"reference does not resolve: {target}")
+            fail(
+                errors,
+                path.relative_to(repo),
+                f"reference does not resolve: {target}",
+            )
 
 
 def validate_triggers(path: Path, errors: list[str]) -> None:
@@ -92,19 +118,24 @@ def validate_triggers(path: Path, errors: list[str]) -> None:
 
 def validate_public_boundary(repo: Path, errors: list[str]) -> None:
     for path in sorted(repo.rglob("*")):
-        if (
-            not path.is_file()
-            or ".git" in path.parts
-            or "__pycache__" in path.parts
-            or path.suffix not in TEXT_SUFFIXES
-        ):
+        if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
+        relative = path.relative_to(repo)
+        if path.name == ".env" or path.name.startswith(".env."):
+            fail(errors, relative, "committed environment file is forbidden in public repos")
+            continue
+        raw = path.read_bytes()
+        if b"\0" in raw:
+            continue
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
         for marker in PRIVATE_MARKERS:
             if marker in text:
-                fail(errors, path.relative_to(repo), f"private identifier exposed: {marker}")
-        if re.search(r"(?<![A-Za-z0-9])(?:/Users|/home)/[^\s`'\"]+", text):
-            fail(errors, path.relative_to(repo), "machine-specific absolute path exposed")
+                fail(errors, relative, f"private identifier exposed: {marker}")
+        if POSIX_HOME_RE.search(text) or WINDOWS_HOME_RE.search(text):
+            fail(errors, relative, "machine-specific absolute path exposed")
 
 
 def validate_repo(
@@ -113,15 +144,21 @@ def validate_repo(
     repo = repo.resolve()
     errors: list[str] = []
     skills_root = repo / "skills"
-    skills = (
-        sorted(
-            path
-            for path in skills_root.iterdir()
-            if path.is_dir() and (path / "SKILL.md").is_file()
-        )
+    skill_directories = (
+        sorted(path for path in skills_root.iterdir() if path.is_dir())
         if skills_root.is_dir()
         else []
     )
+    skills: list[Path] = []
+    for path in skill_directories:
+        if not (path / "SKILL.md").is_file():
+            fail(
+                errors,
+                path.relative_to(repo),
+                "skill directory is missing SKILL.md",
+            )
+            continue
+        skills.append(path)
     if not skills:
         return ["skills: no canonical skills found"]
 
