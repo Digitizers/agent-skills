@@ -1,7 +1,7 @@
 ---
 name: safe-prod-db-write
-description: Safely run a one-off write, backfill, or data-mutating script against a PRODUCTION database — pull the connection from the platform, dry-run, get explicit human authorization, execute, verify, clean up. Use before running any script that inserts/updates/deletes prod data (generating codes, backfills, one-off fixes, seed data), when the user asks to write/mutate production data, or when a task needs a real prod DB connection. Also use when adding a DB model/table/migration or setting up a CI guard that enforces a per-table invariant (RLS enabled, tenant column, required index) — see "Enforce schema invariants in CI". Assumes a Neon/Vercel-style setup with the platform CLI, but the protocol generalizes.
-compatibility: Requires the deployment platform CLI (e.g. `vercel`) to pull the production connection string, and a database client (e.g. `psql`, `prisma`) to run the script against it.
+description: Safely run a one-off write, backfill, or data-mutating script against a PRODUCTION database — pull the connection from the platform, dry-run, get explicit human authorization, execute, verify, clean up. Use before running any script that inserts/updates/deletes prod data (generating codes, backfills, one-off fixes, seed data), when the user asks to write/mutate production data, or when a task needs a real prod DB connection. Also use when adding a DB model/table/migration, when applying a migration to a hosted project through a dashboard or MCP tool (Supabase `apply_migration`, Neon, PlanetScale) — see "Migrations applied by a hosted tool" — or when setting up a CI guard that enforces a per-table invariant (RLS enabled, tenant column, required index) — see "Enforce schema invariants in CI". Assumes a Neon/Vercel-style setup with the platform CLI, but the protocol generalizes.
+compatibility: Needs a way to reach the production database — a deployment platform CLI (e.g. `vercel`) to pull the connection string plus a client (`psql`, `prisma`), or a hosted tool that executes SQL directly (e.g. the Supabase MCP server). The verification steps assume you can run arbitrary reads against the target.
 ---
 
 # Safe production DB write
@@ -30,6 +30,24 @@ compatibility: Requires the deployment platform CLI (e.g. `vercel`) to pull the 
 - **Separate generation from distribution — and test on a *different* batch.** Burn throwaway/smoke-test rows from a batch you are **not** shipping, so the live batch you hand off stays pristine.
 - **The connection is a secret.** Never echo the URL, never commit the pulled env file, never paste creds into chat.
 
+## Migrations applied by a hosted tool: verify the ledger, not just the schema
+
+When a managed platform applies a migration for you — a dashboard button, an MCP tool, a hosted API — **it may record it under a version it chose rather than your filename.** Observed with Supabase's `apply_migration`: a file named `20260726270000_order_where_the_limit_is.sql` landed in `supabase_migrations.schema_migrations` as version `20260726231221`, the wall clock at apply time. It recurred on *every* apply — three times in one session — so this is a per-apply check, not a once-per-project one.
+
+The reason it slips past step 5 is that it splits two things a single read conflates:
+
+| | after a drifted apply |
+|---|---|
+| Database catalog | **correct** — the DDL ran, the function/table/policy is what you wrote |
+| Migration ledger | **wrong** — names a version that has no file in the repo |
+
+Verify both, separately:
+
+1. **The change is really in the catalog.** Introspect for the specific thing you altered, don't infer it from "the tool returned success" — e.g. `select pg_get_functiondef(oid) ...`, `pg_class.relrowsecurity`, `pg_indexes`.
+2. **The ledger's tail matches the repo's filenames.** `select version, name from <ledger> order by version desc limit 5` against `ls migrations/ | tail -5`. They should be identical, in the same order.
+
+Fix drift immediately with an `UPDATE` on the ledger's version — it is a label, and the catalog is already correct, so nothing needs re-running. Leaving it costs more than it looks: nothing reads the ledger until someone runs a schema diff or a `db push`, and *that* person sees one orphan version and one apparently-unapplied file, with no way to tell whether the DDL ran. A recorded version that sorts *before* migrations applied earlier makes that read even worse.
+
 ## Enforce schema invariants in CI, not by memory
 
 When **every** table/model must satisfy a rule — RLS enabled, a tenant column, a required index, a `createdAt`, a soft-delete flag — don't trust humans to remember it on each new migration. Add a **static CI guard** (no database needed) that reconciles the ORM schema against the migrations and **fails the build** when any model is missing the invariant:
@@ -49,4 +67,5 @@ This catches the gap at **PR time** instead of in production, and it's portable 
 | "The dry-run looked fine, running it" | Re-confirm the live write with the human — dry-run approval ≠ write approval. |
 | "Connection came back empty, I'll un-mark Sensitive" | Use `DATABASE_URL_UNPOOLED` instead; don't widen credential exposure. |
 | "Done — it inserted" | Not done until a read verifies count + invariants. |
+| "The migration tool returned success" | It reports that *it* ran, not what landed. Check the catalog **and** that the recorded version matches your filename. |
 | "I'll clean up the env file later" | Clean up now, on every exit path — it holds prod creds. |
