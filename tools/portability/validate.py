@@ -83,8 +83,22 @@ def markdown_target(raw: str) -> str | None:
 
 def inline_link_targets(text: str) -> list[str]:
     targets: list[str] = []
-    for match in LINK_START_RE.finditer(text):
-        start = match.end()
+    index = 0
+    while index < len(text):
+        if text[index] == "!":
+            label_start = index + 2 if index + 1 < len(text) and text[index + 1] == "[" else 0
+        else:
+            label_start = index + 1 if text[index] == "[" else 0
+        if not label_start:
+            index += 1
+            continue
+
+        label_end = closing_bracket(text, label_start)
+        if label_end < 0 or label_end + 1 >= len(text) or text[label_end + 1] != "(":
+            index += 1
+            continue
+
+        start = label_end + 2
         depth = 1
         escaped = False
         for index in range(start, len(text)):
@@ -102,7 +116,28 @@ def inline_link_targets(text: str) -> list[str]:
                 if depth == 0:
                     targets.append(text[start:index])
                     break
+        index += 1
     return targets
+
+
+def closing_bracket(text: str, start: int) -> int:
+    depth = 1
+    escaped = False
+    for index in range(start, len(text)):
+        character = text[index]
+        if escaped:
+            escaped = False
+            continue
+        if character == "\\":
+            escaped = True
+            continue
+        if character == "[":
+            depth += 1
+        elif character == "]":
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
 
 
 def strip_fenced_code(text: str) -> str:
@@ -120,9 +155,11 @@ def strip_fenced_code(text: str) -> str:
                 continue
             kept.append(line)
             continue
-        stripped = line.lstrip(" \t")
-        close = stripped.rstrip("\r\n")
-        if re.fullmatch(rf"{re.escape(fence_marker)}{{{fence_length},}}[ \t]*", close):
+        close = line.rstrip("\r\n")
+        if re.fullmatch(
+            rf"[ \t]{{0,3}}{re.escape(fence_marker)}{{{fence_length},}}[ \t]*",
+            close,
+        ):
             fence_marker = None
             fence_length = 0
         kept.append("\n" if line.endswith("\n") else "")

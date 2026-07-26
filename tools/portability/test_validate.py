@@ -112,6 +112,25 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("reference" in error for error in errors), errors)
 
+    def test_validates_inline_links_with_brackets_in_label(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "[Use `arr[0]`](MISSING.md)\n"
+                "[See [legacy] notes](MISSING.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertEqual(
+                2,
+                sum("reference does not resolve: MISSING.md" in error for error in errors),
+                errors,
+            )
+
     def test_validates_reference_style_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -178,6 +197,22 @@ class PortabilityValidationTests(unittest.TestCase):
                 repo, visibility="private", require_cloud_links=False
             )
             self.assertFalse(any("does not resolve" in error for error in errors), errors)
+
+    def test_closing_code_fence_allows_at_most_three_spaces(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "```\n[example](not-real.md)\n"
+                "    ```\n[real](also-not-real.md)\n```\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("not-real.md" in error for error in errors), errors)
+            self.assertFalse(any("also-not-real.md" in error for error in errors), errors)
 
     def test_rejects_skill_directory_without_skill_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
