@@ -495,6 +495,18 @@ class PortabilityValidationTests(unittest.TestCase):
             errors = VALIDATOR.validate_repo(repo, visibility="public", require_cloud_links=False)
             self.assertFalse(any("absolute path" in error for error in errors), errors)
 
+    def test_public_boundary_rejects_bracket_delimited_local_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            local_root = "/" + "workspace"
+            (skill / "REFERENCE.md").write_text(
+                f"[{local_root}] {{{local_root}}} <{local_root}>\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(repo, visibility="public", require_cloud_links=False)
+            self.assertTrue(any("absolute path" in error for error in errors), errors)
+
     def test_public_boundary_rejects_bare_roots_before_punctuation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
