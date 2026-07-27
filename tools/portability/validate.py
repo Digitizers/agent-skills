@@ -435,12 +435,13 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
         marker = contains_private_marker(relative.as_posix())
         if marker is not None:
             fail(errors, relative, f"private identifier exposed: {marker}")
-        is_env_template = path.name.endswith(ENV_TEMPLATE_SUFFIXES)
+        folded_name = path.name.casefold()
+        is_env_template = folded_name.endswith(ENV_TEMPLATE_SUFFIXES)
         is_env_file = (
-            path.name == ".env"
-            or path.name == ".envrc"
-            or path.name.endswith(".env")
-            or ".env." in path.name
+            folded_name == ".env"
+            or folded_name == ".envrc"
+            or folded_name.endswith(".env")
+            or ".env." in folded_name
         )
         if is_env_file and not is_env_template:
             fail(

@@ -342,11 +342,15 @@ class PortabilityValidationTests(unittest.TestCase):
             make_skill(repo)
             (repo / ".envrc").write_text("TOKEN=secret\n", encoding="utf-8")
             (repo / "prod.env").write_text("TOKEN=secret\n", encoding="utf-8")
+            (repo / ".ENV").write_text("TOKEN=secret\n", encoding="utf-8")
+            (repo / "production.ENV").write_text("TOKEN=secret\n", encoding="utf-8")
             errors = VALIDATOR.validate_repo(
                 repo, visibility="public", require_cloud_links=False
             )
             self.assertTrue(any(".envrc" in error for error in errors))
             self.assertTrue(any("prod.env" in error for error in errors))
+            self.assertTrue(any(".ENV" in error for error in errors))
+            self.assertTrue(any("production.ENV" in error for error in errors))
 
     def test_public_boundary_ignores_untracked_local_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
