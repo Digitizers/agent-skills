@@ -292,6 +292,32 @@ class PortabilityValidationTests(unittest.TestCase):
             self.assertFalse(any("not-real.md" in error for error in errors), errors)
             self.assertFalse(any("also-not-real.md" in error for error in errors), errors)
 
+    def test_three_space_indented_closing_fence_ends_top_level_block(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "```\n[example](not-real.md)\n"
+                "   ```\n"
+                "[real](also-not-real.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(
+                any(error.endswith("reference does not resolve: not-real.md") for error in errors),
+                errors,
+            )
+            self.assertTrue(
+                any(
+                    error.endswith("reference does not resolve: also-not-real.md")
+                    for error in errors
+                ),
+                errors,
+            )
+
     def test_validates_links_in_indented_list_continuations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -552,6 +578,27 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(
                 any("config.yml" in error and "credential value" in error for error in errors),
+                errors,
+            )
+
+    def test_public_boundary_rejects_private_key_and_byte_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / "credentials.py").write_text(
+                'PRIVATE_KEY = "live-private-key"\n'
+                'API_TOKEN = b"live-byte-token"\n',
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertEqual(
+                2,
+                sum(
+                    "credentials.py" in error and "credential value" in error
+                    for error in errors
+                ),
                 errors,
             )
 

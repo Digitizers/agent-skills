@@ -35,7 +35,7 @@ FENCED_CODE_START_RE = re.compile(r"^([ \t]*)(`{3,}|~{3,})")
 INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1", re.DOTALL)
 ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
 CREDENTIAL_NAME_RE = re.compile(
-    r"(?i)(?:api[_-]?key|token|secret|password|credential|database[_-]?url|access[_-]?key|client[_-]?secret)"
+    r"(?i)(?:api[_-]?key|token|secret|password|credential|database[_-]?url|access[_-]?key|client[_-]?secret|private[_-]?key)"
 )
 CREDENTIAL_ASSIGNMENT_RE = re.compile(
     r"""(?ix)
@@ -255,7 +255,7 @@ def strip_fenced_code(text: str) -> str:
             rf"([ \t]*){re.escape(fence_marker)}{{{fence_length},}}[ \t]*",
             close,
         )
-        if close_match and text_width(close_match.group(1)) <= fence_indent:
+        if close_match and text_width(close_match.group(1)) <= max(fence_indent, 3):
             fence_marker = None
             fence_length = 0
             fence_indent = 0
@@ -320,8 +320,18 @@ def python_credential_findings(text: str) -> list[int]:
     def maybe_add(name: str | None, value: ast.AST, line: int) -> None:
         if not name or not CREDENTIAL_NAME_RE.search(name):
             return
-        if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            if not is_placeholder_value(value.value):
+        if isinstance(value, ast.Constant) and isinstance(
+            value.value, (bytes, str)
+        ):
+            if isinstance(value.value, bytes):
+                try:
+                    literal = value.value.decode("utf-8")
+                except UnicodeDecodeError:
+                    findings.add(line)
+                    return
+            else:
+                literal = value.value
+            if not is_placeholder_value(literal):
                 findings.add(line)
 
     def target_name(target: ast.AST) -> str | None:
