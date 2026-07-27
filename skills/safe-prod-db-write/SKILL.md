@@ -29,6 +29,7 @@ compatibility: Needs a way to reach the production database — a deployment pla
 - **Least blast radius.** Scope every mutation by batch / id / explicit filter. Never an unbounded `UPDATE`/`DELETE` — add the `WHERE` and prove it selects only what you intend (count it first).
 - **Idempotent + unique.** Use `skipDuplicates` / unique keys / random tokens so a re-run or partial failure can't double-insert or collide.
 - **Know the undo before you run.** If you can't state how to reverse it, you're not ready to run it.
+- **A verification step must fail LOUD, never produce an answer from missing input.** The dangerous bug in a check is not that it breaks — it is that a failed input silently becomes an empty one, and the check then reports a confident result derived from nothing. An empty query result reads as "no rows match"; an empty file list reads as "nothing exists"; an error on stderr is invisible in a pipeline. Guard the inputs and let errors print, because here the false branch prescribes a **production write**.
 - **Separate generation from distribution — and test on a *different* batch.** Burn throwaway/smoke-test rows from a batch you are **not** shipping, so the live batch you hand off stays pristine.
 - **The connection is a secret.** Never echo the URL, never commit the pulled env file, never paste creds into chat.
 
@@ -62,8 +63,17 @@ Verify both, separately:
 For a whole-ledger reconciliation, diff the complete **sets**, never tails. Order stops mattering once nothing is truncated:
 
 ```bash
+MIGDIR=<migrations dir>
+
+# Fail fast on an empty glob. Without this the command is worse than useless:
+# `ls` writes its error to STDERR, `diff` runs against an empty stream, and
+# STDOUT is a clean report that every ledger row is drift — which points at
+# the production UPDATE below. The one line explaining it is on the other
+# stream, invisible in a pipeline or under `2>/dev/null`.
+ls "$MIGDIR"/*.sql >/dev/null || { echo "no .sql under $MIGDIR" >&2; exit 1; }
+
 diff <(psql -Atc "select version || '_' || name from <ledger> order by 1") \
-     <(ls <migrations dir>/*.sql | sed 's|.*/||; s|\.sql$||' | sort)
+     <(ls "$MIGDIR"/*.sql | sed 's|.*/||; s|\.sql$||' | sort)
 ```
 
 ### Before you `UPDATE` the ledger, prove it is only a label
