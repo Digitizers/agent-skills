@@ -127,6 +127,7 @@ plugin installed pick it up on the next marketplace refresh — no re-install.
 Before opening a PR, run the exact suites used by CI:
 
 ```bash
+python3 -m pip install -r tools/trigger-eval/requirements.txt
 python3 tools/trigger-eval/validate_spec.py
 python3 tools/portability/validate.py \
   --repo . --visibility public --require-cloud-links

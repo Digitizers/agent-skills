@@ -43,6 +43,7 @@ Before moving a skill into a public repository:
 Run:
 
 ```bash
+python3 -m pip install -r tools/trigger-eval/requirements.txt
 python3 tools/portability/validate.py \
   --repo . \
   --visibility public \
