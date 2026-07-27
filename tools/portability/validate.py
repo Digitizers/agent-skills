@@ -209,6 +209,28 @@ def closing_bracket(text: str, start: int) -> int:
     return -1
 
 
+def leading_indent_width(text: str) -> int:
+    width = 0
+    for character in text:
+        if character == " ":
+            width += 1
+        elif character == "\t":
+            width += 4 - (width % 4)
+        else:
+            break
+    return width
+
+
+def text_width(text: str) -> int:
+    width = 0
+    for character in text:
+        if character == "\t":
+            width += 4 - (width % 4)
+        else:
+            width += 1
+    return width
+
+
 def strip_fenced_code(text: str) -> str:
     lines = text.splitlines(keepends=True)
     kept: list[str] = []
@@ -238,28 +260,23 @@ def strip_fenced_code(text: str) -> str:
 def strip_indented_code(text: str) -> str:
     kept: list[str] = []
     in_list_item = False
+    list_code_indent = 8
     for line in text.splitlines(keepends=True):
         content = line.rstrip("\r\n")
         if not content.strip():
             kept.append(line)
             continue
 
-        if LIST_ITEM_RE.match(content):
+        list_match = LIST_ITEM_RE.match(content)
+        if list_match:
             in_list_item = True
+            list_code_indent = text_width(list_match.group(0)) + 4
             kept.append(line)
             continue
 
-        indent = 0
-        for character in content:
-            if character == " ":
-                indent += 1
-            elif character == "\t":
-                indent += 4
-                break
-            else:
-                break
+        indent = leading_indent_width(content)
 
-        if indent >= 4 and not (in_list_item and "\t" not in content[:indent] and indent < 8):
+        if indent >= 4 and not (in_list_item and indent < list_code_indent):
             kept.append("\n" if line.endswith("\n") else "")
         else:
             kept.append(line)
@@ -321,6 +338,8 @@ def python_credential_findings(text: str) -> list[int]:
             for key, value in zip(node.keys, node.values):
                 if isinstance(key, ast.Constant) and isinstance(key.value, str):
                     maybe_add(key.value, value, getattr(value, "lineno", node.lineno))
+        elif isinstance(node, ast.keyword):
+            maybe_add(node.arg, node.value, getattr(node.value, "lineno", node.lineno))
     return findings
 
 

@@ -308,6 +308,22 @@ class PortabilityValidationTests(unittest.TestCase):
             self.assertFalse(any("not-real.md" in error for error in errors), errors)
             self.assertTrue(any("reference does not resolve: MISSING.md" in error for error in errors))
 
+    def test_derives_nested_code_indent_from_list_marker_width(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "- Example:\n"
+                "\n"
+                "      [literal](not-real.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("not-real.md" in error for error in errors), errors)
+
     def test_rejects_skill_directory_without_skill_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -459,6 +475,11 @@ class PortabilityValidationTests(unittest.TestCase):
                 'API_TOKEN = "sk-live-secret-value"\n',
                 encoding="utf-8",
             )
+            (repo / "client.py").write_text(
+                'SDK(api_key="sk-live-secret-value")\n'
+                'dict(API_TOKEN="sk-live-secret-value")\n',
+                encoding="utf-8",
+            )
             (repo / "config.yml").write_text(
                 "client_secret: <replace-me>\n",
                 encoding="utf-8",
@@ -480,6 +501,11 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(
                 any("settings.py" in error and "credential value" in error for error in errors),
+                errors,
+            )
+            self.assertEqual(
+                2,
+                sum("client.py" in error and "credential value" in error for error in errors),
                 errors,
             )
             self.assertFalse(
