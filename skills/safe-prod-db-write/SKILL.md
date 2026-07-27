@@ -1,7 +1,7 @@
 ---
 name: safe-prod-db-write
-description: Safely run a one-off write, backfill, or data-mutating script against a PRODUCTION database — pull the connection from the platform, dry-run, get explicit human authorization, execute, verify, clean up. Use before running any script that inserts/updates/deletes prod data (generating codes, backfills, one-off fixes, seed data), when the user asks to write/mutate production data, or when a task needs a real prod DB connection. Also use when adding a DB model/table/migration or setting up a CI guard that enforces a per-table invariant (RLS enabled, tenant column, required index) — see "Enforce schema invariants in CI". Assumes a Neon/Vercel-style setup with the platform CLI, but the protocol generalizes.
-compatibility: Requires the deployment platform CLI (e.g. `vercel`) to pull the production connection string, and a database client (e.g. `psql`, `prisma`) to run the script against it.
+description: Safely run a one-off write, backfill, or data-mutating script against a PRODUCTION database — pull the connection from the platform, dry-run, get explicit human authorization, execute, verify, clean up. Use before running any script that inserts/updates/deletes prod data (generating codes, backfills, one-off fixes, seed data), when the user asks to write/mutate production data, or when a task needs a real prod DB connection. Also use when adding a DB model/table/migration, when applying a migration to a hosted project through a dashboard or MCP tool (Supabase `apply_migration`, Neon, PlanetScale) — see "Migrations applied by a hosted tool" — or when setting up a CI guard that enforces a per-table invariant (RLS enabled, tenant column, required index) — see "Enforce schema invariants in CI". Assumes a Neon/Vercel-style setup with the platform CLI, but the protocol generalizes.
+compatibility: Needs a way to reach the production database — a deployment platform CLI (e.g. `vercel`) to pull the connection string plus a client (`psql`, `prisma`), or a hosted tool that executes SQL directly (e.g. the Supabase MCP server) — in which case protocol steps 1 and 6 do not apply, see the note under the protocol. The verification steps assume you can run arbitrary reads against the target.
 ---
 
 # Safe production DB write
@@ -16,19 +16,84 @@ compatibility: Requires the deployment platform CLI (e.g. `vercel`) to pull the 
    vercel env pull "$ENVFILE" --environment=production -y   # or your platform's equivalent
    ```
    - **Neon + Vercel gotcha:** `DATABASE_URL` / `DIRECT_DATABASE_URL` are often marked *Sensitive*, so `vercel env pull` returns them **empty** — the run then has no connection. Use `DATABASE_URL_UNPOOLED` (Neon's direct, non-sensitive URL), which pulls fine, and map it into `DATABASE_URL` for the command. Don't un-mark the sensitive vars (that widens exposure).
-2. **Dry-run first.** If the script has `--dry-run`, run it and **read the exact rows/output that WOULD be written**. No dry-run flag? Preview with a rolled-back transaction or a `SELECT` that shows the effect. Confirm the target (table / batch / id range) is in the expected **pre-state** — e.g. the batch count is `0` before you insert.
+2. **Dry-run first.** If the script has `--dry-run`, run it and **read the exact rows/output that WOULD be written**. No dry-run flag? For a **data write**, preview with a `SELECT` over the same `WHERE`, or a transaction you roll back. For a **migration (DDL)**, neither substitutes — see the hosted-tool note below; the preview belongs on a disposable database, never as a rolled-back trial against production. Confirm the target (table / batch / id range) is in the expected **pre-state** — e.g. the batch count is `0` before you insert.
 3. **Get explicit human authorization for the real write.** State precisely: what operation, **how many rows**, which table, which env. Approval of a dry-run is **not** approval of the write — ask again for the live run.
 4. **Execute.** Capture stdout to a file if it *is* the deliverable (e.g. a codes CSV). Keep the command identical to the dry-run minus the flag.
 5. **Verify post-state with a read.** Row count == intended, and key invariants hold (uniqueness, flags set correctly, `redeemedBy IS NULL`, etc.). A write you didn't verify isn't done.
 6. **Clean up.** The `EXIT` trap from step 1 removes the temp creds file on every exit path — including failure. If you didn't arm one, `rm -f "$ENVFILE"` now. Never leave a prod-credentials file on disk.
+
+**When a hosted tool executes the SQL** (a Supabase MCP server, a dashboard console, a platform API), **steps 1 and 6 do not apply** — the tool holds the credentials, nothing is pulled and nothing lands on disk to delete. Every other step applies unchanged, and they get *easier to skip*, not less necessary: there is no `--dry-run` flag to reach for and no command echo to eyeball, so step 5 is the only thing between you and an unverified write.
+
+Step 2 on this path splits by what you are running, and **the two halves are not interchangeable**:
+
+- **A data write** (`UPDATE`/`INSERT`/`DELETE`) — a `SELECT` over the same `WHERE` *is* the dry-run. It shows the exact rows about to change.
+- **A migration (DDL)** — a `SELECT` is **not** a dry-run and must not be presented as one. It reads the pre-state; it never executes the migration, so it cannot surface invalid SQL, a constraint that will reject, a trigger side effect, or lock behavior. The only real preview executes the statements, and it belongs on a **throwaway database carrying the same migration history** — never on production. `begin; … rollback;` is a preview technique *for that disposable database* (Postgres has transactional DDL, `CREATE INDEX CONCURRENTLY` and friends excepted); it is **not** a way to make a production trial safe. A rolled-back transaction still took the locks for its duration, and a migration can reach outside the transaction entirely. If no throwaway database exists, the honest answer is that this migration has no dry-run — say so at step 3 and let the human authorize it on those terms, rather than executing against production to find out.
 
 ## Rules
 
 - **Least blast radius.** Scope every mutation by batch / id / explicit filter. Never an unbounded `UPDATE`/`DELETE` — add the `WHERE` and prove it selects only what you intend (count it first).
 - **Idempotent + unique.** Use `skipDuplicates` / unique keys / random tokens so a re-run or partial failure can't double-insert or collide.
 - **Know the undo before you run.** If you can't state how to reverse it, you're not ready to run it.
+- **A verification step must fail LOUD, never produce an answer from missing input.** The dangerous bug in a check is not that it breaks — it is that a failed input silently becomes an empty one, and the check then reports a confident result derived from nothing. An empty query result reads as "no rows match"; an empty file list reads as "nothing exists"; an error on stderr is invisible in a pipeline. Guard the inputs and let errors print, because here the false branch prescribes a **production write**.
 - **Separate generation from distribution — and test on a *different* batch.** Burn throwaway/smoke-test rows from a batch you are **not** shipping, so the live batch you hand off stays pristine.
 - **The connection is a secret.** Never echo the URL, never commit the pulled env file, never paste creds into chat.
+
+## Migrations applied by a hosted tool: verify the ledger, not just the schema
+
+When a managed platform applies a migration for you — a dashboard button, an MCP tool, a hosted API — **it may record it under a version it chose rather than your filename.** Observed with Supabase's `apply_migration`: a file named `20260726270000_order_where_the_limit_is.sql` landed in `supabase_migrations.schema_migrations` as version `20260726231221`, the wall clock at apply time. It recurred on *every* apply — three times in one session — so this is a per-apply check, not a once-per-project one.
+
+The reason it slips past step 5 is that it splits two things a single read conflates:
+
+| | after a drifted apply |
+|---|---|
+| Database catalog | **correct** — the DDL ran, the function/table/policy is what you wrote |
+| Migration ledger | **wrong** — names a version that has no file in the repo |
+
+Verify both, separately:
+
+1. **The change is really in the catalog.** Introspect for the specific thing you altered, don't infer it from "the tool returned success" — e.g. `select pg_get_functiondef(oid) ...`, `pg_class.relrowsecurity`, `pg_indexes`.
+2. **The row you just wrote carries the version you intended.** Query it **by name** — the identity you control — and compare against the version in your filename:
+
+   ```sql
+   -- `name` is the name PORTION only: no version prefix, no .sql extension.
+   -- For 20260726270000_order_where_the_limit_is.sql that is
+   -- 'order_where_the_limit_is', not the filename.
+   select version from <ledger> where name = '<migration name>';
+   ```
+
+   Getting that wrong returns **zero rows**, which reads as "never applied" and sends you to the wrong branch of the diagnosis table below — so match the ledger's own column, not the filename.
+
+   Do **not** check this by comparing the newest N of each side. A stamped version can sort *below* migrations already present (the wall clock is behind your filename's timestamp), so the drifted row and its repo file can both fall outside their respective windows — the two tails then match and the check passes on a drifted ledger. Any positional window has this hole; keying on the name does not.
+
+A **whole-ledger reconciliation** — every `version_name` in the ledger against every migration filename — is occasionally worth doing, after a branch merge or when inheriting a project. Compare complete **sets**, never tails, and if you write it as a shell one-liner, know that four things will silently turn "the check failed" into "everything is drifted", each of which points at the production `UPDATE` below:
+
+- `name` is **nullable** in Supabase's `schema_migrations` (`version` is not), so `version || '_' || name` is `NULL` for a legacy unnamed row and `psql -At` prints it as a **blank line** — the row stops being itself and shifts the whole comparison. `coalesce` it, and reconcile unnamed rows by `version` alone.
+- An unmatched glob is either the literal pattern (counting as one match) or, under `nullglob`, nothing at all — which degrades `ls <glob>` to a bare `ls` listing the **current directory**. Not an empty set: the wrong set, shaped like a real answer. Assert on a match count.
+- Process substitution **does not propagate exit status**. `diff <(psql …)` with a failing query reads an empty pseudo-file, and `diff` exits 1 — which per its own docs means only "inputs differ", the same status as genuine drift. Materialize the query and check it first.
+- Errors land on **stderr**, invisible in a pipeline, while the wrong answer goes to stdout.
+
+That list is the reason this is prose and not a snippet to paste: each stage of such a pipeline is a place to fail open, and a command in a document is never executed, so nothing catches the next one. If you need this routinely, put it in a script under version control where it can be tested — and see the fail-loud rule above.
+
+### Before you `UPDATE` the ledger, prove it is only a label
+
+A version mismatch has several causes and **only one of them is fixed by relabelling.** The catalog check proves a schema object exists; it does *not* establish which ledger row corresponds to which file. Rewriting a version on a wrong assumption marks unrelated DDL as applied and corrupts every future diff and push — a worse state than the drift, and harder to see.
+
+| The mismatch means | Correct action |
+|---|---|
+| Same migration, wrong version label (name matches, its DDL is in the catalog) | Relabel — below |
+| A repo file genuinely never applied | Apply it. **Never** relabel to hide it |
+| Ledger rows from another branch or environment | Reconcile the branches; not a local fix |
+| The migration was renamed | Fix the name, and decide which side is authoritative first |
+
+Only in the first row, and only after confirming the name matches *and* its DDL is present in the catalog, relabel. The **"least blast radius" rule applies in full** — it is easy to skip here precisely because the change feels clerical:
+
+```sql
+update <ledger> set version = '<version from the repo filename>'
+ where version = '<the stamped version>' and name = '<migration name>';
+-- expect exactly: UPDATE 1
+```
+
+Nothing needs re-running: the catalog is already correct, and the label is all that moves. Leaving drift costs more than it looks — nothing reads the ledger until someone runs a schema diff or a `db push`, and *that* person sees one orphan version beside one apparently-unapplied file, with no way to tell whether the DDL ran.
 
 ## Enforce schema invariants in CI, not by memory
 
@@ -49,4 +114,5 @@ This catches the gap at **PR time** instead of in production, and it's portable 
 | "The dry-run looked fine, running it" | Re-confirm the live write with the human — dry-run approval ≠ write approval. |
 | "Connection came back empty, I'll un-mark Sensitive" | Use `DATABASE_URL_UNPOOLED` instead; don't widen credential exposure. |
 | "Done — it inserted" | Not done until a read verifies count + invariants. |
+| "The migration tool returned success" | It reports that *it* ran, not what landed. Check the catalog **and** that the recorded version matches your filename. |
 | "I'll clean up the env file later" | Clean up now, on every exit path — it holds prod creds. |
