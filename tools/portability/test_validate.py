@@ -1188,6 +1188,50 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("credential value" in error for error in errors), errors)
 
+    def test_public_boundary_rejects_credentials_embedded_in_python_strings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "script.py").write_text(
+                'CONFIG = "API_TOKEN=sk-live-secret"\n',
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("credential value" in error for error in errors), errors)
+
+    def test_public_boundary_ignores_credential_term_substrings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "config.yaml").write_text(
+                "max_tokens: 4096\n"
+                "tokenizer: cl100k_base\n"
+                "passwordless: true\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertFalse(any("credential value" in error for error in errors), errors)
+
+    def test_public_boundary_accepts_descriptive_credential_name_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "config.yaml").write_text(
+                "required_credentials:\n"
+                "  - API_TOKEN\n"
+                "credential_names:\n"
+                "  - CLIENT_SECRET\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertFalse(any("credential value" in error for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()

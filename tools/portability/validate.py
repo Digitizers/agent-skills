@@ -33,7 +33,7 @@ ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 FENCED_CODE_START_RE = re.compile(r"^([ \t]*)(`{3,}|~{3,})")
 ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
 CREDENTIAL_NAME_RE = re.compile(
-    r"(?i)(?:api[ _-]?key|token|secret|password|credential|database[ _-]?url|access[ _-]?key|client[ _-]?secret|private[ _-]?key)"
+    r"(?i)(?<![A-Za-z0-9])(?:api[ _-]?key|token|secret|password|credentials?|database[ _-]?url|access[ _-]?key|client[ _-]?secret|private[ _-]?key)(?![A-Za-z0-9])"
 )
 CREDENTIAL_ASSIGNMENT_RE = re.compile(
     r"""(?ix)
@@ -458,8 +458,11 @@ def regex_credential_findings(text: str) -> list[int]:
         ):
             continue
         assignment_indent = leading_indent_width(line)
-        name_list_context = (
-            name_only.group("name").strip().casefold() == "credentials"
+        normalized_name = re.sub(
+            r"[ .-]+", "_", name_only.group("name").strip().casefold()
+        )
+        name_list_context = normalized_name.endswith(
+            ("credentials", "credential_names")
         )
         for continuation in lines[index + 1 :]:
             candidate = continuation.strip()
@@ -584,6 +587,13 @@ def python_credential_findings(text: str) -> list[int]:
         if literal is not None and not is_placeholder_value(literal):
             findings.add(line)
 
+    def maybe_add_embedded(value: ast.AST, line: int) -> None:
+        literal = static_string_value(value)
+        if literal is None:
+            return
+        for offset in regex_credential_findings(literal):
+            findings.add(line + offset - 1)
+
     def target_name(target: ast.AST) -> str | None:
         if isinstance(target, ast.Name):
             return target.id
@@ -596,9 +606,11 @@ def python_credential_findings(text: str) -> list[int]:
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
+            maybe_add_embedded(node.value, node.lineno)
             for target in node.targets:
                 maybe_add(target_name(target), node.value, node.lineno)
         elif isinstance(node, ast.AnnAssign):
+            maybe_add_embedded(node.value, node.lineno)
             maybe_add(target_name(node.target), node.value, node.lineno)
         elif isinstance(node, ast.Dict):
             for key, value in zip(node.keys, node.values):
