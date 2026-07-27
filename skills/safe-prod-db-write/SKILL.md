@@ -1,7 +1,7 @@
 ---
 name: safe-prod-db-write
 description: Safely run a one-off write, backfill, or data-mutating script against a PRODUCTION database — pull the connection from the platform, dry-run, get explicit human authorization, execute, verify, clean up. Use before running any script that inserts/updates/deletes prod data (generating codes, backfills, one-off fixes, seed data), when the user asks to write/mutate production data, or when a task needs a real prod DB connection. Also use when adding a DB model/table/migration, when applying a migration to a hosted project through a dashboard or MCP tool (Supabase `apply_migration`, Neon, PlanetScale) — see "Migrations applied by a hosted tool" — or when setting up a CI guard that enforces a per-table invariant (RLS enabled, tenant column, required index) — see "Enforce schema invariants in CI". Assumes a Neon/Vercel-style setup with the platform CLI, but the protocol generalizes.
-compatibility: Needs a way to reach the production database — a deployment platform CLI (e.g. `vercel`) to pull the connection string plus a client (`psql`, `prisma`), or a hosted tool that executes SQL directly (e.g. the Supabase MCP server). The verification steps assume you can run arbitrary reads against the target.
+compatibility: Needs a way to reach the production database — a deployment platform CLI (e.g. `vercel`) to pull the connection string plus a client (`psql`, `prisma`), or a hosted tool that executes SQL directly (e.g. the Supabase MCP server) — in which case protocol steps 1 and 6 do not apply, see the note under the protocol. The verification steps assume you can run arbitrary reads against the target.
 ---
 
 # Safe production DB write
@@ -21,6 +21,8 @@ compatibility: Needs a way to reach the production database — a deployment pla
 4. **Execute.** Capture stdout to a file if it *is* the deliverable (e.g. a codes CSV). Keep the command identical to the dry-run minus the flag.
 5. **Verify post-state with a read.** Row count == intended, and key invariants hold (uniqueness, flags set correctly, `redeemedBy IS NULL`, etc.). A write you didn't verify isn't done.
 6. **Clean up.** The `EXIT` trap from step 1 removes the temp creds file on every exit path — including failure. If you didn't arm one, `rm -f "$ENVFILE"` now. Never leave a prod-credentials file on disk.
+
+**When a hosted tool executes the SQL** (a Supabase MCP server, a dashboard console, a platform API), **steps 1 and 6 do not apply** — the tool holds the credentials, nothing is pulled and nothing lands on disk to delete. Every other step applies unchanged, and the two that matter most get *easier* to skip, not less necessary: there is no `--dry-run` flag to reach for, so step 2 has to be a deliberate `SELECT`, and there is no command echo to eyeball, so step 5 is the only thing standing between you and an unverified write.
 
 ## Rules
 
@@ -47,8 +49,13 @@ Verify both, separately:
 2. **The row you just wrote carries the version you intended.** Query it **by name** — the identity you control — and compare against the version in your filename:
 
    ```sql
-   select version from <ledger> where name = '<the migration you just applied>';
+   -- `name` is the name PORTION only: no version prefix, no .sql extension.
+   -- For 20260726270000_order_where_the_limit_is.sql that is
+   -- 'order_where_the_limit_is', not the filename.
+   select version from <ledger> where name = '<migration name>';
    ```
+
+   Getting that wrong returns **zero rows**, which reads as "never applied" and sends you to the wrong branch of the diagnosis table below — so match the ledger's own column, not the filename.
 
    Do **not** check this by comparing the newest N of each side. A stamped version can sort *below* migrations already present (the wall clock is behind your filename's timestamp), so the drifted row and its repo file can both fall outside their respective windows — the two tails then match and the check passes on a drifted ledger. Any positional window has this hole; keying on the name does not.
 
