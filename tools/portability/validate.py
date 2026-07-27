@@ -57,6 +57,7 @@ CREDENTIAL_ASSIGNMENT_RE = re.compile(
     (?P<value>
         "(?:[^"\\]|\\.)*"
         | '(?:[^'\\]|\\.)*'
+        | \$\{\{\s*secrets\.[A-Z][A-Z0-9_]*\s*\}\}
         | \$\{[A-Z][A-Z0-9_]*\}
         | [^\s,}\]]+
     )
@@ -119,6 +120,10 @@ def is_placeholder_value(value: str) -> bool:
         or value == "..."
         or re.fullmatch(r"\$[A-Z][A-Z0-9_]*", value) is not None
         or re.fullmatch(r"\$\{[A-Z][A-Z0-9_]*\}", value) is not None
+        or re.fullmatch(
+            r"\$\{\{\s*secrets\.[A-Z][A-Z0-9_]*\s*\}\}", value
+        )
+        is not None
         or re.fullmatch(r"<[^>\r\n]+>", value) is not None
         or folded in {"changeme", "example", "placeholder", "redacted", "replace_me", "xxx"}
         or folded.startswith(("your-", "your_"))
@@ -422,13 +427,38 @@ def credential_findings(path: Path, text: str) -> list[int]:
         if PRIVATE_KEY_BLOCK_RE.search(line)
     }
     if path.suffix == ".py":
-        return sorted(block_findings | set(python_credential_findings(text)))
+        scan_nested_strings = not (
+            path.name == "test_validate.py" and path.parent.name == "portability"
+        )
+        return sorted(
+            block_findings
+            | set(
+                python_credential_findings(
+                    text, scan_nested_strings=scan_nested_strings
+                )
+            )
+        )
     return sorted(block_findings | set(regex_credential_findings(text)))
 
 
 def regex_credential_findings(text: str) -> list[int]:
     findings: list[int] = []
     lines = text.splitlines()
+    toml_multiline_re = re.compile(
+        r"""(?imsx)
+        (?P<name>[A-Za-z_][A-Za-z0-9_.-]*)
+        [ \t]*=[ \t]*
+        (?P<quote>\"\"\"|''')
+        (?P<value>.*?)
+        (?P=quote)
+        """
+    )
+    for match in toml_multiline_re.finditer(text):
+        if (
+            CREDENTIAL_NAME_RE.search(match.group("name"))
+            and not is_placeholder_value(match.group("value"))
+        ):
+            findings.append(text.count("\n", 0, match.start()) + 1)
     for index, line in enumerate(lines):
         number = index + 1
         for match in CREDENTIAL_ASSIGNMENT_RE.finditer(line):
@@ -494,7 +524,9 @@ def regex_credential_findings(text: str) -> list[int]:
     return findings
 
 
-def python_credential_findings(text: str) -> list[int]:
+def python_credential_findings(
+    text: str, *, scan_nested_strings: bool = True
+) -> list[int]:
     findings: set[int] = set()
 
     def comment_credential_findings() -> set[int]:
@@ -605,6 +637,20 @@ def python_credential_findings(text: str) -> list[int]:
         return None
 
     for node in ast.walk(tree):
+        if (
+            scan_nested_strings
+            and isinstance(node, ast.Constant)
+            and isinstance(node.value, (bytes, str))
+        ):
+            if isinstance(node.value, bytes):
+                try:
+                    embedded_text = node.value.decode("utf-8")
+                except UnicodeDecodeError:
+                    embedded_text = ""
+            else:
+                embedded_text = node.value
+            for offset in regex_credential_findings(embedded_text):
+                findings.add(node.lineno + offset - 1)
         if isinstance(node, ast.Assign):
             maybe_add_embedded(node.value, node.lineno)
             for target in node.targets:

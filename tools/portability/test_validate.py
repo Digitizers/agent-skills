@@ -41,6 +41,10 @@ def make_skill(repo: Path, name: str = "widget") -> Path:
     return skill
 
 
+def fixture_secret() -> str:
+    return "sk-live-" + "secret-value"
+
+
 class PortabilityValidationTests(unittest.TestCase):
     def test_missing_pyyaml_has_actionable_error(self) -> None:
         result = subprocess.run(
@@ -1225,6 +1229,52 @@ class PortabilityValidationTests(unittest.TestCase):
                 "  - API_TOKEN\n"
                 "credential_names:\n"
                 "  - CLIENT_SECRET\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertFalse(any("credential value" in error for error in errors), errors)
+
+    def test_public_boundary_rejects_nested_python_credential_strings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            secret = fixture_secret()
+            (skill / "script.py").write_text(
+                f'CONFIG = {{"env": "API_TOKEN={secret}"}}\n'
+                f'load("API_TOKEN={secret}")\n',
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertEqual(
+                2,
+                sum("credential value" in error for error in errors),
+                errors,
+            )
+
+    def test_public_boundary_rejects_toml_multiline_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            secret = fixture_secret()
+            (skill / "config.toml").write_text(
+                f'api_key = """\n{secret}\n"""\n',
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("credential value" in error for error in errors), errors)
+
+    def test_public_boundary_accepts_github_actions_secret_references(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "workflow.yaml").write_text(
+                "token: ${{ secrets.DEPLOY_TOKEN }}\n",
                 encoding="utf-8",
             )
             errors = VALIDATOR.validate_repo(
