@@ -58,8 +58,11 @@ Codex posts the **review object first** (state `COMMENTED`, body = a generic *"�
   This is the most expensive mistake in the loop, and the "no test → the next Codex pass is the check" instinct is exactly what causes it: it outsources the sweep to the reviewer, so you pay **a full round per instance**. Observed: a public-repos-are-free caveat was corrected in the one place Codex flagged, four rounds running — a single grep found **five** stale copies, including a `REFERENCE` line that directly contradicted a bucket added two commits earlier.
 
   **A high round count on the *same invariant* is the tell.** 3+ rounds finding *different* bugs is the loop working. 3+ rounds re-finding *the same rule* means you are patching pointwise — stop, sweep, and land it in one commit.
+
+  **Count findings by SOURCE, not just by rule — "different bugs" is not a clean bill of health.** The test above clears you when each round finds something new, and that is the hole: findings can be genuinely distinct and still all trace to one artifact, in which case the artifact is the bug. Observed: seven rounds on a skill doc produced a mismatched sort, a `NULL` concatenation, a `nullglob` hole, and a swallowed exit status — four unrelated bugs by any normal reading, so the "different bugs = working" test said keep going. Six of the seven traced to **one optional shell snippet**, and all six were one class (a stage failing open). Deleting the snippet retired the class in a single commit; six rounds of patching had not. So tally each round's findings against the file, function, or block they came from — when one source keeps producing them, ask what that source is *for* and whether it earns its place, instead of fixing the next instance.
 - **Stay inside the project's constraints.** Match its language/runtime version matrix, lint rules, framework, and conventions. A "fix" that breaks the CI matrix (e.g. a newer-language builtin on an older runtime) is itself a new finding — check the CI config before writing the fix.
 - **Surface owner decisions; don't guess.** A finding whose fix is a product / design / security / API tradeoff goes to the human, not an autonomous guess.
+- **Escalate the mechanism by round 3–4, not round 7.** The moment a *second* round patches the same invariant or the same source, stop and ask whether the **proof mechanism** is wrong rather than the patch. Patching an unsound mechanism converges slowly or never; replacing it converges in one commit. Put that redesign to the human — deleting or restructuring someone's code is their call, and it is the one decision the loop cannot make for itself. This applies to any change, not only the distributed-state kind below: a doc that ships a paste-able command owns that command's failure modes exactly the way code does, and one fail-open surface per pipeline stage is a mechanism problem, not a series of typos.
 - **Fixes get their own commit, naming the round**, e.g. `fix(auth): register category before abilities (Codex round-3 P1)` — keeps the loop auditable.
 
 ## Reviewer failure modes
@@ -92,7 +95,7 @@ When the change orchestrates **distributed state** — an external registry with
 - **Which evidence classes may trigger an irreversible action?** Deterministic proof only; a failed command is *not* proof the remote didn't commit (two-generals).
 - **What does ambiguity do?** Always preserve, never delete; sticky across retries — a later guard-failure never launders an earlier ambiguous attempt.
 
-And the escalation trigger, sharpened from "Fix the RULE" above: **the moment you notice a second round patching the same invariant, stop and ask whether the *proof mechanism* is wrong — and put the redesign decision to the human by round 3–4, not round 7.** Patching an unsound invariant converges slowly or never; replacing it converges in one commit.
+The **"escalate the mechanism by round 3–4"** rule above is at its sharpest here, because an improvised evidence model is precisely an unsound proof mechanism: every round retrofits one more hole, and the redesign that ends it is one commit.
 
 ## Polling cadence
 
