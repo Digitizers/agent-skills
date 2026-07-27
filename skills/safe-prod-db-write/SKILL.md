@@ -22,7 +22,12 @@ compatibility: Needs a way to reach the production database — a deployment pla
 5. **Verify post-state with a read.** Row count == intended, and key invariants hold (uniqueness, flags set correctly, `redeemedBy IS NULL`, etc.). A write you didn't verify isn't done.
 6. **Clean up.** The `EXIT` trap from step 1 removes the temp creds file on every exit path — including failure. If you didn't arm one, `rm -f "$ENVFILE"` now. Never leave a prod-credentials file on disk.
 
-**When a hosted tool executes the SQL** (a Supabase MCP server, a dashboard console, a platform API), **steps 1 and 6 do not apply** — the tool holds the credentials, nothing is pulled and nothing lands on disk to delete. Every other step applies unchanged, and the two that matter most get *easier* to skip, not less necessary: there is no `--dry-run` flag to reach for, so step 2 has to be a deliberate `SELECT`, and there is no command echo to eyeball, so step 5 is the only thing standing between you and an unverified write.
+**When a hosted tool executes the SQL** (a Supabase MCP server, a dashboard console, a platform API), **steps 1 and 6 do not apply** — the tool holds the credentials, nothing is pulled and nothing lands on disk to delete. Every other step applies unchanged, and they get *easier to skip*, not less necessary: there is no `--dry-run` flag to reach for and no command echo to eyeball, so step 5 is the only thing between you and an unverified write.
+
+Step 2 on this path splits by what you are running, and **the two halves are not interchangeable**:
+
+- **A data write** (`UPDATE`/`INSERT`/`DELETE`) — a `SELECT` over the same `WHERE` *is* the dry-run. It shows the exact rows about to change.
+- **A migration (DDL)** — a `SELECT` is **not** a dry-run and must not be presented as one. It reads the pre-state; it never executes the migration, so it cannot surface invalid SQL, a constraint that will reject, a trigger side effect, or lock behavior. Run it against a **throwaway database carrying the same migration history** — the only preview that exercises the statements themselves — or wrap it in `begin; … rollback;` where the tool gives you transaction control (Postgres has transactional DDL, with exceptions such as `CREATE INDEX CONCURRENTLY`).
 
 ## Rules
 
@@ -72,9 +77,11 @@ MIGDIR=<migrations dir>
 # stream, invisible in a pipeline or under `2>/dev/null`.
 ls "$MIGDIR"/*.sql >/dev/null || { echo "no .sql under $MIGDIR" >&2; exit 1; }
 
-diff <(psql -Atc "select version || '_' || name from <ledger> order by 1") \
+diff <(psql -Atc "select version || '_' || coalesce(name, '') from <ledger> order by 1") \
      <(ls "$MIGDIR"/*.sql | sed 's|.*/||; s|\.sql$||' | sort)
 ```
+
+`coalesce` is load-bearing, not defensive. `name` is **nullable** in Supabase's `schema_migrations` (`version` is not), and `version || '_' || NULL` is `NULL`, which `psql -At` prints as a **blank line** — so a legacy unnamed row does not show up as itself, it shifts the comparison and reports as drift. Same failure class as the guard above: a missing input quietly becoming an empty one. Rows with no name still can't match a named repo file, so reconcile those by `version` alone.
 
 ### Before you `UPDATE` the ledger, prove it is only a label
 
