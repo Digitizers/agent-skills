@@ -16,7 +16,7 @@ compatibility: Needs a way to reach the production database — a deployment pla
    vercel env pull "$ENVFILE" --environment=production -y   # or your platform's equivalent
    ```
    - **Neon + Vercel gotcha:** `DATABASE_URL` / `DIRECT_DATABASE_URL` are often marked *Sensitive*, so `vercel env pull` returns them **empty** — the run then has no connection. Use `DATABASE_URL_UNPOOLED` (Neon's direct, non-sensitive URL), which pulls fine, and map it into `DATABASE_URL` for the command. Don't un-mark the sensitive vars (that widens exposure).
-2. **Dry-run first.** If the script has `--dry-run`, run it and **read the exact rows/output that WOULD be written**. No dry-run flag? Preview with a rolled-back transaction or a `SELECT` that shows the effect. Confirm the target (table / batch / id range) is in the expected **pre-state** — e.g. the batch count is `0` before you insert.
+2. **Dry-run first.** If the script has `--dry-run`, run it and **read the exact rows/output that WOULD be written**. No dry-run flag? For a **data write**, preview with a `SELECT` over the same `WHERE`, or a transaction you roll back. For a **migration (DDL)**, neither substitutes — see the hosted-tool note below; the preview belongs on a disposable database, never as a rolled-back trial against production. Confirm the target (table / batch / id range) is in the expected **pre-state** — e.g. the batch count is `0` before you insert.
 3. **Get explicit human authorization for the real write.** State precisely: what operation, **how many rows**, which table, which env. Approval of a dry-run is **not** approval of the write — ask again for the live run.
 4. **Execute.** Capture stdout to a file if it *is* the deliverable (e.g. a codes CSV). Keep the command identical to the dry-run minus the flag.
 5. **Verify post-state with a read.** Row count == intended, and key invariants hold (uniqueness, flags set correctly, `redeemedBy IS NULL`, etc.). A write you didn't verify isn't done.
@@ -68,8 +68,10 @@ Verify both, separately:
 For a whole-ledger reconciliation, diff the complete **sets**, never tails. Order stops mattering once nothing is truncated:
 
 ```bash
-# bash: needs arrays and shopt.
-MIGDIR=<migrations dir>
+# bash: needs arrays and shopt. Set MIGDIR to your migrations directory —
+# quoted, because the rest of the snippet quotes it and a path with a space
+# would otherwise split.
+MIGDIR="supabase/migrations"
 
 # Assert on the MATCH COUNT, not on an exit status. Without this the command is
 # worse than useless — it reports every ledger row as drift, pointing straight
