@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import argparse
 import ast
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tokenize
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -29,8 +31,8 @@ REFERENCE_DEF_RE = re.compile(
     re.MULTILINE,
 )
 ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
-FENCED_CODE_START_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
-INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1")
+FENCED_CODE_START_RE = re.compile(r"^([ \t]*)(`{3,}|~{3,})")
+INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1", re.DOTALL)
 ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
 CREDENTIAL_NAME_RE = re.compile(
     r"(?i)(?:api[_-]?key|token|secret|password|credential|database[_-]?url|access[_-]?key|client[_-]?secret)"
@@ -236,23 +238,27 @@ def strip_fenced_code(text: str) -> str:
     kept: list[str] = []
     fence_marker: str | None = None
     fence_length = 0
+    fence_indent = 0
     for line in lines:
         if fence_marker is None:
             match = FENCED_CODE_START_RE.match(line)
             if match:
-                fence_marker = match.group(1)[0]
-                fence_length = len(match.group(1))
+                fence_indent = text_width(match.group(1))
+                fence_marker = match.group(2)[0]
+                fence_length = len(match.group(2))
                 kept.append("\n" if line.endswith("\n") else "")
                 continue
             kept.append(line)
             continue
         close = line.rstrip("\r\n")
-        if re.fullmatch(
-            rf"[ \t]{{0,3}}{re.escape(fence_marker)}{{{fence_length},}}[ \t]*",
+        close_match = re.fullmatch(
+            rf"([ \t]*){re.escape(fence_marker)}{{{fence_length},}}[ \t]*",
             close,
-        ):
+        )
+        if close_match and text_width(close_match.group(1)) <= fence_indent:
             fence_marker = None
             fence_length = 0
+            fence_indent = 0
         kept.append("\n" if line.endswith("\n") else "")
     return "".join(kept)
 
@@ -309,14 +315,14 @@ def python_credential_findings(text: str) -> list[int]:
     except SyntaxError:
         return regex_credential_findings(text)
 
-    findings: list[int] = []
+    findings: set[int] = set()
 
     def maybe_add(name: str | None, value: ast.AST, line: int) -> None:
         if not name or not CREDENTIAL_NAME_RE.search(name):
             return
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
             if not is_placeholder_value(value.value):
-                findings.append(line)
+                findings.add(line)
 
     def target_name(target: ast.AST) -> str | None:
         if isinstance(target, ast.Name):
@@ -340,7 +346,28 @@ def python_credential_findings(text: str) -> list[int]:
                     maybe_add(key.value, value, getattr(value, "lineno", node.lineno))
         elif isinstance(node, ast.keyword):
             maybe_add(node.arg, node.value, getattr(node.value, "lineno", node.lineno))
-    return findings
+        if isinstance(
+            node, (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef, ast.Module)
+        ) and node.body:
+            first = node.body[0]
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                for offset, line in enumerate(first.value.value.splitlines()):
+                    if regex_credential_findings(line):
+                        findings.add(first.lineno + offset)
+
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        for token in tokens:
+            if token.type == tokenize.COMMENT and regex_credential_findings(token.string):
+                findings.add(token.start[0])
+    except tokenize.TokenError:
+        return regex_credential_findings(text)
+
+    return sorted(findings)
 
 
 def validate_one_link(

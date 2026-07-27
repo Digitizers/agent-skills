@@ -244,6 +244,38 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("does not resolve" in error for error in errors), errors)
 
+    def test_ignores_markdown_links_inside_list_nested_fences(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "- Example:\n"
+                "    ```markdown\n"
+                "    [literal](not-real.md)\n"
+                "    ```\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("not-real.md" in error for error in errors), errors)
+
+    def test_ignores_markdown_links_inside_multiline_inline_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "`[literal](not-real.md)\n"
+                "still code`\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("not-real.md" in error for error in errors), errors)
+
     def test_closing_code_fence_allows_at_most_three_spaces(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -480,6 +512,11 @@ class PortabilityValidationTests(unittest.TestCase):
                 'dict(API_TOKEN="sk-live-secret-value")\n',
                 encoding="utf-8",
             )
+            (repo / "notes.py").write_text(
+                '# API_TOKEN = "sk-live-secret-value"\n'
+                '"""Example:\nAPI_TOKEN = "sk-live-secret-value"\n"""\n',
+                encoding="utf-8",
+            )
             (repo / "config.yml").write_text(
                 "client_secret: <replace-me>\n",
                 encoding="utf-8",
@@ -506,6 +543,11 @@ class PortabilityValidationTests(unittest.TestCase):
             self.assertEqual(
                 2,
                 sum("client.py" in error and "credential value" in error for error in errors),
+                errors,
+            )
+            self.assertEqual(
+                2,
+                sum("notes.py" in error and "credential value" in error for error in errors),
                 errors,
             )
             self.assertFalse(
