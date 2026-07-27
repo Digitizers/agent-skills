@@ -28,8 +28,9 @@ REFERENCE_DEF_RE = re.compile(
     re.MULTILINE,
 )
 ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
-FENCED_CODE_START_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
+FENCED_CODE_START_RE = re.compile(r"^([ \t]*)(`{3,}|~{3,})")
 INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1")
+LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-+*]|\d+[.)])[ \t]+")
 ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
 PRIVATE_MARKERS = (
     "Digitizers/" + "marketing-skills",
@@ -105,9 +106,16 @@ def inline_link_targets(text: str) -> list[str]:
     index = 0
     while index < len(text):
         if text[index] == "!":
+            if is_escaped(text, index):
+                index += 1
+                continue
             label_start = index + 2 if index + 1 < len(text) and text[index + 1] == "[" else 0
         else:
-            label_start = index + 1 if text[index] == "[" else 0
+            label_start = (
+                index + 1
+                if text[index] == "[" and not is_escaped(text, index)
+                else 0
+            )
         if not label_start:
             index += 1
             continue
@@ -139,6 +147,15 @@ def inline_link_targets(text: str) -> list[str]:
     return targets
 
 
+def is_escaped(text: str, index: int) -> bool:
+    backslashes = 0
+    index -= 1
+    while index >= 0 and text[index] == "\\":
+        backslashes += 1
+        index -= 1
+    return backslashes % 2 == 1
+
+
 def closing_bracket(text: str, start: int) -> int:
     depth = 1
     escaped = False
@@ -159,26 +176,60 @@ def closing_bracket(text: str, start: int) -> int:
     return -1
 
 
+def text_width(text: str) -> int:
+    width = 0
+    for character in text:
+        width = width + (4 - width % 4 if character == "\t" else 1)
+    return width
+
+
+def without_block_quote_prefix(line: str) -> str:
+    remaining = line
+    while True:
+        match = re.match(r"^[ ]{0,3}>[ \t]?", remaining)
+        if not match:
+            return remaining
+        remaining = remaining[match.end() :]
+
+
 def strip_fenced_code(text: str) -> str:
     lines = text.splitlines(keepends=True)
     kept: list[str] = []
     fence_marker: str | None = None
     fence_length = 0
+    fence_indent = 0
+    in_list_item = False
+    list_code_indent = 8
     for line in lines:
+        markdown_line = without_block_quote_prefix(line)
         if fence_marker is None:
-            match = FENCED_CODE_START_RE.match(line)
-            if match:
-                fence_marker = match.group(1)[0]
-                fence_length = len(match.group(1))
+            content = markdown_line.rstrip("\r\n")
+            list_match = LIST_ITEM_RE.match(content)
+            indent = text_width(content[: len(content) - len(content.lstrip())])
+            if list_match and indent < 4:
+                in_list_item = True
+                list_code_indent = text_width(list_match.group(0)) + 4
+            elif content.strip() and indent < 4:
+                in_list_item = False
+            match = FENCED_CODE_START_RE.match(markdown_line)
+            opener_indent = text_width(match.group(1)) if match else 0
+            if match and (
+                opener_indent <= 3
+                or (in_list_item and opener_indent < list_code_indent)
+            ):
+                fence_indent = opener_indent
+                fence_marker = match.group(2)[0]
+                fence_length = len(match.group(2))
                 kept.append("\n" if line.endswith("\n") else "")
                 continue
             kept.append(line)
             continue
-        close = line.rstrip("\r\n")
-        if re.fullmatch(
-            rf"[ \t]{{0,3}}{re.escape(fence_marker)}{{{fence_length},}}[ \t]*",
+        close = markdown_line.rstrip("\r\n")
+        close_match = re.fullmatch(
+            rf"([ \t]*){re.escape(fence_marker)}{{{fence_length},}}[ \t]*",
             close,
-        ):
+        )
+        if close_match and text_width(close_match.group(1)) <= max(fence_indent, 3):
             fence_marker = None
             fence_length = 0
         kept.append("\n" if line.endswith("\n") else "")
@@ -198,7 +249,7 @@ def validate_one_link(
         return
     if not target or target.startswith(("#", "http://", "https://", "mailto:")):
         return
-    decoded = unquote(target.split("#", 1)[0])
+    decoded = unquote(target.split("#", 1)[0].split("?", 1)[0])
     candidate = (path.parent / decoded).resolve()
     try:
         candidate.relative_to(repo)
@@ -225,10 +276,9 @@ def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
         raw = raw.strip()
         validate_one_link(repo, path, raw, errors)
 
-    definitions = {
-        label.casefold(): target
-        for label, target in REFERENCE_DEF_RE.findall(text)
-    }
+    definitions: dict[str, str] = {}
+    for label, target in REFERENCE_DEF_RE.findall(text):
+        definitions.setdefault(label.casefold(), target)
     for label, target in definitions.items():
         validate_one_link(repo, path, target, errors)
     for text_label, explicit_label in REFERENCE_USE_RE.findall(text):

@@ -457,6 +457,47 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(any("symlink target escapes" in error for error in errors))
 
+    def test_accepts_query_strings_on_resolving_local_links(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n"
+                "[ref](REFERENCE.md?raw=1#details)\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([], VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False))
+
+    def test_ignores_escaped_markdown_link_openers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(r"\[label](missing.md)", encoding="utf-8")
+            self.assertEqual([], VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False))
+
+    def test_ignores_links_inside_list_and_quote_fences(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "- Example:\n    ```\n    [x](missing.md)\n    ```\n"
+                "> ```\n> [y](missing.md)\n> ```\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([], VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False))
+
+    def test_duplicate_reference_labels_use_first_definition(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "EXISTS.md").write_text("ok\n", encoding="utf-8")
+            (skill / "REFERENCE.md").write_text(
+                "[guide]: MISSING.md\n[guide]: EXISTS.md\n[go][guide]\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False)
+            self.assertTrue(any("MISSING.md" in error for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()
