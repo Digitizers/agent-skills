@@ -246,6 +246,21 @@ class PortabilityValidationTests(unittest.TestCase):
             self.assertFalse(any("not-real.md" in error for error in errors), errors)
             self.assertFalse(any("also-not-real.md" in error for error in errors), errors)
 
+    def test_validates_links_in_indented_list_continuations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "- References:\n"
+                "    [Docs](MISSING.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(any("reference does not resolve: MISSING.md" in error for error in errors))
+
     def test_rejects_skill_directory_without_skill_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -379,9 +394,18 @@ class PortabilityValidationTests(unittest.TestCase):
     def test_public_boundary_rejects_credential_values_in_config_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
-            make_skill(repo)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "```bash\nAPI_TOKEN=sk-live-secret-value\n```\n",
+                encoding="utf-8",
+            )
             (repo / ".mcp.json").write_text(
                 '{"API_TOKEN": "sk-live-secret-value"}\n',
+                encoding="utf-8",
+            )
+            (repo / "deploy.sh").write_text(
+                "API_TOKEN=sk-live-secret-value\n",
                 encoding="utf-8",
             )
             (repo / "config.yml").write_text(
@@ -393,6 +417,14 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(".mcp.json" in error and "credential value" in error for error in errors),
+                errors,
+            )
+            self.assertTrue(
+                any("SKILL.md" in error and "credential value" in error for error in errors),
+                errors,
+            )
+            self.assertTrue(
+                any("deploy.sh" in error and "credential value" in error for error in errors),
                 errors,
             )
             self.assertFalse(

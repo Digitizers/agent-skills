@@ -31,7 +31,7 @@ ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 FENCED_CODE_START_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1")
 ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
-TEXT_CREDENTIAL_SUFFIXES = (".json", ".md", ".toml", ".yaml", ".yml")
+TEXT_CREDENTIAL_SUFFIXES = (".bash", ".json", ".md", ".sh", ".toml", ".yaml", ".yml", ".zsh")
 CREDENTIAL_NAME_RE = re.compile(
     r"(?i)(?:api[_-]?key|token|secret|password|credential|database[_-]?url|access[_-]?key|client[_-]?secret)"
 )
@@ -42,6 +42,7 @@ CREDENTIAL_ASSIGNMENT_RE = re.compile(
     (?P<value>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,}\]]+)
     """
 )
+LIST_ITEM_RE = re.compile(r"^[ \t]{0,3}(?:[-+*]|\d+[.)])[ \t]+")
 PRIVATE_MARKERS = (
     "Digitizers/" + "marketing-skills",
     "Digitizers/" + "digitizer-os",
@@ -81,11 +82,12 @@ def contains_machine_specific_path(text: str) -> bool:
 
 
 def is_placeholder_value(value: str) -> bool:
-    value = value.strip().strip("\"'")
+    value = value.strip().strip("\"'`")
     folded = value.casefold()
     return (
         not value
         or value == "..."
+        or re.fullmatch(r"\$[A-Z][A-Z0-9_]*", value) is not None
         or re.fullmatch(r"\$\{[A-Z][A-Z0-9_]*\}", value) is not None
         or re.fullmatch(r"<[^>\r\n]+>", value) is not None
         or folded in {"changeme", "example", "placeholder", "redacted", "replace_me", "xxx"}
@@ -232,22 +234,21 @@ def strip_fenced_code(text: str) -> str:
 
 def strip_indented_code(text: str) -> str:
     kept: list[str] = []
+    previous_nonblank_was_list_item = False
     for line in text.splitlines(keepends=True):
         content = line.rstrip("\r\n")
-        if content.startswith(("    ", "\t")):
+        if content.startswith(("    ", "\t")) and not previous_nonblank_was_list_item:
             kept.append("\n" if line.endswith("\n") else "")
         else:
             kept.append(line)
+        if content.strip():
+            previous_nonblank_was_list_item = LIST_ITEM_RE.match(content) is not None
     return "".join(kept)
 
 
 def credential_scan_text(path: Path, text: str) -> str | None:
     if path.suffix not in TEXT_CREDENTIAL_SUFFIXES:
         return None
-    if path.suffix == ".md":
-        text = strip_fenced_code(text)
-        text = strip_indented_code(text)
-        text = INLINE_CODE_RE.sub("", text)
     return text
 
 
