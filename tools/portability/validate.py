@@ -31,7 +31,6 @@ REFERENCE_DEF_RE = re.compile(
 )
 ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 FENCED_CODE_START_RE = re.compile(r"^([ \t]*)(`{3,}|~{3,})")
-INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1", re.DOTALL)
 ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
 CREDENTIAL_NAME_RE = re.compile(
     r"(?i)(?:api[ _-]?key|token|secret|password|credential|database[ _-]?url|access[ _-]?key|client[ _-]?secret|private[ _-]?key)"
@@ -357,7 +356,7 @@ def strip_indented_code(text: str) -> str:
     in_list_item = False
     list_code_indent = 8
     for line in text.splitlines(keepends=True):
-        content = line.rstrip("\r\n")
+        content = without_block_quote_prefix(line).rstrip("\r\n")
         if not content.strip():
             kept.append(line)
             continue
@@ -376,6 +375,43 @@ def strip_indented_code(text: str) -> str:
             kept.append(line)
             if indent < 4:
                 in_list_item = False
+    return "".join(kept)
+
+
+def strip_inline_code(text: str) -> str:
+    kept: list[str] = []
+    index = 0
+    while index < len(text):
+        if text[index] != "`" or is_escaped(text, index):
+            kept.append(text[index])
+            index += 1
+            continue
+
+        opener_end = index
+        while opener_end < len(text) and text[opener_end] == "`":
+            opener_end += 1
+        run_length = opener_end - index
+        search = opener_end
+        closing_start = -1
+        while search < len(text):
+            if text[search] != "`":
+                search += 1
+                continue
+            closing_end = search
+            while closing_end < len(text) and text[closing_end] == "`":
+                closing_end += 1
+            if closing_end - search == run_length:
+                closing_start = search
+                break
+            search = closing_end
+        if closing_start < 0:
+            kept.append(text[index:opener_end])
+            index = opener_end
+            continue
+
+        removed = text[index : closing_start + run_length]
+        kept.append("\n" * removed.count("\n"))
+        index = closing_start + run_length
     return "".join(kept)
 
 
@@ -537,9 +573,35 @@ def python_credential_findings(text: str) -> list[int]:
 
     try:
         tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        comment_group: list[tokenize.TokenInfo] = []
+
+        def scan_comment_group() -> None:
+            if not comment_group:
+                return
+            comment_text = "\n".join(
+                token.string.removeprefix("#").removeprefix(" ")
+                for token in comment_group
+            )
+            for offset in regex_credential_findings(comment_text):
+                findings.add(comment_group[offset - 1].start[0])
+
+        lines = text.splitlines()
         for token in tokens:
-            if token.type == tokenize.COMMENT and regex_credential_findings(token.string):
+            if token.type != tokenize.COMMENT:
+                continue
+            comment_only = not lines[token.start[0] - 1][: token.start[1]].strip()
+            consecutive = (
+                comment_group
+                and token.start[0] == comment_group[-1].start[0] + 1
+            )
+            if not comment_only or (comment_group and not consecutive):
+                scan_comment_group()
+                comment_group = []
+            if comment_only:
+                comment_group.append(token)
+            elif regex_credential_findings(token.string):
                 findings.add(token.start[0])
+        scan_comment_group()
     except tokenize.TokenError:
         return regex_credential_findings(text)
 
@@ -589,7 +651,7 @@ def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
     text = path.read_text(encoding="utf-8")
     text = strip_fenced_code(text)
     text = strip_indented_code(text)
-    text = INLINE_CODE_RE.sub("", text)
+    text = strip_inline_code(text)
     for raw in inline_link_targets(text):
         raw = raw.strip()
         validate_one_link(repo, path, raw, errors)

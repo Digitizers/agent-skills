@@ -1049,6 +1049,45 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("reference does not resolve" in error for error in errors), errors)
 
+    def test_public_boundary_rejects_multiline_python_comment_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "script.py").write_text(
+                "# api_key:\n#   sk-live-secret\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("credential value" in error for error in errors), errors)
+
+    def test_unequal_backtick_runs_do_not_close_inline_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "``[guide](MISSING.md)```\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(any("reference does not resolve" in error for error in errors), errors)
+
+    def test_ignores_indented_code_inside_block_quotes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                ">     [example](MISSING.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("reference does not resolve" in error for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()
