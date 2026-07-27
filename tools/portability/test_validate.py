@@ -584,6 +584,23 @@ class PortabilityValidationTests(unittest.TestCase):
             errors = VALIDATOR.validate_repo(repo, visibility="public", require_cloud_links=False)
             self.assertTrue(any(".env" in error and "forbidden" in error for error in errors), errors)
 
+    def test_public_boundary_rejects_env_template_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            config = repo / "config"
+            config.mkdir()
+            (config / "secrets.txt").write_text(
+                "API_TOKEN=real-secret-value\n",
+                encoding="utf-8",
+            )
+            (repo / ".env.example").symlink_to("config/secrets.txt")
+            errors = VALIDATOR.validate_repo(repo, visibility="public", require_cloud_links=False)
+            self.assertTrue(
+                any(".env.example" in error and "regular file" in error for error in errors),
+                errors,
+            )
+
     def test_accepts_query_strings_on_resolving_local_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

@@ -451,6 +451,12 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
             )
             continue
         if path.is_symlink():
+            if is_env_template:
+                fail(
+                    errors,
+                    relative,
+                    "environment template must be a regular file in public repos",
+                )
             target = path.readlink()
             target_text = target.as_posix()
             resolved = (path.parent / target).resolve()
