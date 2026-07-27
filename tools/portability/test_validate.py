@@ -498,6 +498,41 @@ class PortabilityValidationTests(unittest.TestCase):
             errors = VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False)
             self.assertTrue(any("MISSING.md" in error for error in errors), errors)
 
+    def test_ignores_fences_in_nested_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "- outer\n    - inner\n        ```\n        [x](missing.md)\n        ```\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([], VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False))
+
+    def test_ignores_escaped_reference_links(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(r"\[label][missing]", encoding="utf-8")
+            self.assertEqual([], VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False))
+
+    def test_normalizes_reference_label_whitespace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "[a b]: SKILL.md\n[go][a   b]\n", encoding="utf-8"
+            )
+            self.assertEqual([], VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False))
+
+    def test_accepts_case_insensitive_external_uri_schemes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "[web](HTTPS://example.com)\n[phone](tel:+123)\n", encoding="utf-8"
+            )
+            self.assertEqual([], VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False))
+
 
 if __name__ == "__main__":
     unittest.main()

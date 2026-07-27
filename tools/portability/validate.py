@@ -47,6 +47,7 @@ WINDOWS_HOME_RE = re.compile(
 LOCAL_ABSOLUTE_RE = re.compile(
     r"(?<![A-Za-z0-9])/(?:workspace|workspaces|opt)/[^\s`'\"]+"
 )
+URI_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 
 def fail(errors: list[str], path: Path, message: str) -> None:
@@ -176,6 +177,27 @@ def closing_bracket(text: str, start: int) -> int:
     return -1
 
 
+def reference_link_uses(text: str) -> list[tuple[str, str]]:
+    uses: list[tuple[str, str]] = []
+    index = 0
+    while index < len(text):
+        bracket = index + 1 if text[index] == "!" else index
+        if bracket >= len(text) or text[bracket] != "[" or is_escaped(text, bracket):
+            index += 1
+            continue
+        label_end = closing_bracket(text, bracket + 1)
+        if label_end < 0 or label_end + 1 >= len(text) or text[label_end + 1] != "[":
+            index += 1
+            continue
+        reference_end = closing_bracket(text, label_end + 2)
+        if reference_end < 0:
+            index += 1
+            continue
+        uses.append((text[bracket + 1 : label_end], text[label_end + 2 : reference_end]))
+        index = reference_end + 1
+    return uses
+
+
 def text_width(text: str) -> int:
     width = 0
     for character in text:
@@ -206,7 +228,9 @@ def strip_fenced_code(text: str) -> str:
             content = markdown_line.rstrip("\r\n")
             list_match = LIST_ITEM_RE.match(content)
             indent = text_width(content[: len(content) - len(content.lstrip())])
-            if list_match and indent < 4:
+            if list_match and (
+                indent < 4 or (in_list_item and indent < list_code_indent)
+            ):
                 in_list_item = True
                 list_code_indent = text_width(list_match.group(0)) + 4
             elif content.strip() and indent < 4:
@@ -247,7 +271,7 @@ def validate_one_link(
             f"angle-bracketed reference is not closed: {raw}",
         )
         return
-    if not target or target.startswith(("#", "http://", "https://", "mailto:")):
+    if not target or target.startswith("#") or URI_SCHEME_RE.match(target):
         return
     decoded = unquote(target.split("#", 1)[0].split("?", 1)[0])
     candidate = (path.parent / decoded).resolve()
@@ -276,13 +300,16 @@ def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
         raw = raw.strip()
         validate_one_link(repo, path, raw, errors)
 
+    def normalized_label(label: str) -> str:
+        return " ".join(label.split()).casefold()
+
     definitions: dict[str, str] = {}
     for label, target in REFERENCE_DEF_RE.findall(text):
-        definitions.setdefault(label.casefold(), target)
+        definitions.setdefault(normalized_label(label), target)
     for label, target in definitions.items():
         validate_one_link(repo, path, target, errors)
-    for text_label, explicit_label in REFERENCE_USE_RE.findall(text):
-        label = (explicit_label or text_label).casefold()
+    for text_label, explicit_label in reference_link_uses(text):
+        label = normalized_label(explicit_label or text_label)
         if label not in definitions:
             fail(
                 errors,
