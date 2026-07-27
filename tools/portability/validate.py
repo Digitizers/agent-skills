@@ -40,8 +40,8 @@ POSIX_HOME_RE = re.compile(
     r"(?<![A-Za-z0-9])(?:/Users|/home|/root)/[^\s`'\"]+"
 )
 WINDOWS_HOME_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9])(?:[A-Z]:\\Users\\|\\\\[^\\\s]+\\Users\\)"
-    r"[^\s`'\"]+"
+    r"(?i)(?<![A-Za-z0-9])(?:[A-Z]:[\\/]Users[\\/]|"
+    r"(?:\\\\|//)[^\\/\s]+[\\/]Users[\\/])[^\s`'\"]+"
 )
 LOCAL_ABSOLUTE_RE = re.compile(
     r"(?<![A-Za-z0-9])/(?:workspace|workspaces|opt)"
@@ -328,7 +328,12 @@ def validate_one_link(
             f"angle-bracketed reference is not closed: {raw}",
         )
         return
-    if not target or target.startswith("#") or URI_SCHEME_RE.match(target):
+    windows_drive = re.match(r"^[A-Za-z]:[\\/]", target)
+    if (
+        not target
+        or target.startswith("#")
+        or (URI_SCHEME_RE.match(target) and not windows_drive)
+    ):
         return
     decoded = unquote(target.split("#", 1)[0].split("?", 1)[0])
     candidate = (path.parent / decoded).resolve()
