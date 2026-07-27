@@ -40,8 +40,9 @@ POSIX_HOME_RE = re.compile(
     r"(?<![A-Za-z0-9])(?:/Users|/home|/root)/[^\s`'\"]+"
 )
 WINDOWS_HOME_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9:])(?:[A-Z]:[\\/]Users[\\/]|"
-    r"(?:\\\\|//)[^\\/\s]+[\\/]Users[\\/])[^\s`'\"]+"
+    r"(?i)(?<![A-Za-z0-9])(?:[A-Z]:[\\/]Users[\\/]|"
+    r"(?<!http:)(?<!https:)(?:\\\\|//)[^\\/\s]+[\\/]Users[\\/])"
+    r"[^\s`'\"]+"
 )
 LOCAL_ABSOLUTE_RE = re.compile(
     r"(?<![A-Za-z0-9])/(?:workspace|workspaces|opt)"

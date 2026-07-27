@@ -521,6 +521,20 @@ class PortabilityValidationTests(unittest.TestCase):
             errors = VALIDATOR.validate_repo(repo, visibility="public", require_cloud_links=False)
             self.assertFalse(any("absolute path" in error for error in errors), errors)
 
+    def test_public_boundary_rejects_windows_homes_after_colons(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            user_home = "Users" + r"\alice\secret"
+            drive_home = "home:C:" + "\\" + user_home
+            unc_home = "home:" + "//server/" + user_home.replace("\\", "/")
+            (skill / "REFERENCE.md").write_text(
+                f"{drive_home}\n{unc_home}\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(repo, visibility="public", require_cloud_links=False)
+            self.assertTrue(any("absolute path" in error for error in errors), errors)
+
     def test_public_boundary_rejects_env_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
