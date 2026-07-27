@@ -1,6 +1,7 @@
 # agent-skills
 
-Portable, project-agnostic skills for **Claude Code** and **OpenClaw** — small,
+Portable, project-agnostic skills for **Claude Code**, **OpenClaw** and
+**Hermes** — small,
 reusable developer-workflow tools that work in any repo. This repo is both a
 **Claude Code plugin** (all skills under [`skills/`](skills/)) and a **plugin
 marketplace** (`digitizer-skills`) that also serves operational guides for the
@@ -96,6 +97,11 @@ cd ~/Documents/GitHub/agent-skills && ./install.sh ~/.agents/skills
 `~/.claude/skills/`). It's idempotent and safe — it replaces a stale symlink and
 skips any real directory of the same name. Updates arrive via `git pull`.
 
+Hermes consumes the same checkout without copies by adding this repository's
+`skills/` directory to `skills.external_dirs`. See the shared
+[portability contract](docs/portability-contract.md) for runtime adapters,
+validation and rollback boundaries.
+
 > **Migrating from the old symlink install?** The skill folders moved from the
 > repo root into `skills/`, so symlinks created before that point at dead paths.
 > After installing the plugin, remove the old links so skills don't load twice:
@@ -117,6 +123,23 @@ Then commit both. `tools/trigger-eval/validate_spec.py` fails if the symlink
 is missing or points at the wrong skill, so a forgotten link can't slip
 through. Split detail into `REFERENCE.md` when it grows. Machines with the
 plugin installed pick it up on the next marketplace refresh — no re-install.
+
+Before opening a PR, run the exact suites used by CI:
+
+```bash
+python3 -m pip install -r tools/trigger-eval/requirements.txt
+python3 tools/trigger-eval/validate_spec.py
+python3 tools/portability/validate.py \
+  --repo . --visibility public --require-cloud-links
+python3 tools/trigger-eval/test_tools.py
+python3 -m unittest discover -s tools/portability -p 'test_*.py'
+python3 tools/plugin-cache-gc/test_plugin_cache_gc.py
+```
+
+Do not substitute bare `python3 -m unittest` or discovery from `tools/`: this
+repository also has a standalone regression script and tool directories are
+not Python packages, so generic discovery can report `0 tests` while skipping
+them.
 
 ## License
 

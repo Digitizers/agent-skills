@@ -1,0 +1,33 @@
+name: Validate skills
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install validation dependencies
+        run: python3 -m pip install -r tools/trigger-eval/requirements.txt
+      - name: Validate portable public skills
+        run: |
+          python3 tools/trigger-eval/validate_spec.py
+          python3 tools/portability/validate.py \
+            --repo . \
+            --visibility public \
+            --require-cloud-links
+      - name: Run the standalone trigger tooling suite
+        run: python3 tools/trigger-eval/test_tools.py
+      - name: Run portability unit tests
+        run: python3 -m unittest discover -s tools/portability -p 'test_*.py'
+      - name: Run plugin cache GC unit tests
+        run: python3 tools/plugin-cache-gc/test_plugin_cache_gc.py
