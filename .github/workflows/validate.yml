@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install validation dependencies
-        run: pip install -r tools/trigger-eval/requirements.txt
+        run: python3 -m pip install -r tools/trigger-eval/requirements.txt
       - name: Validate portable public skills
         run: |
           python3 tools/trigger-eval/validate_spec.py

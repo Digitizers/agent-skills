@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -31,7 +32,6 @@ ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 FENCED_CODE_START_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1")
 ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
-TEXT_CREDENTIAL_SUFFIXES = (".bash", ".json", ".md", ".sh", ".toml", ".yaml", ".yml", ".zsh")
 CREDENTIAL_NAME_RE = re.compile(
     r"(?i)(?:api[_-]?key|token|secret|password|credential|database[_-]?url|access[_-]?key|client[_-]?secret)"
 )
@@ -234,22 +234,91 @@ def strip_fenced_code(text: str) -> str:
 
 def strip_indented_code(text: str) -> str:
     kept: list[str] = []
-    previous_nonblank_was_list_item = False
+    in_list_item = False
     for line in text.splitlines(keepends=True):
         content = line.rstrip("\r\n")
-        if content.startswith(("    ", "\t")) and not previous_nonblank_was_list_item:
+        if not content.strip():
+            kept.append(line)
+            continue
+
+        if LIST_ITEM_RE.match(content):
+            in_list_item = True
+            kept.append(line)
+            continue
+
+        indent = 0
+        for character in content:
+            if character == " ":
+                indent += 1
+            elif character == "\t":
+                indent += 4
+                break
+            else:
+                break
+
+        if indent >= 4 and not (in_list_item and "\t" not in content[:indent] and indent < 8):
             kept.append("\n" if line.endswith("\n") else "")
         else:
             kept.append(line)
-        if content.strip():
-            previous_nonblank_was_list_item = LIST_ITEM_RE.match(content) is not None
+            if indent < 4:
+                in_list_item = False
     return "".join(kept)
 
 
-def credential_scan_text(path: Path, text: str) -> str | None:
-    if path.suffix not in TEXT_CREDENTIAL_SUFFIXES:
+def credential_findings(path: Path, text: str) -> list[int]:
+    if path.suffix == ".py":
+        return python_credential_findings(text)
+    return regex_credential_findings(text)
+
+
+def regex_credential_findings(text: str) -> list[int]:
+    findings: list[int] = []
+    for number, line in enumerate(text.splitlines(), 1):
+        for match in CREDENTIAL_ASSIGNMENT_RE.finditer(line):
+            name = match.group("name").strip("\"'")
+            if CREDENTIAL_NAME_RE.search(name) and not is_placeholder_value(
+                match.group("value")
+            ):
+                findings.append(number)
+    return findings
+
+
+def python_credential_findings(text: str) -> list[int]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return regex_credential_findings(text)
+
+    findings: list[int] = []
+
+    def maybe_add(name: str | None, value: ast.AST, line: int) -> None:
+        if not name or not CREDENTIAL_NAME_RE.search(name):
+            return
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            if not is_placeholder_value(value.value):
+                findings.append(line)
+
+    def target_name(target: ast.AST) -> str | None:
+        if isinstance(target, ast.Name):
+            return target.id
+        if isinstance(target, ast.Attribute):
+            return target.attr
+        if isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant):
+            if isinstance(target.slice.value, str):
+                return target.slice.value
         return None
-    return text
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                maybe_add(target_name(target), node.value, node.lineno)
+        elif isinstance(node, ast.AnnAssign):
+            maybe_add(target_name(node.target), node.value, node.lineno)
+        elif isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                    maybe_add(key.value, value, getattr(value, "lineno", node.lineno))
+    return findings
 
 
 def validate_one_link(
@@ -419,19 +488,12 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
                     fail(errors, relative, f"invalid env name on line {number}")
                 if not is_placeholder_value(value):
                     fail(errors, relative, f"non-placeholder env value on line {number}")
-        credential_text = credential_scan_text(relative, text)
-        if credential_text is not None:
-            for number, line in enumerate(credential_text.splitlines(), 1):
-                for match in CREDENTIAL_ASSIGNMENT_RE.finditer(line):
-                    name = match.group("name").strip("\"'")
-                    if CREDENTIAL_NAME_RE.search(name) and not is_placeholder_value(
-                        match.group("value")
-                    ):
-                        fail(
-                            errors,
-                            relative,
-                            f"credential value is not a placeholder on line {number}",
-                        )
+        for number in credential_findings(relative, text):
+            fail(
+                errors,
+                relative,
+                f"credential value is not a placeholder on line {number}",
+            )
         marker = contains_private_marker(text)
         if marker is not None:
             fail(errors, relative, f"private identifier exposed: {marker}")
@@ -503,7 +565,8 @@ def validate_repo(
             continue
         skills.append(path)
     if not skills:
-        return ["skills: no canonical skills found"]
+        errors.append("skills: no canonical skills found")
+        return errors
 
     for skill in skills:
         relative_skill = skill.relative_to(repo)

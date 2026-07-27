@@ -261,6 +261,39 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(any("reference does not resolve: MISSING.md" in error for error in errors))
 
+    def test_validates_links_after_multiple_indented_list_continuations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "- Details:\n"
+                "    explanatory continuation\n"
+                "    [Docs](MISSING.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(any("reference does not resolve: MISSING.md" in error for error in errors))
+
+    def test_ignores_links_inside_indented_code_nested_in_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "- Example:\n"
+                "        [literal](not-real.md)\n"
+                "    [Docs](MISSING.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("not-real.md" in error for error in errors), errors)
+            self.assertTrue(any("reference does not resolve: MISSING.md" in error for error in errors))
+
     def test_rejects_skill_directory_without_skill_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -408,6 +441,10 @@ class PortabilityValidationTests(unittest.TestCase):
                 "API_TOKEN=sk-live-secret-value\n",
                 encoding="utf-8",
             )
+            (repo / "settings.py").write_text(
+                'API_TOKEN = "sk-live-secret-value"\n',
+                encoding="utf-8",
+            )
             (repo / "config.yml").write_text(
                 "client_secret: <replace-me>\n",
                 encoding="utf-8",
@@ -425,6 +462,10 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(
                 any("deploy.sh" in error and "credential value" in error for error in errors),
+                errors,
+            )
+            self.assertTrue(
+                any("settings.py" in error and "credential value" in error for error in errors),
                 errors,
             )
             self.assertFalse(
@@ -581,6 +622,16 @@ class PortabilityValidationTests(unittest.TestCase):
             VALIDATOR.subprocess.run = original_run
 
         self.assertEqual([Path("/repo") / "skills" / "\udcff" / "SKILL.md"], paths)
+
+    def test_no_valid_skills_preserves_invalid_skill_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "skills" / "unfinished").mkdir(parents=True)
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(any("missing SKILL.md" in error for error in errors), errors)
+            self.assertTrue(any("no canonical skills found" in error for error in errors), errors)
 
 
 if __name__ == "__main__":
