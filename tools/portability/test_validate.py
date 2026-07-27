@@ -1088,6 +1088,50 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("reference does not resolve" in error for error in errors), errors)
 
+    def test_public_boundary_rejects_multiline_comments_in_invalid_python(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "script.py").write_text(
+                "this is not valid python\n"
+                "# api_key:\n"
+                "#   sk-live-secret\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("credential value" in error for error in errors), errors)
+
+    def test_public_boundary_accepts_credential_name_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "config.yaml").write_text(
+                "credentials:\n  - API_TOKEN\n  - CLIENT_SECRET\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertFalse(any("credential value" in error for error in errors), errors)
+
+    def test_duplicate_reference_labels_use_first_definition(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "EXISTS.md").write_text("present\n", encoding="utf-8")
+            (skill / "REFERENCE.md").write_text(
+                "[guide]: MISSING.md\n"
+                "[guide]: EXISTS.md\n"
+                "[Read this][guide]\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(any("reference does not resolve: MISSING.md" in error for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()

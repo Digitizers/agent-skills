@@ -119,6 +119,7 @@ def is_placeholder_value(value: str) -> bool:
         or value == "..."
         or re.fullmatch(r"\$[A-Z][A-Z0-9_]*", value) is not None
         or re.fullmatch(r"\$\{[A-Z][A-Z0-9_]*\}", value) is not None
+        or ENV_NAME_RE.fullmatch(value) is not None
         or re.fullmatch(r"<[^>\r\n]+>", value) is not None
         or folded in {"changeme", "example", "placeholder", "redacted", "replace_me", "xxx"}
         or folded.startswith(("your-", "your_"))
@@ -484,12 +485,51 @@ def regex_credential_findings(text: str) -> list[int]:
 
 
 def python_credential_findings(text: str) -> list[int]:
+    findings: set[int] = set()
+
+    def comment_credential_findings() -> set[int]:
+        comment_findings: set[int] = set()
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        comment_group: list[tokenize.TokenInfo] = []
+
+        def scan_comment_group() -> None:
+            if not comment_group:
+                return
+            comment_text = "\n".join(
+                token.string.removeprefix("#").removeprefix(" ")
+                for token in comment_group
+            )
+            for offset in regex_credential_findings(comment_text):
+                comment_findings.add(comment_group[offset - 1].start[0])
+
+        lines = text.splitlines()
+        for token in tokens:
+            if token.type != tokenize.COMMENT:
+                continue
+            comment_only = not lines[token.start[0] - 1][: token.start[1]].strip()
+            consecutive = (
+                comment_group
+                and token.start[0] == comment_group[-1].start[0] + 1
+            )
+            if not comment_only or (comment_group and not consecutive):
+                scan_comment_group()
+                comment_group = []
+            if comment_only:
+                comment_group.append(token)
+            elif regex_credential_findings(token.string):
+                comment_findings.add(token.start[0])
+        scan_comment_group()
+        return comment_findings
+
+    try:
+        findings.update(comment_credential_findings())
+    except tokenize.TokenError:
+        findings.update(regex_credential_findings(text))
+
     try:
         tree = ast.parse(text)
     except SyntaxError:
-        return regex_credential_findings(text)
-
-    findings: set[int] = set()
+        return sorted(findings | set(regex_credential_findings(text)))
 
     def static_string_value(value: ast.AST) -> str | None:
         if isinstance(value, ast.Constant) and isinstance(value.value, (bytes, str)):
@@ -571,40 +611,6 @@ def python_credential_findings(text: str) -> list[int]:
                 for offset in regex_credential_findings(first.value.value):
                     findings.add(first.lineno + offset - 1)
 
-    try:
-        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
-        comment_group: list[tokenize.TokenInfo] = []
-
-        def scan_comment_group() -> None:
-            if not comment_group:
-                return
-            comment_text = "\n".join(
-                token.string.removeprefix("#").removeprefix(" ")
-                for token in comment_group
-            )
-            for offset in regex_credential_findings(comment_text):
-                findings.add(comment_group[offset - 1].start[0])
-
-        lines = text.splitlines()
-        for token in tokens:
-            if token.type != tokenize.COMMENT:
-                continue
-            comment_only = not lines[token.start[0] - 1][: token.start[1]].strip()
-            consecutive = (
-                comment_group
-                and token.start[0] == comment_group[-1].start[0] + 1
-            )
-            if not comment_only or (comment_group and not consecutive):
-                scan_comment_group()
-                comment_group = []
-            if comment_only:
-                comment_group.append(token)
-            elif regex_credential_findings(token.string):
-                findings.add(token.start[0])
-        scan_comment_group()
-    except tokenize.TokenError:
-        return regex_credential_findings(text)
-
     return sorted(findings)
 
 
@@ -656,10 +662,9 @@ def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
         raw = raw.strip()
         validate_one_link(repo, path, raw, errors)
 
-    definitions = {
-        label.casefold(): target
-        for label, target in REFERENCE_DEF_RE.findall(text)
-    }
+    definitions: dict[str, str] = {}
+    for label, target in REFERENCE_DEF_RE.findall(text):
+        definitions.setdefault(label.casefold(), target)
     for label, target in definitions.items():
         validate_one_link(repo, path, target, errors)
     for text_label, explicit_label in reference_link_uses(text):
