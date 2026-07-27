@@ -472,7 +472,7 @@ def validate_one_link(
         and target[2] in ("\\", "/")
     ):
         return
-    decoded = unquote(target.split("#", 1)[0])
+    decoded = unquote(target.split("#", 1)[0].split("?", 1)[0])
     candidate = (path.parent / decoded).resolve()
     try:
         candidate.relative_to(repo)

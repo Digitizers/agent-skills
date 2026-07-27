@@ -113,6 +113,20 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("reference" in error for error in errors), errors)
 
+    def test_accepts_query_strings_on_resolving_local_links(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "[Reference](REFERENCE.md?raw=1#details)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("reference" in error for error in errors), errors)
+
     def test_accepts_external_uri_schemes_case_insensitively(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
