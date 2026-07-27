@@ -34,7 +34,9 @@ Before moving a skill into a public repository:
 1. Remove private repository names, private marketplace identifiers and
    machine-specific absolute paths.
 2. Keep credential **names** only; never commit values, tokens or local env
-   files.
+   files. The deterministic validator rejects committed env files and
+   non-placeholder env templates, but it is not a general-purpose secret
+   scanner. Repository secret scanning and human review remain required.
 3. Keep Digitizer-specific identity, pricing, clients and internal operating
    context in private overlays.
 4. Verify every reference and trigger fixture with the shared validator.
@@ -50,4 +52,8 @@ python3 tools/portability/validate.py \
   --require-cloud-links
 ```
 
-The validator is deterministic and performs no network calls.
+The validator is deterministic and performs no network calls. Its public
+boundary checks are intentionally limited to committed env files and env
+templates, known private identifiers, machine-specific absolute paths and
+unsafe symlink targets. Parsing arbitrary credential values across programming
+and configuration languages is outside this contract.
