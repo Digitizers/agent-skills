@@ -57,7 +57,7 @@ CREDENTIAL_ASSIGNMENT_RE = re.compile(
     (?P<value>
         "(?:[^"\\]|\\.)*"
         | '(?:[^'\\]|\\.)*'
-        | \$\{\{\s*secrets\.[A-Z][A-Z0-9_]*\s*\}\}
+        | \$\{\{\s*secrets\.[A-Za-z][A-Za-z0-9_]*\s*\}\}
         | \$\{[A-Z][A-Z0-9_]*\}
         | [^\s,}\]]+
     )
@@ -121,7 +121,7 @@ def is_placeholder_value(value: str) -> bool:
         or re.fullmatch(r"\$[A-Z][A-Z0-9_]*", value) is not None
         or re.fullmatch(r"\$\{[A-Z][A-Z0-9_]*\}", value) is not None
         or re.fullmatch(
-            r"\$\{\{\s*secrets\.[A-Z][A-Z0-9_]*\s*\}\}", value
+            r"\$\{\{\s*secrets\.[A-Za-z][A-Za-z0-9_]*\s*\}\}", value
         )
         is not None
         or re.fullmatch(r"<[^>\r\n]+>", value) is not None
@@ -446,7 +446,7 @@ def regex_credential_findings(text: str) -> list[int]:
     lines = text.splitlines()
     toml_multiline_re = re.compile(
         r"""(?imsx)
-        (?P<name>[A-Za-z_][A-Za-z0-9_.-]*)
+        ["']?(?P<name>[A-Za-z_][A-Za-z0-9_.-]*)["']?
         [ \t]*=[ \t]*
         (?P<quote>\"\"\"|''')
         (?P<value>.*?)
@@ -664,6 +664,11 @@ def python_credential_findings(
                     maybe_add(key.value, value, getattr(value, "lineno", node.lineno))
         elif isinstance(node, ast.keyword):
             maybe_add(node.arg, node.value, getattr(node.value, "lineno", node.lineno))
+        elif scan_nested_strings and isinstance(node, ast.Call):
+            for argument in node.args:
+                maybe_add_embedded(
+                    argument, getattr(argument, "lineno", node.lineno)
+                )
         if isinstance(
             node, (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef, ast.Module)
         ) and node.body:

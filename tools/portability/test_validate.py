@@ -1282,6 +1282,23 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("credential value" in error for error in errors), errors)
 
+    def test_public_boundary_rejects_composed_positional_credentials(self) -> None:
+        findings = VALIDATOR.python_credential_findings(
+            'load("API_TOKEN=" + "sk-live-secret")\n'
+        )
+        self.assertEqual([1], findings)
+
+    def test_public_boundary_rejects_quoted_toml_multiline_credentials(self) -> None:
+        findings = VALIDATOR.regex_credential_findings(
+            '"api_key" = """\nsk-live-secret\n"""\n'
+        )
+        self.assertIn(1, findings)
+
+    def test_public_boundary_accepts_lowercase_github_secret_references(self) -> None:
+        self.assertTrue(
+            VALIDATOR.is_placeholder_value("${{ secrets.deploy_token }}")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
