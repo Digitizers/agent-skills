@@ -220,6 +220,7 @@ def strip_fenced_code(text: str) -> str:
     fence_marker: str | None = None
     fence_length = 0
     fence_indent = 0
+    fence_close_indent = 3
     in_list_item = False
     list_code_indent = 8
     for line in lines:
@@ -233,7 +234,11 @@ def strip_fenced_code(text: str) -> str:
             ):
                 in_list_item = True
                 list_code_indent = text_width(list_match.group(0)) + 4
-            elif content.strip() and indent < 4:
+            elif (
+                content.strip()
+                and indent < 4
+                and not FENCED_CODE_START_RE.match(markdown_line)
+            ):
                 in_list_item = False
             match = FENCED_CODE_START_RE.match(markdown_line)
             opener_indent = text_width(match.group(1)) if match else 0
@@ -242,6 +247,7 @@ def strip_fenced_code(text: str) -> str:
                 or (in_list_item and opener_indent < list_code_indent)
             ):
                 fence_indent = opener_indent
+                fence_close_indent = opener_indent + 3 if in_list_item else 3
                 fence_marker = match.group(2)[0]
                 fence_length = len(match.group(2))
                 kept.append("\n" if line.endswith("\n") else "")
@@ -253,7 +259,7 @@ def strip_fenced_code(text: str) -> str:
             rf"([ \t]*){re.escape(fence_marker)}{{{fence_length},}}[ \t]*",
             close,
         )
-        if close_match and text_width(close_match.group(1)) <= max(fence_indent, 3):
+        if close_match and text_width(close_match.group(1)) <= fence_close_indent:
             fence_marker = None
             fence_length = 0
         kept.append("\n" if line.endswith("\n") else "")

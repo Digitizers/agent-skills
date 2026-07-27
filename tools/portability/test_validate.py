@@ -533,6 +533,22 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertEqual([], VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False))
 
+    def test_list_fence_closer_allows_relative_three_space_indent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "- item\n"
+                "  ```\n"
+                "  [example](missing.md)\n"
+                "     ```\n"
+                "[real](also-missing.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False)
+            self.assertFalse(any("missing.md" in error and "also-" not in error for error in errors), errors)
+            self.assertTrue(any("also-missing.md" in error for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()
