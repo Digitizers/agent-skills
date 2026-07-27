@@ -65,41 +65,14 @@ Verify both, separately:
 
    Do **not** check this by comparing the newest N of each side. A stamped version can sort *below* migrations already present (the wall clock is behind your filename's timestamp), so the drifted row and its repo file can both fall outside their respective windows — the two tails then match and the check passes on a drifted ledger. Any positional window has this hole; keying on the name does not.
 
-For a whole-ledger reconciliation, diff the complete **sets**, never tails. Order stops mattering once nothing is truncated:
+A **whole-ledger reconciliation** — every `version_name` in the ledger against every migration filename — is occasionally worth doing, after a branch merge or when inheriting a project. Compare complete **sets**, never tails, and if you write it as a shell one-liner, know that four things will silently turn "the check failed" into "everything is drifted", each of which points at the production `UPDATE` below:
 
-```bash
-# bash: needs arrays and shopt. Set MIGDIR to your migrations directory —
-# quoted, because the rest of the snippet quotes it and a path with a space
-# would otherwise split.
-MIGDIR="supabase/migrations"
+- `name` is **nullable** in Supabase's `schema_migrations` (`version` is not), so `version || '_' || name` is `NULL` for a legacy unnamed row and `psql -At` prints it as a **blank line** — the row stops being itself and shifts the whole comparison. `coalesce` it, and reconcile unnamed rows by `version` alone.
+- An unmatched glob is either the literal pattern (counting as one match) or, under `nullglob`, nothing at all — which degrades `ls <glob>` to a bare `ls` listing the **current directory**. Not an empty set: the wrong set, shaped like a real answer. Assert on a match count.
+- Process substitution **does not propagate exit status**. `diff <(psql …)` with a failing query reads an empty pseudo-file, and `diff` exits 1 — which per its own docs means only "inputs differ", the same status as genuine drift. Materialize the query and check it first.
+- Errors land on **stderr**, invisible in a pipeline, while the wrong answer goes to stdout.
 
-# Assert on the MATCH COUNT, not on an exit status. Without this the command is
-# worse than useless — it reports every ledger row as drift, pointing straight
-# at the production UPDATE below, with the only clue on stderr.
-#
-# `shopt -s nullglob` is set here rather than assumed either way, because BOTH
-# defaults break a naive guard: unset, an unmatched glob stays the literal
-# string `<dir>/*.sql` and counts as one match; set, `ls <glob>` degrades to a
-# bare `ls` that exits 0 and lists the CURRENT DIRECTORY. The second is the
-# nastier one — not an empty set, but the wrong set, shaped like a real answer.
-shopt -s nullglob
-migs=("$MIGDIR"/*.sql)
-(( ${#migs[@]} )) || { echo "no .sql under $MIGDIR" >&2; exit 1; }
-
-# Materialize the query and check it BEFORE diffing. Process substitution does
-# not propagate the child's exit status: `diff <(psql …)` where psql fails on
-# auth, connectivity or a bad query reads an empty pseudo-file and reports every
-# repo migration as missing — and `diff` exits 1, which per its own docs means
-# only "inputs differ". Identical status to genuine drift. `$( )` propagates.
-ledger=$(psql -Atc "select version || '_' || coalesce(name, '') from <ledger> order by 1") \
-  || { echo "ledger query failed" >&2; exit 1; }
-[ -n "$ledger" ] || { echo "ledger query returned no rows" >&2; exit 1; }
-
-diff <(printf '%s\n' "$ledger") \
-     <(printf '%s\n' "${migs[@]}" | sed 's|.*/||; s|\.sql$||' | sort)
-```
-
-`coalesce` is load-bearing, not defensive. `name` is **nullable** in Supabase's `schema_migrations` (`version` is not), and `version || '_' || NULL` is `NULL`, which `psql -At` prints as a **blank line** — so a legacy unnamed row does not show up as itself, it shifts the comparison and reports as drift. Same failure class as the guard above: a missing input quietly becoming an empty one. Rows with no name still can't match a named repo file, so reconcile those by `version` alone.
+That list is the reason this is prose and not a snippet to paste: each stage of such a pipeline is a place to fail open, and a command in a document is never executed, so nothing catches the next one. If you need this routinely, put it in a script under version control where it can be tested — and see the fail-loud rule above.
 
 ### Before you `UPDATE` the ledger, prove it is only a label
 
