@@ -66,17 +66,7 @@ CREDENTIAL_ASSIGNMENT_RE = re.compile(
 CREDENTIAL_NAME_ONLY_RE = re.compile(
     r"""(?ix)^[ \t]*
     ["']?
-    (?P<name>
-        api[ _-]?key
-        | token
-        | secret
-        | password
-        | credential
-        | database[ _-]?url
-        | access[ _-]?key
-        | client[ _-]?secret
-        | private[ _-]?key
-    )
+    (?P<name>[A-Za-z_][A-Za-z0-9_. -]*)
     ["']?[ \t]*:[ \t]*$
     """
 )
@@ -312,10 +302,26 @@ def strip_fenced_code(text: str) -> str:
     fence_marker: str | None = None
     fence_length = 0
     fence_indent = 0
+    in_list_item = False
+    list_code_indent = 8
     for line in lines:
         if fence_marker is None:
+            content = line.rstrip("\r\n")
+            list_match = LIST_ITEM_RE.match(content)
+            indent = leading_indent_width(content)
+            if list_match and (
+                indent < 4 or (in_list_item and indent < list_code_indent)
+            ):
+                in_list_item = True
+                list_code_indent = text_width(list_match.group(0)) + 4
+            elif content.strip() and indent < 4:
+                in_list_item = False
             match = FENCED_CODE_START_RE.match(line)
-            if match:
+            opener_indent = text_width(match.group(1)) if match else 0
+            if match and (
+                opener_indent <= 3
+                or (in_list_item and opener_indent < list_code_indent)
+            ):
                 fence_indent = text_width(match.group(1))
                 fence_marker = match.group(2)[0]
                 fence_length = len(match.group(2))
@@ -400,7 +406,10 @@ def regex_credential_findings(text: str) -> list[int]:
             if not is_placeholder_value(value):
                 findings.append(number)
         name_only = CREDENTIAL_NAME_ONLY_RE.match(line)
-        if not name_only:
+        if (
+            not name_only
+            or not CREDENTIAL_NAME_RE.search(name_only.group("name"))
+        ):
             continue
         for continuation in lines[index + 1 :]:
             candidate = continuation.strip()
@@ -439,6 +448,24 @@ def python_credential_findings(text: str) -> list[int]:
             left = static_string_value(value.left)
             right = static_string_value(value.right)
             return None if left is None or right is None else left + right
+        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Mult):
+            if isinstance(value.right, ast.Constant) and isinstance(
+                value.right.value, int
+            ):
+                literal = static_string_value(value.left)
+                count = value.right.value
+            elif isinstance(value.left, ast.Constant) and isinstance(
+                value.left.value, int
+            ):
+                literal = static_string_value(value.right)
+                count = value.left.value
+            else:
+                return None
+            if literal is None:
+                return None
+            if count > 4096:
+                return "\0"
+            return literal * max(count, 0)
         if isinstance(value, ast.JoinedStr):
             parts: list[str] = []
             for part in value.values:

@@ -967,6 +967,45 @@ class PortabilityValidationTests(unittest.TestCase):
                 errors,
             )
 
+    def test_public_boundary_rejects_prefixed_multiline_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "config.yaml").write_text(
+                "stripe_api_key:\n  sk-live-secret\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("credential value" in error for error in errors), errors)
+
+    def test_public_boundary_rejects_repeated_python_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "script.py").write_text(
+                'API_KEY = "sk-live-" * 2\n',
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("credential value" in error for error in errors), errors)
+
+    def test_four_space_top_level_backticks_do_not_open_fence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "    ```\n[real](MISSING.md)\n```\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(any("reference does not resolve" in error for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()
