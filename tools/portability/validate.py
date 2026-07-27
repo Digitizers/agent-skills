@@ -132,6 +132,9 @@ def inline_link_targets(text: str) -> list[str]:
     index = 0
     while index < len(text):
         if text[index] == "!":
+            if is_escaped(text, index):
+                index += 2 if index + 1 < len(text) and text[index + 1] == "[" else 1
+                continue
             bracket_index = index + 1
             label_start = (
                 index + 2

@@ -143,6 +143,20 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("reference" in error for error in errors), errors)
 
+    def test_ignores_escaped_markdown_image_openers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "\\![literal](not-a-link.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("reference" in error for error in errors), errors)
+
     def test_validates_inline_links_with_brackets_in_label(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
