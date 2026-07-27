@@ -1006,6 +1006,49 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(any("reference does not resolve" in error for error in errors), errors)
 
+    def test_public_boundary_rejects_nested_structured_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "config.yaml").write_text(
+                "api_key:\n  value: sk-live-secret\n"
+                "api_token:\n  [another-live-secret]\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            credential_errors = [
+                error for error in errors if "credential value" in error
+            ]
+            self.assertEqual(2, len(credential_errors), errors)
+
+    def test_public_boundary_rejects_multiline_docstring_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "script.py").write_text(
+                '"""Example:\nstripe_api_key:\n  sk-live-secret\n"""\n',
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("credential value" in error for error in errors), errors)
+
+    def test_ignores_links_inside_block_quote_fences(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "> ```\n> [example](MISSING.md)\n> ```\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("reference does not resolve" in error for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()

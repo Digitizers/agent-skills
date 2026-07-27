@@ -296,6 +296,15 @@ def text_width(text: str) -> int:
     return width
 
 
+def without_block_quote_prefix(line: str) -> str:
+    remaining = line
+    while True:
+        match = re.match(r"^[ ]{0,3}>[ \t]?", remaining)
+        if not match:
+            return remaining
+        remaining = remaining[match.end() :]
+
+
 def strip_fenced_code(text: str) -> str:
     lines = text.splitlines(keepends=True)
     kept: list[str] = []
@@ -305,8 +314,9 @@ def strip_fenced_code(text: str) -> str:
     in_list_item = False
     list_code_indent = 8
     for line in lines:
+        markdown_line = without_block_quote_prefix(line)
         if fence_marker is None:
-            content = line.rstrip("\r\n")
+            content = markdown_line.rstrip("\r\n")
             list_match = LIST_ITEM_RE.match(content)
             indent = leading_indent_width(content)
             if list_match and (
@@ -316,7 +326,7 @@ def strip_fenced_code(text: str) -> str:
                 list_code_indent = text_width(list_match.group(0)) + 4
             elif content.strip() and indent < 4:
                 in_list_item = False
-            match = FENCED_CODE_START_RE.match(line)
+            match = FENCED_CODE_START_RE.match(markdown_line)
             opener_indent = text_width(match.group(1)) if match else 0
             if match and (
                 opener_indent <= 3
@@ -329,7 +339,7 @@ def strip_fenced_code(text: str) -> str:
                 continue
             kept.append(line)
             continue
-        close = line.rstrip("\r\n")
+        close = markdown_line.rstrip("\r\n")
         close_match = re.fullmatch(
             rf"([ \t]*){re.escape(fence_marker)}{{{fence_length},}}[ \t]*",
             close,
@@ -411,20 +421,29 @@ def regex_credential_findings(text: str) -> list[int]:
             or not CREDENTIAL_NAME_RE.search(name_only.group("name"))
         ):
             continue
+        assignment_indent = leading_indent_width(line)
         for continuation in lines[index + 1 :]:
             candidate = continuation.strip()
             if not candidate or candidate.startswith("#"):
                 continue
-            candidate = candidate.removesuffix(",").strip().strip("\"'")
-            if (
-                candidate.startswith(("{", "["))
-                or CREDENTIAL_ASSIGNMENT_RE.match(candidate)
+            continuation_indent = leading_indent_width(continuation)
+            if continuation_indent < assignment_indent:
+                break
+            if continuation_indent == assignment_indent and (
+                CREDENTIAL_ASSIGNMENT_RE.match(candidate)
                 or CREDENTIAL_NAME_ONLY_RE.match(candidate)
             ):
                 break
-            if not is_placeholder_value(candidate):
+            candidate = candidate.removeprefix("-").strip()
+            if ":" in candidate:
+                _, candidate = candidate.split(":", 1)
+                candidate = candidate.strip()
+                if not candidate:
+                    continue
+            candidate = candidate.strip("[],").strip().strip("\"'")
+            if candidate and not is_placeholder_value(candidate):
                 findings.append(number)
-            break
+                break
     return findings
 
 
@@ -513,9 +532,8 @@ def python_credential_findings(text: str) -> list[int]:
                 and isinstance(first.value, ast.Constant)
                 and isinstance(first.value.value, str)
             ):
-                for offset, line in enumerate(first.value.value.splitlines()):
-                    if regex_credential_findings(line):
-                        findings.add(first.lineno + offset)
+                for offset in regex_credential_findings(first.value.value):
+                    findings.add(first.lineno + offset - 1)
 
     try:
         tokens = tokenize.generate_tokens(io.StringIO(text).readline)
