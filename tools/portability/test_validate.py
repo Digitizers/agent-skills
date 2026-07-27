@@ -230,6 +230,20 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("does not resolve" in error for error in errors), errors)
 
+    def test_ignores_list_like_text_inside_top_level_indented_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "    - [literal](not-real.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("not-real.md" in error for error in errors), errors)
+
     def test_ignores_markdown_links_inside_longer_closing_fence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -348,6 +362,25 @@ class PortabilityValidationTests(unittest.TestCase):
                 repo, visibility="private", require_cloud_links=False
             )
             self.assertTrue(any("reference does not resolve: MISSING.md" in error for error in errors))
+
+    def test_validates_links_in_nested_list_continuations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "- Outer:\n"
+                "    - Inner:\n"
+                "        [Docs](MISSING.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(
+                any("reference does not resolve: MISSING.md" in error for error in errors),
+                errors,
+            )
 
     def test_ignores_links_inside_indented_code_nested_in_lists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -599,6 +632,61 @@ class PortabilityValidationTests(unittest.TestCase):
                     "credentials.py" in error and "credential value" in error
                     for error in errors
                 ),
+                errors,
+            )
+
+    def test_public_boundary_rejects_spaced_credential_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "API key: sk-live-secret-value\n"
+                "access key: another-real-value\n"
+                "private key: embedded-private-value\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertEqual(
+                3,
+                sum(
+                    "REFERENCE.md" in error and "credential value" in error
+                    for error in errors
+                ),
+                errors,
+            )
+
+    def test_public_boundary_accepts_placeholder_yaml_block_scalars(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / "config.yaml").write_text(
+                "api_token: |\n"
+                "  ${API_TOKEN}\n"
+                "private_key: >-\n"
+                "  <your-private-key>\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertFalse(any("credential value" in error for error in errors), errors)
+
+    def test_public_boundary_rejects_literal_yaml_block_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / "config.yaml").write_text(
+                "api_token: |\n"
+                "  sk-live-secret-value\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(
+                any("config.yaml" in error and "credential value" in error for error in errors),
                 errors,
             )
 

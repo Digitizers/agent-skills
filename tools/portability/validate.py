@@ -35,16 +35,31 @@ FENCED_CODE_START_RE = re.compile(r"^([ \t]*)(`{3,}|~{3,})")
 INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1", re.DOTALL)
 ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
 CREDENTIAL_NAME_RE = re.compile(
-    r"(?i)(?:api[_-]?key|token|secret|password|credential|database[_-]?url|access[_-]?key|client[_-]?secret|private[_-]?key)"
+    r"(?i)(?:api[ _-]?key|token|secret|password|credential|database[ _-]?url|access[ _-]?key|client[ _-]?secret|private[ _-]?key)"
 )
 CREDENTIAL_ASSIGNMENT_RE = re.compile(
     r"""(?ix)
-    (?P<name>["']?[A-Za-z_][A-Za-z0-9_.-]*["']?)
+    (?P<name>
+        ["']?
+        (?:
+            api[ _-]?key
+            | token
+            | secret
+            | password
+            | credential
+            | database[ _-]?url
+            | access[ _-]?key
+            | client[ _-]?secret
+            | private[ _-]?key
+            | [A-Za-z_][A-Za-z0-9_.-]*
+        )
+        ["']?
+    )
     \s*(?:=|:)\s*
     (?P<value>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,}\]]+)
     """
 )
-LIST_ITEM_RE = re.compile(r"^[ \t]{0,3}(?:[-+*]|\d+[.)])[ \t]+")
+LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-+*]|\d+[.)])[ \t]+")
 PRIVATE_MARKERS = (
     "Digitizers/" + "marketing-skills",
     "Digitizers/" + "digitizer-os",
@@ -274,13 +289,12 @@ def strip_indented_code(text: str) -> str:
             continue
 
         list_match = LIST_ITEM_RE.match(content)
-        if list_match:
+        indent = leading_indent_width(content)
+        if list_match and (indent < 4 or (in_list_item and indent < list_code_indent)):
             in_list_item = True
             list_code_indent = text_width(list_match.group(0)) + 4
             kept.append(line)
             continue
-
-        indent = leading_indent_width(content)
 
         if indent >= 4 and not (in_list_item and indent < list_code_indent):
             kept.append("\n" if line.endswith("\n") else "")
@@ -299,12 +313,28 @@ def credential_findings(path: Path, text: str) -> list[int]:
 
 def regex_credential_findings(text: str) -> list[int]:
     findings: list[int] = []
-    for number, line in enumerate(text.splitlines(), 1):
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        number = index + 1
         for match in CREDENTIAL_ASSIGNMENT_RE.finditer(line):
             name = match.group("name").strip("\"'")
-            if CREDENTIAL_NAME_RE.search(name) and not is_placeholder_value(
-                match.group("value")
-            ):
+            if not CREDENTIAL_NAME_RE.search(name):
+                continue
+            value = match.group("value")
+            if value in {"|", "|-", "|+", ">", ">-", ">+"}:
+                assignment_indent = leading_indent_width(line)
+                block_values: list[str] = []
+                for block_line in lines[index + 1 :]:
+                    if not block_line.strip():
+                        continue
+                    if leading_indent_width(block_line) <= assignment_indent:
+                        break
+                    block_values.append(block_line.strip())
+                if block_values and all(
+                    is_placeholder_value(block_value) for block_value in block_values
+                ):
+                    continue
+            if not is_placeholder_value(value):
                 findings.append(number)
     return findings
 
