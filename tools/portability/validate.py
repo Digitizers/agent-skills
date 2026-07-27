@@ -9,7 +9,7 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import unquote
 
 try:
@@ -45,7 +45,7 @@ WINDOWS_HOME_RE = re.compile(
 )
 LOCAL_ABSOLUTE_RE = re.compile(
     r"(?<![A-Za-z0-9])/(?:workspace|workspaces|opt)"
-    r"(?:/[^\s`'\"]+)?(?=$|[\s`'\"])"
+    r"(?:/[^\s`'\"]+)?(?=$|[\s`'\"),.;:!?])"
 )
 URI_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
@@ -429,25 +429,6 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
         marker = contains_private_marker(relative.as_posix())
         if marker is not None:
             fail(errors, relative, f"private identifier exposed: {marker}")
-        if path.is_symlink():
-            target = path.readlink()
-            target_text = target.as_posix()
-            resolved = (path.parent / target).resolve()
-            escapes_repo = False
-            try:
-                resolved.relative_to(repo)
-            except ValueError:
-                escapes_repo = True
-            if (
-                target.is_absolute()
-                or escapes_repo
-                or contains_private_marker(target_text) is not None
-                or contains_machine_specific_path(target_text)
-            ):
-                fail(errors, relative, "symlink target escapes public repository boundary")
-            continue
-        if not path.is_file():
-            continue
         is_env_template = path.name.endswith(ENV_TEMPLATE_SUFFIXES)
         is_env_file = (
             path.name == ".env"
@@ -461,6 +442,26 @@ def validate_public_boundary(repo: Path, errors: list[str]) -> None:
                 relative,
                 "committed environment file is forbidden in public repos",
             )
+            continue
+        if path.is_symlink():
+            target = path.readlink()
+            target_text = target.as_posix()
+            resolved = (path.parent / target).resolve()
+            escapes_repo = False
+            try:
+                resolved.relative_to(repo)
+            except ValueError:
+                escapes_repo = True
+            if (
+                target.is_absolute()
+                or PureWindowsPath(target_text).is_absolute()
+                or escapes_repo
+                or contains_private_marker(target_text) is not None
+                or contains_machine_specific_path(target_text)
+            ):
+                fail(errors, relative, "symlink target escapes public repository boundary")
+            continue
+        if not path.is_file():
             continue
         raw = path.read_bytes()
         if b"\0" in raw:

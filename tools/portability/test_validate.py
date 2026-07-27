@@ -467,6 +467,34 @@ class PortabilityValidationTests(unittest.TestCase):
             errors = VALIDATOR.validate_repo(repo, visibility="public", require_cloud_links=False)
             self.assertTrue(any("absolute path" in error for error in errors), errors)
 
+    def test_public_boundary_rejects_bare_roots_before_punctuation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "Use (/" "workspace). Install under /" "opt, then continue.\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(repo, visibility="public", require_cloud_links=False)
+            self.assertTrue(any("absolute path" in error for error in errors), errors)
+
+    def test_public_boundary_rejects_windows_absolute_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / "windows-link").symlink_to(r"C:\Projects\private-skills")
+            errors = VALIDATOR.validate_repo(repo, visibility="public", require_cloud_links=False)
+            self.assertTrue(any("symlink target escapes" in error for error in errors), errors)
+
+    def test_public_boundary_rejects_env_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / ".env.example").write_text("API_TOKEN=<replace-me>\n", encoding="utf-8")
+            (repo / ".env").symlink_to(".env.example")
+            errors = VALIDATOR.validate_repo(repo, visibility="public", require_cloud_links=False)
+            self.assertTrue(any(".env" in error and "forbidden" in error for error in errors), errors)
+
     def test_accepts_query_strings_on_resolving_local_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
