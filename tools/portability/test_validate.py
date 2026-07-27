@@ -690,6 +690,63 @@ class PortabilityValidationTests(unittest.TestCase):
                 errors,
             )
 
+    def test_public_boundary_rejects_multiline_structured_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / "config.yaml").write_text(
+                "api_key:\n"
+                "  sk-live-secret-value\n",
+                encoding="utf-8",
+            )
+            (repo / "config.json").write_text(
+                '{\n  "private_key":\n  "embedded-private-value"\n}\n',
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(
+                any("config.yaml" in error and "credential value" in error for error in errors),
+                errors,
+            )
+            self.assertTrue(
+                any("config.json" in error and "credential value" in error for error in errors),
+                errors,
+            )
+
+    def test_public_boundary_accepts_multiline_placeholder_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / "config.yaml").write_text(
+                "api_key:\n"
+                "  ${API_KEY}\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertFalse(any("credential value" in error for error in errors), errors)
+
+    def test_public_boundary_rejects_private_key_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / "key.pem").write_text(
+                "-----BEGIN " "PRIVATE KEY-----\n"
+                "not-real-test-material\n"
+                "-----END " "PRIVATE KEY-----\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(
+                any("key.pem" in error and "credential value" in error for error in errors),
+                errors,
+            )
+
     def test_public_boundary_scans_suffixless_files_and_rejects_env_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

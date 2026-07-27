@@ -59,6 +59,26 @@ CREDENTIAL_ASSIGNMENT_RE = re.compile(
     (?P<value>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,}\]]+)
     """
 )
+CREDENTIAL_NAME_ONLY_RE = re.compile(
+    r"""(?ix)^[ \t]*
+    ["']?
+    (?P<name>
+        api[ _-]?key
+        | token
+        | secret
+        | password
+        | credential
+        | database[ _-]?url
+        | access[ _-]?key
+        | client[ _-]?secret
+        | private[ _-]?key
+    )
+    ["']?[ \t]*:[ \t]*$
+    """
+)
+PRIVATE_KEY_BLOCK_RE = re.compile(
+    r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----"
+)
 LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-+*]|\d+[.)])[ \t]+")
 PRIVATE_MARKERS = (
     "Digitizers/" + "marketing-skills",
@@ -306,9 +326,14 @@ def strip_indented_code(text: str) -> str:
 
 
 def credential_findings(path: Path, text: str) -> list[int]:
+    block_findings = {
+        number
+        for number, line in enumerate(text.splitlines(), 1)
+        if PRIVATE_KEY_BLOCK_RE.search(line)
+    }
     if path.suffix == ".py":
-        return python_credential_findings(text)
-    return regex_credential_findings(text)
+        return sorted(block_findings | set(python_credential_findings(text)))
+    return sorted(block_findings | set(regex_credential_findings(text)))
 
 
 def regex_credential_findings(text: str) -> list[int]:
@@ -336,6 +361,23 @@ def regex_credential_findings(text: str) -> list[int]:
                     continue
             if not is_placeholder_value(value):
                 findings.append(number)
+        name_only = CREDENTIAL_NAME_ONLY_RE.match(line)
+        if not name_only:
+            continue
+        for continuation in lines[index + 1 :]:
+            candidate = continuation.strip()
+            if not candidate or candidate.startswith("#"):
+                continue
+            candidate = candidate.removesuffix(",").strip().strip("\"'")
+            if (
+                candidate.startswith(("{", "["))
+                or CREDENTIAL_ASSIGNMENT_RE.match(candidate)
+                or CREDENTIAL_NAME_ONLY_RE.match(candidate)
+            ):
+                break
+            if not is_placeholder_value(candidate):
+                findings.append(number)
+            break
     return findings
 
 
