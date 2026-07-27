@@ -921,6 +921,52 @@ class PortabilityValidationTests(unittest.TestCase):
             self.assertTrue(any("missing SKILL.md" in error for error in errors), errors)
             self.assertTrue(any("no canonical skills found" in error for error in errors), errors)
 
+    def test_public_boundary_accepts_braced_credential_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / ".env.example").write_text(
+                "API_KEY=${API_KEY}\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertFalse(any("credential value" in error for error in errors), errors)
+
+    def test_public_boundary_rejects_composed_python_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "script.py").write_text(
+                'API_KEY = "real-" + "secret"\n'
+                'API_TOKEN = f"another-secret"\n',
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            credential_errors = [
+                error for error in errors if "credential value" in error
+            ]
+            self.assertEqual(2, len(credential_errors), errors)
+
+    def test_rejects_nested_undefined_reference_link_label(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "[outer [inner]][missing]\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(
+                any("reference label is not defined: missing" in error for error in errors),
+                errors,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

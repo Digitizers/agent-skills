@@ -25,7 +25,6 @@ except ImportError:
 
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-REFERENCE_USE_RE = re.compile(r"(?<!\\)!?\[([^\]]+)\]\[([^\]]*)\]")
 REFERENCE_DEF_RE = re.compile(
     r"^[ \t]{0,3}\[([^\]]+)\]:[ \t]*(.+)$",
     re.MULTILINE,
@@ -56,7 +55,12 @@ CREDENTIAL_ASSIGNMENT_RE = re.compile(
         ["']?
     )
     \s*(?:=|:)\s*
-    (?P<value>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,}\]]+)
+    (?P<value>
+        "(?:[^"\\]|\\.)*"
+        | '(?:[^'\\]|\\.)*'
+        | \$\{[A-Z][A-Z0-9_]*\}
+        | [^\s,}\]]+
+    )
     """
 )
 CREDENTIAL_NAME_ONLY_RE = re.compile(
@@ -246,6 +250,40 @@ def closing_bracket(text: str, start: int) -> int:
     return -1
 
 
+def reference_link_uses(text: str) -> list[tuple[str, str]]:
+    uses: list[tuple[str, str]] = []
+    index = 0
+    while index < len(text):
+        bracket = index + 1 if text[index] == "!" else index
+        if (
+            bracket >= len(text)
+            or text[bracket] != "["
+            or is_escaped(text, bracket)
+        ):
+            index += 1
+            continue
+        label_end = closing_bracket(text, bracket + 1)
+        if (
+            label_end < 0
+            or label_end + 1 >= len(text)
+            or text[label_end + 1] != "["
+        ):
+            index += 1
+            continue
+        reference_end = closing_bracket(text, label_end + 2)
+        if reference_end < 0:
+            index += 1
+            continue
+        uses.append(
+            (
+                text[bracket + 1 : label_end],
+                text[label_end + 2 : reference_end],
+            )
+        )
+        index = reference_end + 1
+    return uses
+
+
 def leading_indent_width(text: str) -> int:
     width = 0
     for character in text:
@@ -389,22 +427,33 @@ def python_credential_findings(text: str) -> list[int]:
 
     findings: set[int] = set()
 
+    def static_string_value(value: ast.AST) -> str | None:
+        if isinstance(value, ast.Constant) and isinstance(value.value, (bytes, str)):
+            if isinstance(value.value, bytes):
+                try:
+                    return value.value.decode("utf-8")
+                except UnicodeDecodeError:
+                    return "\0"
+            return value.value
+        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Add):
+            left = static_string_value(value.left)
+            right = static_string_value(value.right)
+            return None if left is None or right is None else left + right
+        if isinstance(value, ast.JoinedStr):
+            parts: list[str] = []
+            for part in value.values:
+                if not isinstance(part, ast.Constant) or not isinstance(part.value, str):
+                    return None
+                parts.append(part.value)
+            return "".join(parts)
+        return None
+
     def maybe_add(name: str | None, value: ast.AST, line: int) -> None:
         if not name or not CREDENTIAL_NAME_RE.search(name):
             return
-        if isinstance(value, ast.Constant) and isinstance(
-            value.value, (bytes, str)
-        ):
-            if isinstance(value.value, bytes):
-                try:
-                    literal = value.value.decode("utf-8")
-                except UnicodeDecodeError:
-                    findings.add(line)
-                    return
-            else:
-                literal = value.value
-            if not is_placeholder_value(literal):
-                findings.add(line)
+        literal = static_string_value(value)
+        if literal is not None and not is_placeholder_value(literal):
+            findings.add(line)
 
     def target_name(target: ast.AST) -> str | None:
         if isinstance(target, ast.Name):
@@ -506,7 +555,7 @@ def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
     }
     for label, target in definitions.items():
         validate_one_link(repo, path, target, errors)
-    for text_label, explicit_label in REFERENCE_USE_RE.findall(text):
+    for text_label, explicit_label in reference_link_uses(text):
         label = (explicit_label or text_label).casefold()
         if label not in definitions:
             fail(
