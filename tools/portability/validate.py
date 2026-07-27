@@ -29,7 +29,6 @@ REFERENCE_DEF_RE = re.compile(
 )
 ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 FENCED_CODE_START_RE = re.compile(r"^([ \t]*)(`{3,}|~{3,})")
-INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1")
 LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-+*]|\d+[.)])[ \t]+")
 ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
 PRIVATE_MARKERS = (
@@ -222,6 +221,8 @@ def strip_fenced_code(text: str) -> str:
     fence_indent = 0
     fence_close_indent = 3
     in_list_item = False
+    fence_in_list = False
+    fence_in_quote = False
     list_code_indent = 8
     for line in lines:
         markdown_line = without_block_quote_prefix(line)
@@ -248,6 +249,8 @@ def strip_fenced_code(text: str) -> str:
             ):
                 fence_indent = opener_indent
                 fence_close_indent = opener_indent + 3 if in_list_item else 3
+                fence_in_list = in_list_item
+                fence_in_quote = markdown_line != line
                 fence_marker = match.group(2)[0]
                 fence_length = len(match.group(2))
                 kept.append("\n" if line.endswith("\n") else "")
@@ -255,6 +258,18 @@ def strip_fenced_code(text: str) -> str:
             kept.append(line)
             continue
         close = markdown_line.rstrip("\r\n")
+        if (
+            (fence_in_quote and markdown_line == line)
+            or (
+                fence_in_list
+                and close.strip()
+                and text_width(close[: len(close) - len(close.lstrip())])
+                < fence_indent
+            )
+        ):
+            fence_marker = None
+            kept.append(line)
+            continue
         close_match = re.fullmatch(
             rf"([ \t]*){re.escape(fence_marker)}{{{fence_length},}}[ \t]*",
             close,
@@ -263,6 +278,41 @@ def strip_fenced_code(text: str) -> str:
             fence_marker = None
             fence_length = 0
         kept.append("\n" if line.endswith("\n") else "")
+    return "".join(kept)
+
+
+def strip_inline_code(text: str) -> str:
+    kept: list[str] = []
+    index = 0
+    while index < len(text):
+        if text[index] != "`" or is_escaped(text, index):
+            kept.append(text[index])
+            index += 1
+            continue
+        opener_end = index
+        while opener_end < len(text) and text[opener_end] == "`":
+            opener_end += 1
+        run_length = opener_end - index
+        search = opener_end
+        closing_start = -1
+        while search < len(text):
+            if text[search] != "`":
+                search += 1
+                continue
+            closing_end = search
+            while closing_end < len(text) and text[closing_end] == "`":
+                closing_end += 1
+            if closing_end - search == run_length:
+                closing_start = search
+                break
+            search = closing_end
+        if closing_start < 0:
+            kept.append(text[index:opener_end])
+            index = opener_end
+            continue
+        removed = text[index : closing_start + run_length]
+        kept.append("\n" * removed.count("\n"))
+        index = closing_start + run_length
     return "".join(kept)
 
 
@@ -301,7 +351,7 @@ def validate_one_link(
 def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
     text = path.read_text(encoding="utf-8")
     text = strip_fenced_code(text)
-    text = INLINE_CODE_RE.sub("", text)
+    text = strip_inline_code(text)
     for raw in inline_link_targets(text):
         raw = raw.strip()
         validate_one_link(repo, path, raw, errors)
@@ -310,7 +360,11 @@ def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
         return " ".join(label.split()).casefold()
 
     definitions: dict[str, str] = {}
-    for label, target in REFERENCE_DEF_RE.findall(text):
+    reference_text = "\n".join(
+        without_block_quote_prefix(line).lstrip()
+        for line in text.splitlines()
+    )
+    for label, target in REFERENCE_DEF_RE.findall(reference_text):
         definitions.setdefault(normalized_label(label), target)
     for label, target in definitions.items():
         validate_one_link(repo, path, target, errors)

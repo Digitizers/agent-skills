@@ -549,6 +549,35 @@ class PortabilityValidationTests(unittest.TestCase):
             self.assertFalse(any("missing.md" in error and "also-" not in error for error in errors), errors)
             self.assertTrue(any("also-missing.md" in error for error in errors), errors)
 
+    def test_unterminated_quote_fence_ends_at_container_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "> ```\n> example\n[real](MISSING.md)\n", encoding="utf-8"
+            )
+            errors = VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False)
+            self.assertTrue(any("MISSING.md" in error for error in errors), errors)
+
+    def test_reference_definitions_inside_quotes_resolve(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "> [ref]: SKILL.md\n> [go][ref]\n", encoding="utf-8"
+            )
+            self.assertEqual([], VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False))
+
+    def test_unmatched_backtick_runs_leave_links_active(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "``[real](MISSING.md)`\n", encoding="utf-8"
+            )
+            errors = VALIDATOR.validate_repo(repo, visibility="private", require_cloud_links=False)
+            self.assertTrue(any("MISSING.md" in error for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()
