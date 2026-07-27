@@ -68,17 +68,24 @@ Verify both, separately:
 For a whole-ledger reconciliation, diff the complete **sets**, never tails. Order stops mattering once nothing is truncated:
 
 ```bash
+# bash: needs arrays and shopt.
 MIGDIR=<migrations dir>
 
-# Fail fast on an empty glob. Without this the command is worse than useless:
-# `ls` writes its error to STDERR, `diff` runs against an empty stream, and
-# STDOUT is a clean report that every ledger row is drift — which points at
-# the production UPDATE below. The one line explaining it is on the other
-# stream, invisible in a pipeline or under `2>/dev/null`.
-ls "$MIGDIR"/*.sql >/dev/null || { echo "no .sql under $MIGDIR" >&2; exit 1; }
+# Assert on the MATCH COUNT, not on an exit status. Without this the command is
+# worse than useless — it reports every ledger row as drift, pointing straight
+# at the production UPDATE below, with the only clue on stderr.
+#
+# `shopt -s nullglob` is set here rather than assumed either way, because BOTH
+# defaults break a naive guard: unset, an unmatched glob stays the literal
+# string `<dir>/*.sql` and counts as one match; set, `ls <glob>` degrades to a
+# bare `ls` that exits 0 and lists the CURRENT DIRECTORY. The second is the
+# nastier one — not an empty set, but the wrong set, shaped like a real answer.
+shopt -s nullglob
+migs=("$MIGDIR"/*.sql)
+(( ${#migs[@]} )) || { echo "no .sql under $MIGDIR" >&2; exit 1; }
 
 diff <(psql -Atc "select version || '_' || coalesce(name, '') from <ledger> order by 1") \
-     <(ls "$MIGDIR"/*.sql | sed 's|.*/||; s|\.sql$||' | sort)
+     <(printf '%s\n' "${migs[@]}" | sed 's|.*/||; s|\.sql$||' | sort)
 ```
 
 `coalesce` is load-bearing, not defensive. `name` is **nullable** in Supabase's `schema_migrations` (`version` is not), and `version || '_' || NULL` is `NULL`, which `psql -At` prints as a **blank line** — so a legacy unnamed row does not show up as itself, it shifts the comparison and reports as drift. Same failure class as the guard above: a missing input quietly becoming an empty one. Rows with no name still can't match a named repo file, so reconcile those by `version` alone.
