@@ -44,7 +44,8 @@ WINDOWS_HOME_RE = re.compile(
     r"[^\s`'\"]+"
 )
 LOCAL_ABSOLUTE_RE = re.compile(
-    r"(?<![A-Za-z0-9])/(?:workspace|workspaces|opt)/[^\s`'\"]+"
+    r"(?<![A-Za-z0-9])/(?:workspace|workspaces|opt)"
+    r"(?:/[^\s`'\"]+)?(?=$|[\s`'\"])"
 )
 URI_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 

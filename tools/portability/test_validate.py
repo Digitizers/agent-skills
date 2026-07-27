@@ -457,6 +457,16 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(any("symlink target escapes" in error for error in errors))
 
+    def test_public_boundary_rejects_bare_local_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "cd /workspace\ncd /opt\n", encoding="utf-8"
+            )
+            errors = VALIDATOR.validate_repo(repo, visibility="public", require_cloud_links=False)
+            self.assertTrue(any("absolute path" in error for error in errors), errors)
+
     def test_accepts_query_strings_on_resolving_local_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
