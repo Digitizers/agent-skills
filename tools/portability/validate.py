@@ -119,7 +119,6 @@ def is_placeholder_value(value: str) -> bool:
         or value == "..."
         or re.fullmatch(r"\$[A-Z][A-Z0-9_]*", value) is not None
         or re.fullmatch(r"\$\{[A-Z][A-Z0-9_]*\}", value) is not None
-        or ENV_NAME_RE.fullmatch(value) is not None
         or re.fullmatch(r"<[^>\r\n]+>", value) is not None
         or folded in {"changeme", "example", "placeholder", "redacted", "replace_me", "xxx"}
         or folded.startswith(("your-", "your_"))
@@ -459,6 +458,9 @@ def regex_credential_findings(text: str) -> list[int]:
         ):
             continue
         assignment_indent = leading_indent_width(line)
+        name_list_context = (
+            name_only.group("name").strip().casefold() == "credentials"
+        )
         for continuation in lines[index + 1 :]:
             candidate = continuation.strip()
             if not candidate or candidate.startswith("#"):
@@ -466,11 +468,14 @@ def regex_credential_findings(text: str) -> list[int]:
             continuation_indent = leading_indent_width(continuation)
             if continuation_indent < assignment_indent:
                 break
-            if continuation_indent == assignment_indent and (
-                CREDENTIAL_ASSIGNMENT_RE.match(candidate)
-                or CREDENTIAL_NAME_ONLY_RE.match(candidate)
-            ):
-                break
+            if continuation_indent == assignment_indent:
+                if not candidate.startswith(("-", "[", "{", '"', "'")):
+                    break
+                if (
+                    CREDENTIAL_ASSIGNMENT_RE.match(candidate)
+                    or CREDENTIAL_NAME_ONLY_RE.match(candidate)
+                ):
+                    break
             candidate = candidate.removeprefix("-").strip()
             if ":" in candidate:
                 _, candidate = candidate.split(":", 1)
@@ -478,6 +483,8 @@ def regex_credential_findings(text: str) -> list[int]:
                 if not candidate:
                     continue
             candidate = candidate.strip("[],").strip().strip("\"'")
+            if name_list_context and ENV_NAME_RE.fullmatch(candidate):
+                continue
             if candidate and not is_placeholder_value(candidate):
                 findings.append(number)
                 break
@@ -523,7 +530,7 @@ def python_credential_findings(text: str) -> list[int]:
 
     try:
         findings.update(comment_credential_findings())
-    except tokenize.TokenError:
+    except (IndentationError, tokenize.TokenError):
         findings.update(regex_credential_findings(text))
 
     try:
@@ -662,13 +669,16 @@ def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
         raw = raw.strip()
         validate_one_link(repo, path, raw, errors)
 
+    def normalized_reference_label(label: str) -> str:
+        return " ".join(label.split()).casefold()
+
     definitions: dict[str, str] = {}
     for label, target in REFERENCE_DEF_RE.findall(text):
-        definitions.setdefault(label.casefold(), target)
+        definitions.setdefault(normalized_reference_label(label), target)
     for label, target in definitions.items():
         validate_one_link(repo, path, target, errors)
     for text_label, explicit_label in reference_link_uses(text):
-        label = (explicit_label or text_label).casefold()
+        label = normalized_reference_label(explicit_label or text_label)
         if label not in definitions:
             fail(
                 errors,

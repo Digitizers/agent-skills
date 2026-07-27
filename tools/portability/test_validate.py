@@ -1132,6 +1132,62 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertTrue(any("reference does not resolve: MISSING.md" in error for error in errors), errors)
 
+    def test_public_boundary_rejects_uppercase_credential_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / ".env.example").write_text(
+                "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("credential value" in error for error in errors), errors)
+
+    def test_invalid_python_indentation_falls_back_without_crashing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "script.py").write_text(
+                "if True:\n  pass\n pass\nAPI_KEY = 'sk-live-secret'\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertTrue(any("credential value" in error for error in errors), errors)
+
+    def test_reference_labels_normalize_internal_whitespace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "EXISTS.md").write_text("present\n", encoding="utf-8")
+            (skill / "REFERENCE.md").write_text(
+                "[foo bar]: EXISTS.md\n"
+                "[foo   bar]: MISSING.md\n"
+                "[Read this][foo \t bar]\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("reference does not resolve" in error for error in errors), errors)
+            self.assertFalse(any("reference label is not defined" in error for error in errors), errors)
+
+    def test_same_indent_prose_after_credentials_heading_is_not_a_value(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "REFERENCE.md").write_text(
+                "Credentials:\nThis section describes authentication.\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="public", require_cloud_links=False
+            )
+            self.assertFalse(any("credential value" in error for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()
