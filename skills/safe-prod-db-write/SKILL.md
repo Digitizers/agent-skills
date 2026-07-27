@@ -27,7 +27,7 @@ compatibility: Needs a way to reach the production database — a deployment pla
 Step 2 on this path splits by what you are running, and **the two halves are not interchangeable**:
 
 - **A data write** (`UPDATE`/`INSERT`/`DELETE`) — a `SELECT` over the same `WHERE` *is* the dry-run. It shows the exact rows about to change.
-- **A migration (DDL)** — a `SELECT` is **not** a dry-run and must not be presented as one. It reads the pre-state; it never executes the migration, so it cannot surface invalid SQL, a constraint that will reject, a trigger side effect, or lock behavior. Run it against a **throwaway database carrying the same migration history** — the only preview that exercises the statements themselves — or wrap it in `begin; … rollback;` where the tool gives you transaction control (Postgres has transactional DDL, with exceptions such as `CREATE INDEX CONCURRENTLY`).
+- **A migration (DDL)** — a `SELECT` is **not** a dry-run and must not be presented as one. It reads the pre-state; it never executes the migration, so it cannot surface invalid SQL, a constraint that will reject, a trigger side effect, or lock behavior. The only real preview executes the statements, and it belongs on a **throwaway database carrying the same migration history** — never on production. `begin; … rollback;` is a preview technique *for that disposable database* (Postgres has transactional DDL, `CREATE INDEX CONCURRENTLY` and friends excepted); it is **not** a way to make a production trial safe. A rolled-back transaction still took the locks for its duration, and a migration can reach outside the transaction entirely. If no throwaway database exists, the honest answer is that this migration has no dry-run — say so at step 3 and let the human authorize it on those terms, rather than executing against production to find out.
 
 ## Rules
 
@@ -84,7 +84,16 @@ shopt -s nullglob
 migs=("$MIGDIR"/*.sql)
 (( ${#migs[@]} )) || { echo "no .sql under $MIGDIR" >&2; exit 1; }
 
-diff <(psql -Atc "select version || '_' || coalesce(name, '') from <ledger> order by 1") \
+# Materialize the query and check it BEFORE diffing. Process substitution does
+# not propagate the child's exit status: `diff <(psql …)` where psql fails on
+# auth, connectivity or a bad query reads an empty pseudo-file and reports every
+# repo migration as missing — and `diff` exits 1, which per its own docs means
+# only "inputs differ". Identical status to genuine drift. `$( )` propagates.
+ledger=$(psql -Atc "select version || '_' || coalesce(name, '') from <ledger> order by 1") \
+  || { echo "ledger query failed" >&2; exit 1; }
+[ -n "$ledger" ] || { echo "ledger query returned no rows" >&2; exit 1; }
+
+diff <(printf '%s\n' "$ledger") \
      <(printf '%s\n' "${migs[@]}" | sed 's|.*/||; s|\.sql$||' | sort)
 ```
 
