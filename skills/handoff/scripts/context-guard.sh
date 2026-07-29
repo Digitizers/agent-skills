@@ -7,17 +7,21 @@
 # usage >= threshold injects additionalContext telling the agent to invoke
 # the handoff skill. Fires once per session (marker file).
 #
+# The hook JSON stays on stdin all the way into Python — it can carry a large
+# prompt or tool_response, and expanding it into an argv argument would hit
+# the OS per-argument limit ("Argument list too long") exactly on the large
+# context-growing operations this hook exists to catch. The Python code is
+# fed via process substitution so stdin remains the hook payload.
+#
 # Env:
 #   HANDOFF_THRESHOLD_PCT   default 70
 #   CONTEXT_WINDOW_TOKENS   default 200000
 set -euo pipefail
 
-INPUT="$(cat)"
-
-python3 - "$INPUT" <<'PY'
+exec python3 <(cat <<'PY'
 import json, os, sys, tempfile
 
-inp = json.loads(sys.argv[1])
+inp = json.load(sys.stdin)
 transcript = inp.get("transcript_path") or ""
 session_id = inp.get("session_id") or "unknown"
 event = inp.get("hook_event_name") or "UserPromptSubmit"
@@ -52,7 +56,7 @@ if pct < threshold:
 open(marker, "w").close()
 msg = (
     f"Context window is at ~{pct:.0f}% of {window} tokens ({tokens} used), "
-    f"past the {threshold:.0f}% handoff threshold. Invoke the 'handoff' "
+    f"past the {threshold:.0f}% handoff threshold. Invoke the handoff "
     "skill NOW to write a handoff document before context is compacted, "
     "then continue the current task."
 )
@@ -63,3 +67,4 @@ print(json.dumps({
     }
 }))
 PY
+)
