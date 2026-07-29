@@ -4,6 +4,6 @@
   { "query": "hand this work off to another agent, summarize the state of the migration for them", "should_trigger": true },
   { "query": "make me a handoff for the next session, it will focus on the billing refactor", "should_trigger": true },
   { "query": "summarize this article into three bullet points", "should_trigger": false },
-  { "query": "write a README for this repo", "should_trigger": false },
+  { "query": "draft a changelog entry for these fixes: login bug, slow dashboard, broken export link", "should_trigger": false },
   { "query": "what did we change in the last commit?", "should_trigger": false }
 ]

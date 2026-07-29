@@ -7,7 +7,9 @@ description: >-
   another agent, machine, or teammate, or the user asks for a "handoff",
   "handoff document", "session summary to continue from", or to "prepare this
   for the next session". Also fires when a hook or system reminder reports
-  high context usage and asks for a handoff.
+  high context usage and asks for a handoff. Not for writing project
+  documentation for humans (README, docs, changelogs, reports) — only for
+  transferring this session's state to a future agent session.
 argument-hint: "What will the next session focus on?"
 ---
 
