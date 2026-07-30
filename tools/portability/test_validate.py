@@ -218,6 +218,28 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("indented-not-real.md" in error for error in errors), errors)
 
+    def test_flags_backslash_windows_drive_destination(self) -> None:
+        # markdown-it percent-encodes the backslashes (C:%5C...), which must
+        # not be mistaken for a "C:" URI scheme and silently accepted.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "[guide](C:\\Projects\\guide.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(
+                any(
+                    "does not resolve" in error or "escapes repository" in error
+                    for error in errors
+                ),
+                errors,
+            )
+
     def test_escaped_destination_and_autolink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

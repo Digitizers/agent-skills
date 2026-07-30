@@ -138,7 +138,10 @@ def validate_one_link(
     repo: Path, path: Path, target: str, errors: list[str]
 ) -> None:
     target = target.strip()
-    windows_drive = re.match(r"^[A-Za-z]:[\\/]", target)
+    # Classify on the DECODED form: markdown-it percent-encodes backslashes,
+    # so a raw target like C:%5CProjects%5Cguide.md would otherwise read as
+    # URI scheme "C:" and be silently accepted as external.
+    windows_drive = re.match(r"^[A-Za-z]:[\\/]", unquote(target))
     if (
         not target
         or target.startswith("#")
