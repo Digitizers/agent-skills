@@ -62,7 +62,11 @@ The validator is deterministic and performs no network calls. Its public
 boundary checks are intentionally limited to committed env files and env
 templates, known private identifiers, machine-specific absolute paths and
 unsafe symlink targets. Parsing arbitrary credential values across programming
-and configuration languages is outside this contract.
+and configuration languages is outside this contract — credential *detection*
+belongs to gitleaks, which CI runs against the full git history with the
+pinned config in `.gitleaks.toml`. Division of labor: validator = structural
+and bounded hygiene checks; gitleaks = secret detection; human review = final
+gate.
 Markdown link enumeration is parser-backed (markdown-it-py, CommonMark
 preset) — see the canonical-layout section for exactly what that covers and
 what is deliberately not flagged.
