@@ -1,0 +1,9 @@
+[
+  { "query": "we're almost out of context — write a handoff document so a fresh agent can pick this up", "should_trigger": true },
+  { "query": "I need to stop for today, prepare everything so tomorrow's session can continue where we left off", "should_trigger": true },
+  { "query": "hand this work off to another agent, summarize the state of the migration for them", "should_trigger": true },
+  { "query": "make me a handoff for the next session, it will focus on the billing refactor", "should_trigger": true },
+  { "query": "summarize this article into three bullet points", "should_trigger": false },
+  { "query": "draft a changelog entry for these fixes: login bug, slow dashboard, broken export link", "should_trigger": false },
+  { "query": "what did we change in the last commit?", "should_trigger": false }
+]
