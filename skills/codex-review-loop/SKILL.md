@@ -28,7 +28,7 @@ If the OpenAI Codex plugin for Claude Code (`openai/codex-plugin-cc`) is install
 
 (`/codex:adversarial-review` accepts custom focus text and emits schema-validated findings. To drive the review programmatically, resolve the Codex plugin's installed copy first — e.g. the newest `codex-companion.mjs` under the Claude plugin cache's `*/codex/*/scripts/` — and run `node <that path> review …`. Do **not** use `${CLAUDE_PLUGIN_ROOT}` for this: it points at the plugin whose own component is executing, never at the Codex plugin from another skill.)
 
-Triage its findings exactly like cloud findings: verify against the code, fix the real ones with regression tests, ignore false positives. Then push the post-Round-0 HEAD, open the PR, and continue from step 3.
+Triage its findings exactly like cloud findings: verify against the code, fix the real ones with regression tests, ignore false positives. Re-run the relevant test suite until it is green again — fixes invalidate the pre-Round-0 green. Then push the post-Round-0 HEAD, open the PR, and continue from step 3.
 
 **Why:** the cloud bot's round-trip is minutes per round, and its early rounds are dominated by findings a local pass catches in seconds. The local and cloud reviewers share a model family, so a local pre-pass mostly *de-duplicates* the first cloud rounds rather than adding a new defect class — that is exactly the point: spend the cheap reviewer first.
 
