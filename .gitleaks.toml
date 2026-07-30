@@ -1,16 +1,17 @@
 # Gitleaks configuration for agent-skills (issue #24).
 #
 # Division of labor: tools/portability/validate.py enforces structural
-# hygiene (including placeholder-only env templates); gitleaks detects
-# credential values; human review stays the final gate.
+# hygiene on the checked-out tip (including placeholder-only env
+# templates); gitleaks detects credential values across the FULL git
+# history; human review stays the final gate.
 #
-# The full-history scan is currently clean, so this config carries no
-# finding-specific baseline. Add allowlist entries narrowly — path + rule +
-# reason in a comment — instead of loosening rules.
+# Policy: NO path-wide allowlists. The validator only sees the tip, so a
+# path exemption here would blind the history scan to a credential that
+# once lived in that file — exactly the leak this layer exists to catch.
+# If a finding must be suppressed, add a per-finding fingerprint to
+# .gitleaksignore with a comment explaining why, and have it reviewed.
+#
+# The full-history scan is currently clean (no baseline entries).
 
 [extend]
 useDefault = true
-
-[allowlist]
-description = "Env templates are placeholder-only, enforced by the portability validator"
-paths = ['''\.env\.(example|sample|template)$''']
