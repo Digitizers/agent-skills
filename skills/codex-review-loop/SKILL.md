@@ -11,7 +11,7 @@ Claude develops, Codex reviews, Claude fixes — **in a loop** — the human rev
 ## The loop
 
 1. Build on a branch → tests green.
-2. **Round 0 — local pre-review of the built branch diff, when the Codex plugin is installed** (see below). Fix its real findings, re-run the relevant test suite until green again — fixes invalidate step 1's green — then **push the post-Round-0 HEAD** and open the PR. A PR created by a non-pushing flow from the stale remote SHA omits the reviewed fixes.
+2. **Round 0 — local pre-review of the built branch diff, when the Codex plugin is installed** (see below). If the PR **already exists**, skip this step and continue at step 3 — Round 0 is the pre-PR round only. Otherwise: fix its real findings, re-run the relevant test suite until green again — fixes invalidate step 1's green — then **push the post-Round-0 HEAD** and open the PR. A PR created by a non-pushing flow from the stale remote SHA omits the reviewed fixes.
 3. Trigger: `gh pr comment <PR> -R <owner>/<repo> --body "@codex review"`.
 4. Pull findings from **all three surfaces** (see REFERENCE) — and from **every reviewer bot on the PR, not just Codex** (Copilot and friends post to the same surfaces; see "Other reviewer bots"). **Verify each against HEAD** — Codex re-posts stale + false-positive findings every round.
 5. Fix the **real** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed).
