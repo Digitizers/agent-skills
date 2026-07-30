@@ -10,12 +10,32 @@ Claude develops, Codex reviews, Claude fixes — **in a loop** — the human rev
 
 ## The loop
 
+0. **Round 0 — local pre-review, when the Codex plugin is installed** (see below).
 1. Build on a branch → tests green → open PR.
 2. Trigger: `gh pr comment <PR> -R <owner>/<repo> --body "@codex review"`.
 3. Pull findings from **all three surfaces** (see REFERENCE) — and from **every reviewer bot on the PR, not just Codex** (Copilot and friends post to the same surfaces; see "Other reviewer bots"). **Verify each against HEAD** — Codex re-posts stale + false-positive findings every round.
 4. Fix the **real** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed).
 5. Re-trigger and repeat 2–4 until Codex says **"Didn't find any major issues"** *against the current HEAD*.
 6. **Human reviews once**, at the end. Never auto-merge a substantial PR without a nod.
+
+## Round 0 — local Codex pre-review
+
+If the OpenAI Codex plugin for Claude Code (`openai/codex-plugin-cc`) is installed — check for the `/codex:review` command or `codex:setup` skill — run a **local** review round on the branch diff *before* opening the PR:
+
+```text
+/codex:review --wait --base <default-branch> --scope branch
+```
+
+(or `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" review ...` when driving it programmatically; `/codex:adversarial-review` accepts custom focus text and emits schema-validated findings.)
+
+Triage its findings exactly like cloud findings: verify against the code, fix the real ones with regression tests, ignore false positives. Then enter the loop at step 1.
+
+**Why:** the cloud bot's round-trip is minutes per round, and its early rounds are dominated by findings a local pass catches in seconds. The local and cloud reviewers share a model family, so a local pre-pass mostly *de-duplicates* the first cloud rounds rather than adding a new defect class — that is exactly the point: spend the cheap reviewer first.
+
+**What Round 0 is NOT:**
+
+- **Not a convergence gate.** It reviews local state, not the PR, and emits no authoritative clean verdict. Convergence is decided **only** by the cloud bot's clean verdict at HEAD, per the Convergence section — a clean local review never justifies skipping the cloud loop or merging.
+- **Not a substitute for the fix rules.** Round-0 fixes follow the same discipline: regression test per code fix, fix-the-rule-not-the-line, own commit.
 
 ## Convergence
 
