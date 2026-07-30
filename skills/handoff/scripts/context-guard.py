@@ -22,21 +22,24 @@ import re
 import sys
 import tempfile
 
-# Token-density buckets by script. English-like text runs ~4 chars/token,
-# but Hebrew/Arabic/Cyrillic/Greek run ~2 and CJK ~1 — applying the 4:1
-# ratio universally underestimates multilingual sessions and misses the
-# threshold. Rough on purpose; erring high only fires the nudge earlier.
-_NON_ASCII = re.compile(r"[^\x00-\x7f]")
+# Estimation policy: a conservative FLOOR, not an average. Without the real
+# tokenizer any per-content-class ratio (prose ~4 chars/token, Hebrew ~2,
+# base64 ~2-2.7, minified code ~2-3) can be beaten by the next token-dense
+# counterexample, so instead of bucketing content classes we assume the
+# near-worst ratio everywhere: 2 chars/token for everything except CJK,
+# which gets 1:1. Prose overcounts ~2x — on the tail/payload only, the
+# usage-block baseline stays exact — so the nudge can fire early, never
+# late. Any residual undercount is also self-healing: the marker is only
+# written when the nudge fires, and the next hook event reads a usage block
+# that already includes this content at its true token cost.
 _CJK = re.compile(
     r"[⺀-鿿぀-ヿ가-힯豈-﫿]"
 )
 
 
 def estimate_tokens(text: str) -> int:
-    non_ascii = len(_NON_ASCII.findall(text))
     cjk = len(_CJK.findall(text))
-    ascii_chars = len(text) - non_ascii
-    return ascii_chars // 4 + (non_ascii - cjk) // 2 + cjk
+    return cjk + (len(text) - cjk) // 2
 
 
 def main() -> None:

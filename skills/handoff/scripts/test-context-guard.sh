@@ -81,4 +81,13 @@ OUT="$(run_guard "$WORK/in-heb.json")"
 echo "$OUT" | grep -q "additionalContext" || fail "Hebrew tail under-counted"
 echo "PASS hebrew-tail script-aware estimate"
 
+# 8. Token-dense ASCII (base64-like) is covered by the 2-chars/token floor
+#    (Codex round-4 P2): 130k baseline + 32k high-entropy ASCII chars is
+#    ~12-16k real tokens; the old 4:1 ratio added only 8k and stayed silent.
+mk_transcript "$WORK/b64.jsonl" 130000
+printf '{"transcript_path":"%s","session_id":"cg-test-b64","hook_event_name":"PostToolUse","tool_response":{"stdout":"%s"}}' "$WORK/b64.jsonl" "$(python3 -c 'import base64,os; print(base64.b64encode(os.urandom(24000)).decode())')" > "$WORK/in-b64.json"
+OUT="$(run_guard "$WORK/in-b64.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "token-dense ASCII payload under-counted"
+echo "PASS base64-payload conservative floor"
+
 echo "all context-guard tests passed"

@@ -19,11 +19,13 @@ on:
    transcript JSONL for the **latest assistant message's `usage` block**, and
    sums `input_tokens + cache_read_input_tokens + cache_creation_input_tokens
    + output_tokens`. Because that block only counts context sent into the
-   *previous* model call, it also adds a script-aware estimate for the
-   transcript tail recorded after it and for the current hook payload
-   (prompt / tool_response) — ASCII at ~4 chars/token, other scripts
-   (Hebrew, Arabic, Cyrillic…) at ~2, CJK at ~1 — since a large tail is
-   exactly what crosses the threshold between assistant turns.
+   *previous* model call, it also adds a conservative floor estimate for
+   the transcript tail recorded after it and for the current hook payload
+   (prompt / tool_response): 2 chars/token for everything except CJK (1:1).
+   A floor, not an average — English prose counts ~2x high, so the nudge
+   can only fire early, never late; and any residual undercount self-heals,
+   because the next hook event reads a usage block that already prices this
+   content exactly.
 3. At `>= HANDOFF_THRESHOLD_PCT` (default 70) of `CONTEXT_WINDOW_TOKENS`
    (default 200000) it emits `additionalContext` instructing the agent to
    invoke the handoff skill, and drops a per-session marker file so it fires
