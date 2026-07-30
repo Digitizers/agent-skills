@@ -20,16 +20,17 @@ except ImportError:
         "Install it with: pip install pyyaml"
     )
 
+try:
+    from markdown_it import MarkdownIt
+except ImportError:
+    sys.exit(
+        "validate.py needs markdown-it-py to enumerate Markdown links. "
+        "Install it with: pip install markdown-it-py"
+    )
+
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-REFERENCE_USE_RE = re.compile(r"!?\[([^\]]+)\]\[([^\]]*)\]")
-REFERENCE_DEF_RE = re.compile(
-    r"^[ \t]{0,3}\[([^\]]+)\]:[ \t]*(.+)$",
-    re.MULTILINE,
-)
 ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
-FENCED_CODE_START_RE = re.compile(r"^([ \t]*)(`{3,}|~{3,})")
-LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-+*]|\d+[.)])[ \t]+")
 ENV_TEMPLATE_SUFFIXES = (".env.example", ".env.sample", ".env.template")
 PRIVATE_MARKERS = (
     "Digitizers/" + "marketing-skills",
@@ -95,240 +96,48 @@ def frontmatter(
     return parsed
 
 
-def markdown_target(raw: str) -> str | None:
-    raw = raw.strip()
-    if raw.startswith("<"):
-        closing = raw.find(">")
-        return None if closing < 0 else raw[1:closing]
-    return raw.split(maxsplit=1)[0] if raw else ""
+_MD_PARSER: MarkdownIt | None = None
 
 
-def inline_link_targets(text: str) -> list[str]:
+def link_targets(text: str) -> list[str]:
+    """Enumerate link/image destinations per CommonMark.
+
+    Walks the markdown-it-py token tree, so links inside nested lists and
+    blockquotes are found, while fenced, inline and indented code never
+    contribute targets. Reference links resolve through their definitions;
+    definitions that are never used are still returned so their targets get
+    validated. Undefined reference labels render as literal text per
+    CommonMark and therefore yield no target. Duplicate targets collapse to
+    one entry per document.
+    """
+    global _MD_PARSER
+    if _MD_PARSER is None:
+        _MD_PARSER = MarkdownIt("commonmark")
+    env: dict[str, object] = {}
+    tokens = _MD_PARSER.parse(text, env)
     targets: list[str] = []
-    index = 0
-    while index < len(text):
-        if text[index] == "!":
-            if is_escaped(text, index):
-                index += 1
-                continue
-            label_start = index + 2 if index + 1 < len(text) and text[index + 1] == "[" else 0
-        else:
-            label_start = (
-                index + 1
-                if text[index] == "[" and not is_escaped(text, index)
-                else 0
-            )
-        if not label_start:
-            index += 1
-            continue
 
-        label_end = closing_bracket(text, label_start)
-        if label_end < 0 or label_end + 1 >= len(text) or text[label_end + 1] != "(":
-            index += 1
-            continue
+    def walk(items) -> None:
+        for token in items:
+            if token.type == "link_open":
+                targets.append(token.attrGet("href") or "")
+            elif token.type == "image":
+                targets.append(token.attrGet("src") or "")
+            if token.children:
+                walk(token.children)
 
-        start = label_end + 2
-        depth = 1
-        escaped = False
-        for index in range(start, len(text)):
-            character = text[index]
-            if escaped:
-                escaped = False
-                continue
-            if character == "\\":
-                escaped = True
-                continue
-            if character == "(":
-                depth += 1
-            elif character == ")":
-                depth -= 1
-                if depth == 0:
-                    targets.append(text[start:index])
-                    break
-        index += 1
-    return targets
-
-
-def is_escaped(text: str, index: int) -> bool:
-    backslashes = 0
-    index -= 1
-    while index >= 0 and text[index] == "\\":
-        backslashes += 1
-        index -= 1
-    return backslashes % 2 == 1
-
-
-def closing_bracket(text: str, start: int) -> int:
-    depth = 1
-    escaped = False
-    for index in range(start, len(text)):
-        character = text[index]
-        if escaped:
-            escaped = False
-            continue
-        if character == "\\":
-            escaped = True
-            continue
-        if character == "[":
-            depth += 1
-        elif character == "]":
-            depth -= 1
-            if depth == 0:
-                return index
-    return -1
-
-
-def reference_link_uses(text: str) -> list[tuple[str, str]]:
-    uses: list[tuple[str, str]] = []
-    index = 0
-    while index < len(text):
-        bracket = index + 1 if text[index] == "!" else index
-        if bracket >= len(text) or text[bracket] != "[" or is_escaped(text, bracket):
-            index += 1
-            continue
-        label_end = closing_bracket(text, bracket + 1)
-        if label_end < 0 or label_end + 1 >= len(text) or text[label_end + 1] != "[":
-            index += 1
-            continue
-        reference_end = closing_bracket(text, label_end + 2)
-        if reference_end < 0:
-            index += 1
-            continue
-        uses.append((text[bracket + 1 : label_end], text[label_end + 2 : reference_end]))
-        index = reference_end + 1
-    return uses
-
-
-def text_width(text: str) -> int:
-    width = 0
-    for character in text:
-        width = width + (4 - width % 4 if character == "\t" else 1)
-    return width
-
-
-def without_block_quote_prefix(line: str) -> str:
-    remaining = line
-    while True:
-        match = re.match(r"^[ ]{0,3}>[ \t]?", remaining)
-        if not match:
-            return remaining
-        remaining = remaining[match.end() :]
-
-
-def strip_fenced_code(text: str) -> str:
-    lines = text.splitlines(keepends=True)
-    kept: list[str] = []
-    fence_marker: str | None = None
-    fence_length = 0
-    fence_indent = 0
-    fence_close_indent = 3
-    in_list_item = False
-    fence_in_list = False
-    fence_in_quote = False
-    list_code_indent = 8
-    for line in lines:
-        markdown_line = without_block_quote_prefix(line)
-        if fence_marker is None:
-            content = markdown_line.rstrip("\r\n")
-            list_match = LIST_ITEM_RE.match(content)
-            indent = text_width(content[: len(content) - len(content.lstrip())])
-            if list_match and (
-                indent < 4 or (in_list_item and indent < list_code_indent)
-            ):
-                in_list_item = True
-                list_code_indent = text_width(list_match.group(0)) + 4
-            elif (
-                content.strip()
-                and indent < 4
-                and not FENCED_CODE_START_RE.match(markdown_line)
-            ):
-                in_list_item = False
-            match = FENCED_CODE_START_RE.match(markdown_line)
-            opener_indent = text_width(match.group(1)) if match else 0
-            if match and (
-                opener_indent <= 3
-                or (in_list_item and opener_indent < list_code_indent)
-            ):
-                fence_indent = opener_indent
-                fence_close_indent = opener_indent + 3 if in_list_item else 3
-                fence_in_list = in_list_item
-                fence_in_quote = markdown_line != line
-                fence_marker = match.group(2)[0]
-                fence_length = len(match.group(2))
-                kept.append("\n" if line.endswith("\n") else "")
-                continue
-            kept.append(line)
-            continue
-        close = markdown_line.rstrip("\r\n")
-        if (
-            (fence_in_quote and markdown_line == line)
-            or (
-                fence_in_list
-                and close.strip()
-                and text_width(close[: len(close) - len(close.lstrip())])
-                < fence_indent
-            )
-        ):
-            fence_marker = None
-            kept.append(line)
-            continue
-        close_match = re.fullmatch(
-            rf"([ \t]*){re.escape(fence_marker)}{{{fence_length},}}[ \t]*",
-            close,
-        )
-        if close_match and text_width(close_match.group(1)) <= fence_close_indent:
-            fence_marker = None
-            fence_length = 0
-        kept.append("\n" if line.endswith("\n") else "")
-    return "".join(kept)
-
-
-def strip_inline_code(text: str) -> str:
-    kept: list[str] = []
-    index = 0
-    while index < len(text):
-        if text[index] != "`" or is_escaped(text, index):
-            kept.append(text[index])
-            index += 1
-            continue
-        opener_end = index
-        while opener_end < len(text) and text[opener_end] == "`":
-            opener_end += 1
-        run_length = opener_end - index
-        search = opener_end
-        closing_start = -1
-        while search < len(text):
-            if text[search] != "`":
-                search += 1
-                continue
-            closing_end = search
-            while closing_end < len(text) and text[closing_end] == "`":
-                closing_end += 1
-            if closing_end - search == run_length:
-                closing_start = search
-                break
-            search = closing_end
-        if closing_start < 0:
-            kept.append(text[index:opener_end])
-            index = opener_end
-            continue
-        removed = text[index : closing_start + run_length]
-        kept.append("\n" * removed.count("\n"))
-        index = closing_start + run_length
-    return "".join(kept)
+    walk(tokens)
+    references = env.get("references")
+    if isinstance(references, dict):
+        for definition in references.values():
+            targets.append(definition.get("href") or "")
+    return list(dict.fromkeys(targets))
 
 
 def validate_one_link(
-    repo: Path, path: Path, raw: str, errors: list[str]
+    repo: Path, path: Path, target: str, errors: list[str]
 ) -> None:
-    target = markdown_target(raw)
-    if target is None:
-        fail(
-            errors,
-            path.relative_to(repo),
-            f"angle-bracketed reference is not closed: {raw}",
-        )
-        return
+    target = target.strip()
     windows_drive = re.match(r"^[A-Za-z]:[\\/]", target)
     if (
         not target
@@ -357,32 +166,8 @@ def validate_one_link(
 
 def validate_links(repo: Path, path: Path, errors: list[str]) -> None:
     text = path.read_text(encoding="utf-8")
-    text = strip_fenced_code(text)
-    text = strip_inline_code(text)
-    for raw in inline_link_targets(text):
-        raw = raw.strip()
-        validate_one_link(repo, path, raw, errors)
-
-    def normalized_label(label: str) -> str:
-        return " ".join(label.split()).casefold()
-
-    definitions: dict[str, str] = {}
-    reference_text = "\n".join(
-        without_block_quote_prefix(line).lstrip()
-        for line in text.splitlines()
-    )
-    for label, target in REFERENCE_DEF_RE.findall(reference_text):
-        definitions.setdefault(normalized_label(label), target)
-    for label, target in definitions.items():
+    for target in link_targets(text):
         validate_one_link(repo, path, target, errors)
-    for text_label, explicit_label in reference_link_uses(text):
-        label = normalized_label(explicit_label or text_label)
-        if label not in definitions:
-            fail(
-                errors,
-                path.relative_to(repo),
-                f"reference label is not defined: {label}",
-            )
 
 
 def validate_triggers(
