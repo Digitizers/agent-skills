@@ -1,5 +1,8 @@
-# trigger-eval / validate_spec dependencies.
+# trigger-eval / validate_spec / portability-validator dependencies.
 # validate_spec parses SKILL.md frontmatter as real YAML (a regex approximation
 # accepts input the runtime rejects), and yaml is not in the standard library.
+# tools/portability/validate.py enumerates Markdown links with a real
+# CommonMark parser (markdown-it-py) instead of regex emulation (issue #25).
 #   pip install -r tools/trigger-eval/requirements.txt
 PyYAML>=6.0
+markdown-it-py>=3,<4

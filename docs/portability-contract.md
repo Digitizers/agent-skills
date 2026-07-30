@@ -8,11 +8,13 @@ Claude Code, OpenClaw and Hermes. A sibling skill repository may reuse
 
 - Each canonical skill lives at `skills/<name>/SKILL.md`.
 - Frontmatter `name` equals the containing directory.
-- Portable skill docs use simple top-level inline/reference links. The bounded
-  validator checks those destinations remain inside the repository and
-  resolve. Full CommonMark container semantics (nested lists/quotes, indented
-  code and every escape form) require a real parser and are outside this
-  validator's contract.
+- Skill-doc links are enumerated with a real CommonMark parser
+  (markdown-it-py): inline, reference and image destinations — including
+  inside nested lists and blockquotes — are checked to remain inside the
+  repository and resolve; fenced, inline and indented code never contribute
+  targets. Undefined reference labels are literal text per CommonMark, not
+  links, and are not flagged. One error is reported per unique broken target
+  per document.
 - `evals/triggers.json`, when present, is a non-empty JSON list of
   `{"query": <non-empty string>, "should_trigger": <boolean>}` with at least
   one positive and one negative example.
@@ -61,6 +63,6 @@ boundary checks are intentionally limited to committed env files and env
 templates, known private identifiers, machine-specific absolute paths and
 unsafe symlink targets. Parsing arbitrary credential values across programming
 and configuration languages is outside this contract.
-Likewise, it is not a general CommonMark parser; advanced Markdown link
-semantics must be checked by a parser-backed follow-up rather than additional
-regular-expression emulation.
+Markdown link enumeration is parser-backed (markdown-it-py, CommonMark
+preset) — see the canonical-layout section for exactly what that covers and
+what is deliberately not flagged.

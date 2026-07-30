@@ -125,8 +125,11 @@ class PortabilityValidationTests(unittest.TestCase):
             errors = VALIDATOR.validate_repo(
                 repo, visibility="private", require_cloud_links=False
             )
+            # One error per unique broken target per document: both labels
+            # point at MISSING.md, and a used reference definition would
+            # otherwise double-report through link + definition.
             self.assertEqual(
-                2,
+                1,
                 sum("reference does not resolve: MISSING.md" in error for error in errors),
                 errors,
             )
@@ -155,19 +158,122 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("reference" in error for error in errors), errors)
 
-    def test_validates_reference_style_image_labels(self) -> None:
+    def test_undefined_reference_label_is_literal_text_not_an_error(self) -> None:
+        # Per CommonMark an undefined label renders as literal text — it is
+        # not a link, so the parser-backed validator has nothing to check.
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             skill = make_skill(repo)
             (skill / "SKILL.md").write_text(
                 "---\nname: widget\ndescription: Fine.\n---\n\n"
-                "![Diagram][architecture]\n",
+                "![Diagram][architecture]\n\n[Text][no-such-label]\n",
                 encoding="utf-8",
             )
             errors = VALIDATOR.validate_repo(
                 repo, visibility="private", require_cloud_links=False
             )
-            self.assertTrue(any("reference label is not defined" in error for error in errors))
+            self.assertFalse(any("reference" in error for error in errors), errors)
+
+    def test_validates_unused_reference_definitions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "No link uses this definition.\n\n[orphan]: MISSING.md\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(any("does not resolve" in error for error in errors), errors)
+
+    def test_finds_links_in_nested_lists_and_blockquotes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "- outer\n  - inner [broken](nested-missing.md)\n\n"
+                "> quoted [also broken](quoted-missing.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(any("nested-missing.md" in error for error in errors), errors)
+            self.assertTrue(any("quoted-missing.md" in error for error in errors), errors)
+
+    def test_ignores_links_in_indented_code_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "Paragraph.\n\n    [example](indented-not-real.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("indented-not-real.md" in error for error in errors), errors)
+
+    def test_finds_links_beyond_default_nesting_cap(self) -> None:
+        # The commonmark preset's maxNesting=20 silently drops content in
+        # deeper containers; the validator raises the cap so a broken link
+        # 30 blockquotes deep is still found.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                + "> " * 30
+                + "[deep](deep-missing.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(
+                any("deep-missing.md" in error for error in errors), errors
+            )
+
+    def test_flags_backslash_windows_drive_destination(self) -> None:
+        # markdown-it percent-encodes the backslashes (C:%5C...), which must
+        # not be mistaken for a "C:" URI scheme and silently accepted.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "[guide](C:\\Projects\\guide.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(
+                any(
+                    "does not resolve" in error or "escapes repository" in error
+                    for error in errors
+                ),
+                errors,
+            )
+
+    def test_escaped_destination_and_autolink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                "[escaped](REFERENCE\\.md)\n\n<https://example.com/x?y=1>\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertFalse(any("REFERENCE" in error for error in errors), errors)
+            self.assertFalse(any("example.com" in error for error in errors), errors)
 
     def test_ignores_markdown_links_inside_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
