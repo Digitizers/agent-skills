@@ -66,4 +66,19 @@ OUT="$(run_guard "$WORK/in-payload2.json")"
 echo "$OUT" | grep -q "additionalContext" || fail "hook payload not counted"
 echo "PASS hook-payload counted"
 
+# 7. Token-dense scripts are not diluted by the 4:1 ASCII ratio (Codex
+#    round-3 P2): 130k baseline + 24k Hebrew chars is ~12k real tokens
+#    (~2 chars/token) and must fire; the flat chars/4 estimate read it as
+#    6k and stayed silent.
+mk_transcript "$WORK/heb.jsonl" 130000
+python3 - "$WORK/heb.jsonl" <<'PY'
+import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"type": "user", "message": {"content": "א" * 24000}}, ensure_ascii=False) + "\n")
+PY
+printf '{"transcript_path":"%s","session_id":"cg-test-hebrew","hook_event_name":"UserPromptSubmit"}' "$WORK/heb.jsonl" > "$WORK/in-heb.json"
+OUT="$(run_guard "$WORK/in-heb.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "Hebrew tail under-counted"
+echo "PASS hebrew-tail script-aware estimate"
+
 echo "all context-guard tests passed"

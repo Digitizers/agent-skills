@@ -18,8 +18,25 @@ Env:
 """
 import json
 import os
+import re
 import sys
 import tempfile
+
+# Token-density buckets by script. English-like text runs ~4 chars/token,
+# but Hebrew/Arabic/Cyrillic/Greek run ~2 and CJK ~1 — applying the 4:1
+# ratio universally underestimates multilingual sessions and misses the
+# threshold. Rough on purpose; erring high only fires the nudge earlier.
+_NON_ASCII = re.compile(r"[^\x00-\x7f]")
+_CJK = re.compile(
+    r"[⺀-鿿぀-ヿ가-힯豈-﫿]"
+)
+
+
+def estimate_tokens(text: str) -> int:
+    non_ascii = len(_NON_ASCII.findall(text))
+    cjk = len(_CJK.findall(text))
+    ascii_chars = len(text) - non_ascii
+    return ascii_chars // 4 + (non_ascii - cjk) // 2 + cjk
 
 
 def main() -> None:
@@ -38,18 +55,18 @@ def main() -> None:
     # The latest assistant usage block counts only the context sent INTO that
     # model call — it excludes that call's own output_tokens and anything
     # appended to the transcript since (new user prompt, tool results). A
-    # large tail can cross the threshold silently, so estimate it at
-    # ~4 chars/token and add the current hook payload the same way. Double
-    # counting between tail and payload only makes the nudge fire earlier,
-    # never later — the safe direction for a handoff reminder.
+    # large tail can cross the threshold silently, so estimate it with the
+    # script-aware ratio above and add the current hook payload the same
+    # way. Double counting between tail and payload only makes the nudge
+    # fire earlier, never later — the safe direction for a handoff reminder.
     tokens = 0
-    tail_chars = 0
+    tail_tokens = 0
     with open(transcript, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             try:
                 rec = json.loads(line)
             except json.JSONDecodeError:
-                tail_chars += len(line)
+                tail_tokens += estimate_tokens(line)
                 continue
             usage = (rec.get("message") or {}).get("usage")
             if usage:
@@ -59,16 +76,18 @@ def main() -> None:
                     + usage.get("cache_creation_input_tokens", 0)
                     + usage.get("output_tokens", 0)
                 )
-                tail_chars = 0
+                tail_tokens = 0
             else:
-                tail_chars += len(line)
+                tail_tokens += estimate_tokens(line)
 
-    payload_chars = len(inp.get("prompt") or "")
+    payload_tokens = estimate_tokens(inp.get("prompt") or "")
     tool_response = inp.get("tool_response")
     if tool_response is not None:
-        payload_chars += len(json.dumps(tool_response, ensure_ascii=False))
+        payload_tokens += estimate_tokens(
+            json.dumps(tool_response, ensure_ascii=False)
+        )
 
-    tokens += tail_chars // 4 + payload_chars // 4
+    tokens += tail_tokens + payload_tokens
 
     pct = tokens * 100.0 / window
     if pct < threshold:
