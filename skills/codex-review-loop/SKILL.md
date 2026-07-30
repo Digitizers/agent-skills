@@ -26,7 +26,11 @@ If the OpenAI Codex plugin for Claude Code (`openai/codex-plugin-cc`) is install
 /codex:review --wait --base <default-branch> --scope branch
 ```
 
-(`/codex:adversarial-review` accepts custom focus text and emits schema-validated findings. To drive the review programmatically, resolve the Codex plugin's installed copy first — e.g. the newest `codex-companion.mjs` under the Claude plugin cache's `*/codex/*/scripts/` — and run `node <that path> review …`. Do **not** use `${CLAUDE_PLUGIN_ROOT}` for this: it points at the plugin whose own component is executing, never at the Codex plugin from another skill.)
+(`/codex:adversarial-review` accepts custom focus text and emits schema-validated findings.)
+
+Round 0 runs through the plugin's slash commands only. Do **not** shell out to `codex-companion.mjs` directly from another skill: `${CLAUDE_PLUGIN_ROOT}` resolves to the plugin whose own component is executing — never the Codex plugin — and even with the cache path resolved manually, a raw headless invocation has been observed to hang indefinitely (50+ minutes, no CPU) because the companion expects the slash-command session wiring.
+
+**Round 0 is an accelerator, never a blocker.** If the review has not returned within ~10 minutes, or the plugin's commands are unavailable in the session, kill it and fall back to the no-Round-0 path: push the branch, open the PR (noting the skip in its body), then continue the cloud loop from step 3 — the cloud reviewer remains the convergence gate either way.
 
 Triage its findings exactly like cloud findings: verify against the code, fix the real ones with regression tests, ignore false positives. Re-run the relevant test suite until it is green again — fixes invalidate the pre-Round-0 green. Then push the post-Round-0 HEAD, open the PR, and continue from step 3.
 
