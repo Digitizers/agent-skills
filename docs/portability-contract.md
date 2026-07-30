@@ -63,6 +63,6 @@ boundary checks are intentionally limited to committed env files and env
 templates, known private identifiers, machine-specific absolute paths and
 unsafe symlink targets. Parsing arbitrary credential values across programming
 and configuration languages is outside this contract.
-Likewise, it is not a general CommonMark parser; advanced Markdown link
-semantics must be checked by a parser-backed follow-up rather than additional
-regular-expression emulation.
+Markdown link enumeration is parser-backed (markdown-it-py, CommonMark
+preset) — see the canonical-layout section for exactly what that covers and
+what is deliberately not flagged.
