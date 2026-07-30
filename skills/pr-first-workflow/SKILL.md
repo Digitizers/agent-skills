@@ -1,6 +1,6 @@
 ---
 name: pr-first-workflow
-description: Default to a branch + pull request for every change — code, docs, config, content, and marketing copy alike — instead of committing to main. Branch → commit → PR → review → merge → return to main; direct-to-main only when the human explicitly says so. Use when starting any change in a git + GitHub repo, when deciding whether something can skip a PR, when the user mentions branching / PR workflow, and whenever a request implies landing a change — "commit it", "ship it", "push it", "get it into main", "publish it", "update the copy / the page / the README" — however small the edit sounds. Pairs with codex-review-loop, which drives the opened PR to green.
+description: Default to a branch + pull request for every change — code, docs, config, content, and marketing copy alike — instead of committing to main. Branch → commit → PR → review → merge → return to main; direct-to-main only when the human explicitly says so. Use when starting any change in a git + GitHub repo, when deciding whether something can skip a PR, when the user mentions branching / PR workflow, and whenever a request implies landing a change — "commit it", "ship it", "push it", "get it into main", "publish it", "update the copy / the page / the README" — however small the edit sounds. Pairs with codex-review-loop, which pre-reviews the built branch (Round 0) and drives the opened PR to green.
 compatibility: Requires a git repository with a GitHub remote and the `gh` CLI authenticated.
 ---
 
@@ -13,7 +13,7 @@ compatibility: Requires a git repository with a GitHub remote and the `gh` CLI a
 1. **Start from a clean default branch.** Check out the repo's **default branch** — usually `main`, but may be `master` / `trunk` / `develop`. Get the **bare** branch name (not the `origin/…` remote-tracking name, or you'll detach HEAD) with `git remote show origin | sed -n '/HEAD branch/s/.*: //p'` (or `git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'`). Then `git checkout <branch> && git pull` before branching. Never branch off stale or dirty state. (Substitute your repo's default branch wherever this skill says `main`.)
 2. **Branch per logical change.** `type/scope-slug` (e.g. `fix/redeem-stacking`, `docs/roadmap-ph-idea`). One logical change per branch — don't bundle unrelated edits.
 3. **Commit** with a clear message; **push** the branch.
-4. **Open the PR** with a body saying what + why. Hand it to **codex-review-loop** (or your reviewer) to drive to green.
+4. **Pre-review, then open the PR.** Hand the built branch to **codex-review-loop** *before* PR creation — its Round 0 runs a local Codex review on the branch diff when the Codex plugin is installed. Then open the PR with a body saying what + why, and let codex-review-loop (or your reviewer) drive it to green.
 5. **Merge** once reviewed (squash keeps main linear), **delete the branch**.
 6. **Return to the default branch:** check it out and `git pull`. Don't leave the local checkout on a merged branch.
 

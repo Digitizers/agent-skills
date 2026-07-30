@@ -1,6 +1,6 @@
 ---
 name: codex-review-loop
-description: Drive a pull request to convergence through the Codex AI reviewer — build → PR → @codex review → verify each finding against HEAD → fix the real ones with regression tests → re-trigger until clean → human reviews last. Use when a PR is open or just pushed and should be reviewed, when the user mentions "codex", "@codex review", "the review loop", "ultrareview", or asks to iterate a PR to green.
+description: Drive a pull request to convergence through the Codex AI reviewer — build → local Round 0 pre-review → PR → @codex review → verify each finding against HEAD → fix the real ones with regression tests → re-trigger until clean → human reviews last. Use when a PR is open or just pushed and should be reviewed, when a branch is built and tested and a PR is about to be opened (Round 0 local pre-review), when the user mentions "codex", "@codex review", "the review loop", "ultrareview", or asks to iterate a PR to green.
 compatibility: Requires a git repository with a GitHub remote, the `gh` CLI authenticated, and the Codex GitHub reviewer enabled on the repo.
 ---
 
@@ -11,7 +11,7 @@ Claude develops, Codex reviews, Claude fixes — **in a loop** — the human rev
 ## The loop
 
 1. Build on a branch → tests green.
-2. **Round 0 — local pre-review of the built branch diff, when the Codex plugin is installed** (see below). Fix its real findings, then open the PR.
+2. **Round 0 — local pre-review of the built branch diff, when the Codex plugin is installed** (see below). Fix its real findings, re-run the relevant test suite until green again — fixes invalidate step 1's green — then open the PR.
 3. Trigger: `gh pr comment <PR> -R <owner>/<repo> --body "@codex review"`.
 4. Pull findings from **all three surfaces** (see REFERENCE) — and from **every reviewer bot on the PR, not just Codex** (Copilot and friends post to the same surfaces; see "Other reviewer bots"). **Verify each against HEAD** — Codex re-posts stale + false-positive findings every round.
 5. Fix the **real** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed).
