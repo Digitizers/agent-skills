@@ -1,6 +1,6 @@
 ---
 name: codex-review-loop
-description: Drive a pull request to convergence through the Codex AI reviewer — build → PR → @codex review → verify each finding against HEAD → fix the real ones with regression tests → re-trigger until clean → human reviews last. Use when a PR is open or just pushed and should be reviewed, when the user mentions "codex", "@codex review", "the review loop", "ultrareview", or asks to iterate a PR to green.
+description: Drive a pull request to convergence through the Codex AI reviewer — build → local Round 0 pre-review → PR → @codex review → verify each finding against HEAD → fix the real ones with regression tests → re-trigger until clean → human reviews last. Use when a PR is open or just pushed and should be reviewed, when a branch is built and tested and a PR is about to be opened (Round 0 local pre-review), when the user mentions "codex", "@codex review", "the review loop", "ultrareview", or asks to iterate a PR to green.
 compatibility: Requires a git repository with a GitHub remote, the `gh` CLI authenticated, and the Codex GitHub reviewer enabled on the repo.
 ---
 
@@ -10,12 +10,32 @@ Claude develops, Codex reviews, Claude fixes — **in a loop** — the human rev
 
 ## The loop
 
-1. Build on a branch → tests green → open PR.
-2. Trigger: `gh pr comment <PR> -R <owner>/<repo> --body "@codex review"`.
-3. Pull findings from **all three surfaces** (see REFERENCE) — and from **every reviewer bot on the PR, not just Codex** (Copilot and friends post to the same surfaces; see "Other reviewer bots"). **Verify each against HEAD** — Codex re-posts stale + false-positive findings every round.
-4. Fix the **real** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed).
-5. Re-trigger and repeat 2–4 until Codex says **"Didn't find any major issues"** *against the current HEAD*.
-6. **Human reviews once**, at the end. Never auto-merge a substantial PR without a nod.
+1. Build on a branch → tests green.
+2. **Round 0 — local pre-review of the built branch diff, when the Codex plugin is installed** (see below). If the PR **already exists**, skip this step and continue at step 3 — Round 0 is the pre-PR round only. Otherwise: fix its real findings, re-run the relevant test suite until green again — fixes invalidate step 1's green — then **push the post-Round-0 HEAD** and open the PR. A PR created by a non-pushing flow from the stale remote SHA omits the reviewed fixes.
+3. Trigger: `gh pr comment <PR> -R <owner>/<repo> --body "@codex review"`.
+4. Pull findings from **all three surfaces** (see REFERENCE) — and from **every reviewer bot on the PR, not just Codex** (Copilot and friends post to the same surfaces; see "Other reviewer bots"). **Verify each against HEAD** — Codex re-posts stale + false-positive findings every round.
+5. Fix the **real** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed).
+6. Re-trigger and repeat 3–5 until Codex says **"Didn't find any major issues"** *against the current HEAD*.
+7. **Human reviews once**, at the end. Never auto-merge a substantial PR without a nod.
+
+## Round 0 — local Codex pre-review
+
+If the OpenAI Codex plugin for Claude Code (`openai/codex-plugin-cc`) is installed — check for the `/codex:review` command or `codex:setup` skill — run a **local** review round on the branch diff *before* opening the PR:
+
+```text
+/codex:review --wait --base <default-branch> --scope branch
+```
+
+(`/codex:adversarial-review` accepts custom focus text and emits schema-validated findings. To drive the review programmatically, resolve the Codex plugin's installed copy first — e.g. the newest `codex-companion.mjs` under the Claude plugin cache's `*/codex/*/scripts/` — and run `node <that path> review …`. Do **not** use `${CLAUDE_PLUGIN_ROOT}` for this: it points at the plugin whose own component is executing, never at the Codex plugin from another skill.)
+
+Triage its findings exactly like cloud findings: verify against the code, fix the real ones with regression tests, ignore false positives. Re-run the relevant test suite until it is green again — fixes invalidate the pre-Round-0 green. Then push the post-Round-0 HEAD, open the PR, and continue from step 3.
+
+**Why:** the cloud bot's round-trip is minutes per round, and its early rounds are dominated by findings a local pass catches in seconds. The local and cloud reviewers share a model family, so a local pre-pass mostly *de-duplicates* the first cloud rounds rather than adding a new defect class — that is exactly the point: spend the cheap reviewer first.
+
+**What Round 0 is NOT:**
+
+- **Not a convergence gate.** It reviews local state, not the PR, and emits no authoritative clean verdict. Convergence is decided **only** by the cloud bot's clean verdict at HEAD, per the Convergence section — a clean local review never justifies skipping the cloud loop or merging.
+- **Not a substitute for the fix rules.** Round-0 fixes follow the same discipline: regression test per code fix, fix-the-rule-not-the-line, own commit.
 
 ## Convergence
 
