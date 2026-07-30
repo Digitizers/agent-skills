@@ -26,7 +26,7 @@ If the OpenAI Codex plugin for Claude Code (`openai/codex-plugin-cc`) is install
 /codex:review --wait --base <default-branch> --scope branch
 ```
 
-(or `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" review ...` when driving it programmatically; `/codex:adversarial-review` accepts custom focus text and emits schema-validated findings.)
+(`/codex:adversarial-review` accepts custom focus text and emits schema-validated findings. To drive the review programmatically, resolve the Codex plugin's installed copy first — e.g. the newest `codex-companion.mjs` under the Claude plugin cache's `*/codex/*/scripts/` — and run `node <that path> review …`. Do **not** use `${CLAUDE_PLUGIN_ROOT}` for this: it points at the plugin whose own component is executing, never at the Codex plugin from another skill.)
 
 Triage its findings exactly like cloud findings: verify against the code, fix the real ones with regression tests, ignore false positives. Then push the post-Round-0 HEAD, open the PR, and continue from step 3.
 
