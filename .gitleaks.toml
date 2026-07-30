@@ -1,0 +1,16 @@
+# Gitleaks configuration for agent-skills (issue #24).
+#
+# Division of labor: tools/portability/validate.py enforces structural
+# hygiene (including placeholder-only env templates); gitleaks detects
+# credential values; human review stays the final gate.
+#
+# The full-history scan is currently clean, so this config carries no
+# finding-specific baseline. Add allowlist entries narrowly — path + rule +
+# reason in a comment — instead of loosening rules.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Env templates are placeholder-only, enforced by the portability validator"
+paths = ['''\.env\.(example|sample|template)$''']
