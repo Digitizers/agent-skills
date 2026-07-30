@@ -112,7 +112,11 @@ def link_targets(text: str) -> list[str]:
     """
     global _MD_PARSER
     if _MD_PARSER is None:
-        _MD_PARSER = MarkdownIt("commonmark")
+        # The commonmark preset caps container nesting at 20; content beyond
+        # the cap is not tokenized, so a link buried deeper would silently
+        # skip validation. 512 is far past anything a hand-written doc
+        # reaches while keeping the parse bounded and deterministic.
+        _MD_PARSER = MarkdownIt("commonmark", {"maxNesting": 512})
     env: dict[str, object] = {}
     tokens = _MD_PARSER.parse(text, env)
     targets: list[str] = []

@@ -218,6 +218,26 @@ class PortabilityValidationTests(unittest.TestCase):
             )
             self.assertFalse(any("indented-not-real.md" in error for error in errors), errors)
 
+    def test_finds_links_beyond_default_nesting_cap(self) -> None:
+        # The commonmark preset's maxNesting=20 silently drops content in
+        # deeper containers; the validator raises the cap so a broken link
+        # 30 blockquotes deep is still found.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            skill = make_skill(repo)
+            (skill / "SKILL.md").write_text(
+                "---\nname: widget\ndescription: Fine.\n---\n\n"
+                + "> " * 30
+                + "[deep](deep-missing.md)\n",
+                encoding="utf-8",
+            )
+            errors = VALIDATOR.validate_repo(
+                repo, visibility="private", require_cloud_links=False
+            )
+            self.assertTrue(
+                any("deep-missing.md" in error for error in errors), errors
+            )
+
     def test_flags_backslash_windows_drive_destination(self) -> None:
         # markdown-it percent-encodes the backslashes (C:%5C...), which must
         # not be mistaken for a "C:" URI scheme and silently accepted.
