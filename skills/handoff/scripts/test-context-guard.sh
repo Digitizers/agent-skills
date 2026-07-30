@@ -90,4 +90,13 @@ OUT="$(run_guard "$WORK/in-b64.json")"
 echo "$OUT" | grep -q "additionalContext" || fail "token-dense ASCII payload under-counted"
 echo "PASS base64-payload conservative floor"
 
+# 9. Emoji-heavy payloads are covered by the byte-based floor (Codex
+#    round-5 P2): 10k emoji code points can be 10-20k real tokens; the
+#    per-char //2 path added only 5k and stayed silent past the threshold.
+mk_transcript "$WORK/emoji.jsonl" 130000
+printf '{"transcript_path":"%s","session_id":"cg-test-emoji","hook_event_name":"PostToolUse","tool_response":{"stdout":"%s"}}' "$WORK/emoji.jsonl" "$(python3 -c 'print("\U0001F680" * 10000)')" > "$WORK/in-emoji.json"
+OUT="$(run_guard "$WORK/in-emoji.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "emoji payload under-counted"
+echo "PASS emoji-payload byte floor"
+
 echo "all context-guard tests passed"

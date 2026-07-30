@@ -18,28 +18,24 @@ Env:
 """
 import json
 import os
-import re
 import sys
 import tempfile
 
-# Estimation policy: a conservative FLOOR, not an average. Without the real
-# tokenizer any per-content-class ratio (prose ~4 chars/token, Hebrew ~2,
-# base64 ~2-2.7, minified code ~2-3) can be beaten by the next token-dense
-# counterexample, so instead of bucketing content classes we assume the
-# near-worst ratio everywhere: 2 chars/token for everything except CJK,
-# which gets 1:1. Prose overcounts ~2x — on the tail/payload only, the
-# usage-block baseline stays exact — so the nudge can fire early, never
-# late. Any residual undercount is also self-healing: the marker is only
-# written when the nudge fires, and the next hook event reads a usage block
-# that already includes this content at its true token cost.
-_CJK = re.compile(
-    r"[⺀-鿿぀-ヿ가-힯豈-﫿]"
-)
+# Estimation policy: a conservative FLOOR, not an average — UTF-8 bytes / 2.
+# Character-class ratios (prose ~4 chars/token, Hebrew ~2, base64 ~2-2.7,
+# CJK ~1, multi-token emoji) lose to the next token-dense counterexample by
+# construction; byte length dominates them all: ASCII counts 2 chars/token,
+# Hebrew/Arabic/Cyrillic 1:1 per char, CJK ~0.67 chars/token, emoji ~2
+# tokens per code point. Prose overcounts ~2x — on the tail/payload only,
+# the usage-block baseline stays exact — so the nudge fires early, never
+# late. The one residual undercount (tokenizer byte-fallback on pathological
+# input, up to 1 token/byte) is accepted by design because it self-heals:
+# the once-per-session marker is written only when the nudge fires, and the
+# next hook event reads a usage block that prices this content exactly.
 
 
 def estimate_tokens(text: str) -> int:
-    cjk = len(_CJK.findall(text))
-    return cjk + (len(text) - cjk) // 2
+    return len(text.encode("utf-8", "replace")) // 2
 
 
 def main() -> None:
@@ -59,8 +55,8 @@ def main() -> None:
     # model call — it excludes that call's own output_tokens and anything
     # appended to the transcript since (new user prompt, tool results). A
     # large tail can cross the threshold silently, so estimate it with the
-    # script-aware ratio above and add the current hook payload the same
-    # way. Double counting between tail and payload only makes the nudge
+    # byte floor above and add the current hook payload the same way.
+    # Double counting between tail and payload only makes the nudge
     # fire earlier, never later — the safe direction for a handoff reminder.
     tokens = 0
     tail_tokens = 0

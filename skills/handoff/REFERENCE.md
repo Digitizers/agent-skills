@@ -21,11 +21,12 @@ on:
    + output_tokens`. Because that block only counts context sent into the
    *previous* model call, it also adds a conservative floor estimate for
    the transcript tail recorded after it and for the current hook payload
-   (prompt / tool_response): 2 chars/token for everything except CJK (1:1).
-   A floor, not an average — English prose counts ~2x high, so the nudge
-   can only fire early, never late; and any residual undercount self-heals,
-   because the next hook event reads a usage block that already prices this
-   content exactly.
+   (prompt / tool_response): **UTF-8 bytes ÷ 2**. A floor, not an average —
+   ASCII counts 2 chars/token, Hebrew 1:1, CJK ~0.67, emoji ~2 per code
+   point — so English prose counts ~2x high and the nudge can only fire
+   early, never late. Any residual undercount (tokenizer byte-fallback on
+   pathological input) self-heals: the next hook event reads a usage block
+   that already prices this content exactly.
 3. At `>= HANDOFF_THRESHOLD_PCT` (default 70) of `CONTEXT_WINDOW_TOKENS`
    (default 200000) it emits `additionalContext` instructing the agent to
    invoke the handoff skill, and drops a per-session marker file so it fires
