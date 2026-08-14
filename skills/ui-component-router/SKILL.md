@@ -33,7 +33,12 @@ Stop at the first match:
    its pick and the step that chose it. When the chosen source differs from
    the project's existing component system, the ask itself is the explicit
    say-so the one-system rule requires, but **announce the mix** (name both
-   systems and the consequence) before adding.
+   systems and the consequence) before adding. **Honoring is bounded by
+   feasibility**: when the chosen source's output cannot run in the
+   project's stack (a React-emitting source in a Vue/Svelte project;
+   shadcn without Tailwind), do not add unusable code and do not silently
+   reroute either — report the incompatibility and hand the decision back.
+   Say-so licenses mixing systems; it cannot make incompatible code run.
 1. **Does the project already have a component system?** Existing
    `components/ui/` with shadcn conventions → shadcn. `antd` in
    `package.json` → Ant Design. Another system (MUI, Chakra, Mantine,
