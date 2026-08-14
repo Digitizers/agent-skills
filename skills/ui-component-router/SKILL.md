@@ -91,9 +91,11 @@ layer:
 - **shadcn-ui MCP missing** → the CLI path (`npx shadcn@latest add`) is the
   same registry and needs only npx; for source inspection, the registry is
   public — fetch the component page/source directly.
-- **magic-mcp missing or out of credits** → compose the section from shadcn
-  primitives (free), or declare a custom build (step 4). Never substitute a
-  different metered service without saying so.
+- **magic-mcp missing or out of credits** → in a React/**Tailwind** project,
+  compose the section from shadcn primitives (free); a React project
+  without Tailwind gets the declared custom build (step 4) instead — the
+  stack gate binds fallbacks too, shadcn assumes Tailwind. Never
+  substitute a different metered service without saying so.
 - **npx/network unavailable** → say so. Deliver the component as a patch
   **only when the registry source is actually readable** — a cached copy,
   a vendored registry, an MCP that still answers. With no reachable source
