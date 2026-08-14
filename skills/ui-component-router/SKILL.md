@@ -23,10 +23,14 @@ component systems in one project.
 
 Stop at the first match:
 
-0. **Did the user explicitly name a source** ("use antd for this dialog",
-   "add the shadcn table", "pull it from 21st.dev")? → **that source.**
-   Explicit user choice beats every generic rule below — a named system is
-   never re-routed to a "better" one. When the named source differs from
+0. **Did the user explicitly choose a source** — an instruction or stated
+   preference ("use antd for this dialog", "add the shadcn table", "pull it
+   from 21st.dev")? → **that source.** Explicit user choice beats every
+   generic rule below — a chosen system is never re-routed to a "better"
+   one. **Naming candidates is not choosing**: a question that merely
+   mentions sources ("should we use shadcn or antd here?") selects nothing
+   — it runs through the generic order below and the router answers with
+   its pick and the step that chose it. When the chosen source differs from
    the project's existing component system, the ask itself is the explicit
    say-so the one-system rule requires, but **announce the mix** (name both
    systems and the consequence) before adding.
@@ -60,7 +64,13 @@ step 1, an explicit antd ask by step 0.)*
 No tool named here is assumed present. **Confirm the chosen tool actually
 answers in this session before routing to it** — an MCP can be unloaded, a
 key revoked, credits exhausted. A tool that doesn't answer is not a route.
-Fall back by layer:
+
+**Fallbacks apply only to routes the router chose (steps 1+).** When the
+unavailable source was the user's explicit choice (step 0), there is no
+silent substitute at any layer: report the inability and get their say-so
+before rerouting — substituting changes the provenance the user asked for,
+and can smuggle in a system they never approved. Otherwise, fall back by
+layer:
 
 - **shadcn-ui MCP missing** → the CLI path (`npx shadcn@latest add`) is the
   same registry and needs only npx; for source inspection, the registry is
