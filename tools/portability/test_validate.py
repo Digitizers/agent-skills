@@ -920,6 +920,24 @@ class AgentPluginsManifestTests(unittest.TestCase):
             self.assertTrue(any("extensions must be an object" in e for e in errors), errors)
             self.assertTrue(any("description must be non-empty text" in e for e in errors), errors)
 
+    def test_version_must_be_semver(self) -> None:
+        for bad_version in ("latest", "1", "1.0", "v1.2.3", "1.2.3 ", "01.2.3", ""):
+            with tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                make_skill(repo)
+                make_agent_plugins_manifest(repo, version=bad_version)
+                errors = self._errors(repo)
+                self.assertTrue(
+                    any("semantic version" in e for e in errors),
+                    (bad_version, errors),
+                )
+        for good_version in ("1.2.3", "0.1.0", "1.0.0-rc.1", "2.0.0-alpha+build.7"):
+            with tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                make_skill(repo)
+                make_agent_plugins_manifest(repo, version=good_version)
+                self.assertEqual([], self._errors(repo), good_version)
+
     def test_rejects_non_object_and_invalid_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

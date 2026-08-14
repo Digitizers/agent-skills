@@ -234,11 +234,18 @@ AGENT_PLUGINS_FIELDS = {
     "extensions",
 }
 AGENT_PLUGINS_STRING_FIELDS = (
-    "version",
     "description",
     "homepage",
     "repository",
     "license",
+)
+# SemVer 2.0.0 (semver.org) — the grammar Agent Plugins 1.0 requires for
+# the optional version field.
+SEMVER_RE = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)"
+    r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
+    r"(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
 )
 AGENT_PLUGINS_AUTHOR_FIELDS = {"name", "email", "url"}
 
@@ -291,6 +298,14 @@ def validate_agent_plugins_manifest(
             not isinstance(manifest[field], str) or not manifest[field].strip()
         ):
             fail(errors, display_path, f"{field} must be non-empty text")
+    if "version" in manifest:
+        version = manifest["version"]
+        if not isinstance(version, str) or not SEMVER_RE.fullmatch(version):
+            fail(
+                errors,
+                display_path,
+                "version must be a semantic version (SemVer 2.0.0)",
+            )
     if "author" in manifest:
         author = manifest["author"]
         if not isinstance(author, dict):
