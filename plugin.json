@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "agent-skills",
+  "description": "Portable developer-workflow and design skills: canva-studio, codex-review-loop, fable-mode, figma-studio, gha-optimizer, handoff, magnific-studio, pr-first-workflow, safe-prod-db-write, ui-component-router.",
+  "author": {
+    "name": "Ben Kalsky",
+    "email": "benkalsky@gmail.com"
+  },
+  "homepage": "https://github.com/Digitizers/agent-skills",
+  "repository": "https://github.com/Digitizers/agent-skills",
+  "license": "MIT",
+  "keywords": ["agent-skills", "skills", "claude-code", "codex", "developer-workflow"]
+}

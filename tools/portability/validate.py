@@ -219,6 +219,134 @@ def validate_triggers(
         )
 
 
+AGENT_PLUGINS_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+AGENT_PLUGINS_NAME_RE = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
+AGENT_PLUGINS_FIELDS = {
+    "$schema",
+    "name",
+    "version",
+    "description",
+    "author",
+    "homepage",
+    "repository",
+    "license",
+    "keywords",
+    "extensions",
+}
+AGENT_PLUGINS_STRING_FIELDS = (
+    "description",
+    "homepage",
+    "repository",
+    "license",
+)
+# SemVer 2.0.0 (semver.org) — the grammar Agent Plugins 1.0 requires for
+# the optional version field.
+SEMVER_RE = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)"
+    r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
+    r"(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$",
+    re.ASCII,  # SemVer numeric identifiers are ASCII digits; Python's \d
+    # would otherwise admit Unicode digits like ٣.
+)
+AGENT_PLUGINS_AUTHOR_FIELDS = {"name", "email", "url"}
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-JSON constant {value!r}")
+
+
+def validate_agent_plugins_manifest(
+    repo: Path, errors: list[str], *, required: bool
+) -> None:
+    """Validate the root Agent Plugins 1.0 manifest when present.
+
+    Deliberately stricter than the specification in one respect: the spec
+    treats unknown top-level fields as warnings, this validator treats them
+    as errors so CI stays deterministic for our own manifest.
+    """
+    manifest_path = repo / "plugin.json"
+    display_path = Path("plugin.json")
+    if not manifest_path.is_file():
+        if required:
+            fail(
+                errors,
+                display_path,
+                "required Agent Plugins 1.0 manifest is missing",
+            )
+        return
+    try:
+        manifest = json.loads(
+            manifest_path.read_text(encoding="utf-8"),
+            parse_constant=_reject_json_constant,
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        # ValueError covers json.JSONDecodeError and the non-JSON constants
+        # (NaN, Infinity) that json.loads would otherwise admit.
+        fail(errors, display_path, f"manifest is not readable UTF-8 JSON: {exc}")
+        return
+    if not isinstance(manifest, dict):
+        fail(errors, display_path, "manifest must be a JSON object")
+        return
+    for field in sorted(set(manifest) - AGENT_PLUGINS_FIELDS):
+        fail(errors, display_path, f"unknown manifest field {field!r}")
+    if manifest.get("$schema") != AGENT_PLUGINS_SCHEMA:
+        fail(errors, display_path, f"$schema must be {AGENT_PLUGINS_SCHEMA}")
+    name = manifest.get("name")
+    if (
+        not isinstance(name, str)
+        or not 1 <= len(name) <= 64
+        or not AGENT_PLUGINS_NAME_RE.fullmatch(name)
+    ):
+        fail(
+            errors,
+            display_path,
+            "name must be 1-64 lowercase alphanumerics with single"
+            " internal hyphens or periods",
+        )
+    for field in AGENT_PLUGINS_STRING_FIELDS:
+        if field in manifest and (
+            not isinstance(manifest[field], str) or not manifest[field].strip()
+        ):
+            fail(errors, display_path, f"{field} must be non-empty text")
+    if "version" in manifest:
+        version = manifest["version"]
+        if not isinstance(version, str) or not SEMVER_RE.fullmatch(version):
+            fail(
+                errors,
+                display_path,
+                "version must be a semantic version (SemVer 2.0.0)",
+            )
+    if "author" in manifest:
+        author = manifest["author"]
+        if not isinstance(author, dict):
+            fail(errors, display_path, "author must be an object")
+        else:
+            for field in sorted(set(author) - AGENT_PLUGINS_AUTHOR_FIELDS):
+                fail(errors, display_path, f"unknown author field {field!r}")
+            if "name" not in author:
+                fail(errors, display_path, "author requires a name")
+            for key in sorted(AGENT_PLUGINS_AUTHOR_FIELDS & set(author)):
+                if not isinstance(author[key], str) or not author[key].strip():
+                    fail(
+                        errors,
+                        display_path,
+                        f"author.{key} must be non-empty text",
+                    )
+    if "keywords" in manifest:
+        keywords = manifest["keywords"]
+        if not isinstance(keywords, list) or not all(
+            isinstance(keyword, str) and keyword.strip() for keyword in keywords
+        ):
+            fail(
+                errors,
+                display_path,
+                "keywords must be a list of non-empty strings",
+            )
+    if "extensions" in manifest and not isinstance(manifest["extensions"], dict):
+        fail(errors, display_path, "extensions must be an object")
+
+
 def validate_public_boundary(repo: Path, errors: list[str]) -> None:
     for path in public_boundary_paths(repo):
         if ".git" in path.parts or "__pycache__" in path.parts:
@@ -332,10 +460,17 @@ def fallback_public_boundary_paths(repo: Path) -> list[Path]:
 
 
 def validate_repo(
-    repo: Path, *, visibility: str, require_cloud_links: bool
+    repo: Path,
+    *,
+    visibility: str,
+    require_cloud_links: bool,
+    require_agent_plugins_manifest: bool = False,
 ) -> list[str]:
     repo = repo.resolve()
     errors: list[str] = []
+    validate_agent_plugins_manifest(
+        repo, errors, required=require_agent_plugins_manifest
+    )
     skills_root = repo / "skills"
     skill_directories = (
         sorted(path for path in skills_root.iterdir() if path.is_dir())
@@ -405,11 +540,13 @@ def main() -> int:
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--visibility", choices=("public", "private"), required=True)
     parser.add_argument("--require-cloud-links", action="store_true")
+    parser.add_argument("--require-agent-plugins-manifest", action="store_true")
     args = parser.parse_args()
     errors = validate_repo(
         args.repo,
         visibility=args.visibility,
         require_cloud_links=args.require_cloud_links,
+        require_agent_plugins_manifest=args.require_agent_plugins_manifest,
     )
     for error in errors:
         print(f"error: {error}", file=sys.stderr)
