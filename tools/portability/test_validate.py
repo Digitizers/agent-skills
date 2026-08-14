@@ -921,7 +921,9 @@ class AgentPluginsManifestTests(unittest.TestCase):
             self.assertTrue(any("description must be non-empty text" in e for e in errors), errors)
 
     def test_version_must_be_semver(self) -> None:
-        for bad_version in ("latest", "1", "1.0", "v1.2.3", "1.2.3 ", "01.2.3", ""):
+        for bad_version in (
+            "latest", "1", "1.0", "v1.2.3", "1.2.3 ", "01.2.3", "", "1.2.٣"
+        ):
             with tempfile.TemporaryDirectory() as tmp:
                 repo = Path(tmp)
                 make_skill(repo)

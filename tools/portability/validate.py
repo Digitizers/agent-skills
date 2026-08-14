@@ -245,7 +245,9 @@ SEMVER_RE = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)"
     r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
-    r"(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
+    r"(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$",
+    re.ASCII,  # SemVer numeric identifiers are ASCII digits; Python's \d
+    # would otherwise admit Unicode digits like ٣.
 )
 AGENT_PLUGINS_AUTHOR_FIELDS = {"name", "email", "url"}
 
@@ -313,7 +315,7 @@ def validate_agent_plugins_manifest(
         else:
             for field in sorted(set(author) - AGENT_PLUGINS_AUTHOR_FIELDS):
                 fail(errors, display_path, f"unknown author field {field!r}")
-            for key in AGENT_PLUGINS_AUTHOR_FIELDS & set(author):
+            for key in sorted(AGENT_PLUGINS_AUTHOR_FIELDS & set(author)):
                 if not isinstance(author[key], str) or not author[key].strip():
                     fail(
                         errors,
