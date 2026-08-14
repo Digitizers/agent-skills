@@ -1,0 +1,11 @@
+[
+  { "query": "add a date picker component to the settings page", "should_trigger": true },
+  { "query": "I need a pricing section for the landing page, something modern", "should_trigger": true },
+  { "query": "תוסיף טבלה עם מיון וסינון לדף הלקוחות", "should_trigger": true },
+  { "query": "find me a nice animated navbar component like the ones on 21st.dev", "should_trigger": true },
+  { "query": "should we use shadcn or antd for the dialog here?", "should_trigger": true },
+  { "query": "design a new brand identity and color palette for the client", "should_trigger": false },
+  { "query": "which frontend framework should we pick for the new project, Next or Remix?", "should_trigger": false },
+  { "query": "write a SQL migration that adds an index on the orders table", "should_trigger": false },
+  { "query": "help me set up the shadcn MCP server in my claude config", "should_trigger": false }
+]
