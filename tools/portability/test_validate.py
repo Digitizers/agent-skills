@@ -951,6 +951,33 @@ class AgentPluginsManifestTests(unittest.TestCase):
             errors = self._errors(repo)
             self.assertTrue(any("not readable UTF-8 JSON" in e for e in errors), errors)
 
+    def test_rejects_non_json_numeric_constants(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / "plugin.json").write_text(
+                '{"$schema": "%s", "name": "a",'
+                ' "extensions": {"com.example.x": {"limit": NaN}}}'
+                % VALIDATOR.AGENT_PLUGINS_SCHEMA,
+                encoding="utf-8",
+            )
+            errors = self._errors(repo)
+            self.assertTrue(
+                any("non-JSON constant 'NaN'" in e for e in errors), errors
+            )
+
+    def test_author_requires_name(self) -> None:
+        for author in ({}, {"email": "owner@example.com"}, {"url": "https://x.example"}):
+            with tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                make_skill(repo)
+                make_agent_plugins_manifest(repo, author=author)
+                errors = self._errors(repo)
+                self.assertTrue(
+                    any("author requires a name" in e for e in errors),
+                    (author, errors),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

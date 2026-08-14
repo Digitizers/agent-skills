@@ -252,6 +252,10 @@ SEMVER_RE = re.compile(
 AGENT_PLUGINS_AUTHOR_FIELDS = {"name", "email", "url"}
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-JSON constant {value!r}")
+
+
 def validate_agent_plugins_manifest(
     repo: Path, errors: list[str], *, required: bool
 ) -> None:
@@ -272,8 +276,13 @@ def validate_agent_plugins_manifest(
             )
         return
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        manifest = json.loads(
+            manifest_path.read_text(encoding="utf-8"),
+            parse_constant=_reject_json_constant,
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        # ValueError covers json.JSONDecodeError and the non-JSON constants
+        # (NaN, Infinity) that json.loads would otherwise admit.
         fail(errors, display_path, f"manifest is not readable UTF-8 JSON: {exc}")
         return
     if not isinstance(manifest, dict):
@@ -315,6 +324,8 @@ def validate_agent_plugins_manifest(
         else:
             for field in sorted(set(author) - AGENT_PLUGINS_AUTHOR_FIELDS):
                 fail(errors, display_path, f"unknown author field {field!r}")
+            if "name" not in author:
+                fail(errors, display_path, "author requires a name")
             for key in sorted(AGENT_PLUGINS_AUTHOR_FIELDS & set(author)):
                 if not isinstance(author[key], str) or not author[key].strip():
                     fail(
