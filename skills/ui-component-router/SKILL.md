@@ -59,18 +59,20 @@ Stop at the first match:
 2. **Anything the shadcn registry ships, in a React/Tailwind project** —
    standard primitives (button, dialog, table, form, tabs, dropdown,
    toast…) **and registry blocks** (login/signup, sidebars, dashboard
-   shells, calendars…)? → **shadcn**. For a section-shaped need, this step
-   includes an operative check, not an assumption: **look the section up in
+   shells, calendars…)? → **shadcn**. For any need that isn't an obvious
+   primitive — a section, a pattern, a "something like X" search — this
+   step includes an operative check, not an assumption: **look it up in
    the registry first** — the shadcn-ui MCP listing when it answers,
    otherwise the public registry index — and only a miss falls through to
    step 3. The lookup is free; step 3 is not. The add itself goes through
    `npx shadcn@latest add <name>` — the free path that works in any
    session.
-3. **Full section or pattern in a React project that the registry lookup
-   in step 2 missed** (pricing section, hero, landing block…) **or a
-   community search** ("something like X")? → **magic-mcp**. magic-mcp is
-   metered — spend only for what the free paths can't produce; reaching
-   this step without the step-2 lookup having happened is a routing error.
+3. **A need in a React project that the registry lookup in step 2 missed**
+   — a full section or pattern (pricing section, hero, landing block…) or
+   a community search ("something like X")? → **magic-mcp**. magic-mcp is
+   metered — spend only for what the free paths can't produce; the step-2
+   lookup is a prerequisite for every branch of this step, and reaching it
+   without that lookup is a routing error.
 4. **Nothing fits** (non-React stack with no system, unique bespoke need)?
    → **declared custom build**: say explicitly that no source covers this,
    then build following the project's own conventions. A custom build is a
