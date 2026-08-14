@@ -23,28 +23,37 @@ component systems in one project.
 
 Stop at the first match:
 
-0. **Does the project already have a component system?** Existing
+0. **Did the user explicitly name a source** ("use antd for this dialog",
+   "add the shadcn table", "pull it from 21st.dev")? → **that source.**
+   Explicit user choice beats every generic rule below — a named system is
+   never re-routed to a "better" one. When the named source differs from
+   the project's existing component system, the ask itself is the explicit
+   say-so the one-system rule requires, but **announce the mix** (name both
+   systems and the consequence) before adding.
+1. **Does the project already have a component system?** Existing
    `components/ui/` with shadcn conventions → shadcn. `antd` in
    `package.json` → Ant Design. Another system (MUI, Chakra, Mantine,
    project-internal design system) → **use that system**; this router adds
-   nothing and must not introduce a second one. The existing stack always
-   wins — a "better" component from another system is never a reason to mix.
-1. **Standard primitive in a React/Tailwind project** (button, dialog,
+   nothing and must not introduce a second one. The existing stack wins
+   over everything below — a "better" component from another system is
+   never a reason to mix.
+2. **Standard primitive in a React/Tailwind project** (button, dialog,
    table, form, tabs, dropdown, toast…)? → **shadcn**. Use the shadcn-ui
    MCP to inspect source/demos when it answers; the add itself goes through
    `npx shadcn@latest add <name>` — the free path that works in any session.
-2. **Full section or pattern** (pricing section, hero, navbar, dashboard
+3. **Full section or pattern** (pricing section, hero, navbar, dashboard
    shell, landing block) **or a community search** ("something like X")?
    → **magic-mcp** — after the free rungs don't cover it: a standard
    primitive is never a magic-mcp job, and a section shadcn's registry
    already ships goes through shadcn first. magic-mcp is metered — spend
    only for what the free paths can't produce.
-3. **Project on Ant Design** (or an explicit antd ask in a project with no
-   conflicting system)? → **antd** components via normal imports.
 4. **Nothing fits** (non-React stack with no system, unique bespoke need)?
    → **declared custom build**: say explicitly that no source covers this,
    then build following the project's own conventions. A custom build is a
    stated decision, never a silent default.
+
+*(Ant Design has no generic step of its own: an antd project is caught by
+step 1, an explicit antd ask by step 0.)*
 
 ## Availability rule (inherited from browser-router)
 
@@ -74,9 +83,11 @@ source's defaults stand — but never invent a brand for a real client
 
 ## Rules
 
-- **One system per project.** The stack decision (step 0) is made once and
+- **One system per project.** The stack decision (step 1) is made once and
   respected forever after; adding a second component system needs the
-  user's explicit say-so, never the router's initiative.
+  user's explicit say-so — an explicit ask for a named source (step 0)
+  counts, the router's own initiative never does, and the mix is announced
+  either way.
 - **Free before metered.** shadcn CLI/registry and antd are free; magic-mcp
   spends credits — reach it only when the free paths don't cover the need.
 - **Route, don't build.** This skill picks the source; the actual add /
