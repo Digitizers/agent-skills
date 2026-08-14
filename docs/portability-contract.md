@@ -76,8 +76,12 @@ python3 -m pip install -r tools/trigger-eval/requirements.txt
 python3 tools/portability/validate.py \
   --repo . \
   --visibility public \
-  --require-cloud-links
+  --require-cloud-links \
+  --require-agent-plugins-manifest
 ```
+
+(`--require-agent-plugins-manifest` applies to this repository, which ships
+the root manifest; a sibling repository without one omits the flag.)
 
 The validator is deterministic and performs no network calls. Its public
 boundary checks are intentionally limited to committed env files and env

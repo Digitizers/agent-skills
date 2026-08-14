@@ -141,7 +141,8 @@ Before opening a PR, run the exact suites used by CI:
 python3 -m pip install -r tools/trigger-eval/requirements.txt
 python3 tools/trigger-eval/validate_spec.py
 python3 tools/portability/validate.py \
-  --repo . --visibility public --require-cloud-links
+  --repo . --visibility public --require-cloud-links \
+  --require-agent-plugins-manifest
 python3 tools/trigger-eval/test_tools.py
 python3 -m unittest discover -s tools/portability -p 'test_*.py'
 python3 tools/plugin-cache-gc/test_plugin_cache_gc.py
