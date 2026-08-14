@@ -829,5 +829,108 @@ class PortabilityValidationTests(unittest.TestCase):
             self.assertTrue(any("MISSING.md" in error for error in errors), errors)
 
 
+def make_agent_plugins_manifest(repo: Path, **overrides: object) -> None:
+    manifest: dict[str, object] = {
+        "$schema": VALIDATOR.AGENT_PLUGINS_SCHEMA,
+        "name": "agent-skills",
+    }
+    manifest.update(overrides)
+    (repo / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+class AgentPluginsManifestTests(unittest.TestCase):
+    def _errors(
+        self, repo: Path, *, required: bool = False
+    ) -> list[str]:
+        return VALIDATOR.validate_repo(
+            repo,
+            visibility="private",
+            require_cloud_links=False,
+            require_agent_plugins_manifest=required,
+        )
+
+    def test_missing_manifest_passes_unless_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            self.assertEqual([], self._errors(repo))
+            errors = self._errors(repo, required=True)
+            self.assertTrue(any("manifest is missing" in e for e in errors), errors)
+
+    def test_valid_manifest_with_full_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            make_agent_plugins_manifest(
+                repo,
+                description="Portable skills.",
+                author={"name": "Owner", "email": "owner@example.com"},
+                homepage="https://example.com",
+                repository="https://example.com/repo",
+                license="MIT",
+                keywords=["skills", "agents"],
+                extensions={"com.example.client": {}},
+            )
+            self.assertEqual([], self._errors(repo, required=True))
+
+    def test_rejects_wrong_schema_and_bad_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            make_agent_plugins_manifest(
+                repo, **{"$schema": "https://example.com/other.json"}
+            )
+            errors = self._errors(repo)
+            self.assertTrue(any("$schema must be" in e for e in errors), errors)
+        for bad_name in ("Agent-Skills", "-skills", "skills-", "a--b", "a..b", "a" * 65, ""):
+            with tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                make_skill(repo)
+                make_agent_plugins_manifest(repo, name=bad_name)
+                errors = self._errors(repo)
+                self.assertTrue(
+                    any("name must be" in e for e in errors),
+                    (bad_name, errors),
+                )
+
+    def test_accepts_single_char_and_dotted_names(self) -> None:
+        for good_name in ("a", "a.b-c", "skills.v2"):
+            with tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                make_skill(repo)
+                make_agent_plugins_manifest(repo, name=good_name)
+                self.assertEqual([], self._errors(repo), good_name)
+
+    def test_rejects_unknown_fields_and_bad_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            make_agent_plugins_manifest(
+                repo,
+                main="index.js",
+                author={"name": "Owner", "twitter": "@owner"},
+                keywords=["ok", ""],
+                extensions="not-an-object",
+                description="   ",
+            )
+            errors = self._errors(repo)
+            self.assertTrue(any("unknown manifest field 'main'" in e for e in errors), errors)
+            self.assertTrue(any("unknown author field 'twitter'" in e for e in errors), errors)
+            self.assertTrue(any("keywords must be" in e for e in errors), errors)
+            self.assertTrue(any("extensions must be an object" in e for e in errors), errors)
+            self.assertTrue(any("description must be non-empty text" in e for e in errors), errors)
+
+    def test_rejects_non_object_and_invalid_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            make_skill(repo)
+            (repo / "plugin.json").write_text("[]", encoding="utf-8")
+            errors = self._errors(repo)
+            self.assertTrue(any("must be a JSON object" in e for e in errors), errors)
+            (repo / "plugin.json").write_text("{not json", encoding="utf-8")
+            errors = self._errors(repo)
+            self.assertTrue(any("not readable UTF-8 JSON" in e for e in errors), errors)
+
+
 if __name__ == "__main__":
     unittest.main()

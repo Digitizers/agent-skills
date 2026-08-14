@@ -38,7 +38,8 @@ jobs:
           python3 tools/portability/validate.py \
             --repo . \
             --visibility public \
-            --require-cloud-links
+            --require-cloud-links \
+            --require-agent-plugins-manifest
       - name: Run the standalone trigger tooling suite
         run: python3 tools/trigger-eval/test_tools.py
       - name: Run portability unit tests

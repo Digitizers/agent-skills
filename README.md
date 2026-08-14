@@ -88,6 +88,15 @@ already load from the repo itself); when copying the file into another repo,
 add that entry too or you'll get the tools without the workflow skills. It has
 no effect on cloud sessions; environment sources are the only cloud mechanism.
 
+## Install — Agent Plugins 1.0 clients (VS Code, Cursor, Copilot, ChatGPT/Codex)
+
+The repository is itself a valid [Agent Plugins 1.0](https://agent-plugins.org)
+plugin: the root [`plugin.json`](plugin.json) is the spec manifest, and the
+canonical `skills/<name>/SKILL.md` layout is exactly the spec's discovery
+layout. A plain `git clone` (or pointing the client's plugin install at this
+repo) loads every skill with no build step and no content duplication —
+details in the [portability contract](docs/portability-contract.md).
+
 ## Install — OpenClaw / plain symlinks (fallback)
 
 ```bash

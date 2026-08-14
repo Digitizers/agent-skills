@@ -29,9 +29,30 @@ Claude Code, OpenClaw and Hermes. A sibling skill repository may reuse
 | Claude Code web/mobile | Committed `.claude/skills` relative links | Repository checkout |
 | OpenClaw | Symlinks created by `install.sh <target>` | Repository checkout |
 | Hermes | `skills.external_dirs` pointing to `skills/` | Repository checkout |
+| Agent Plugins 1.0 clients (VS Code, Cursor, GitHub Copilot, ChatGPT/Codex) | Committed root `plugin.json` manifest | Repository checkout |
 
 Adapters may expose the same folders but must not copy or edit them. A runtime
 rollback removes the adapter and leaves the checkout unchanged.
+
+### Agent Plugins 1.0 manifest
+
+The canonical `skills/<name>/SKILL.md` layout is already the discovery layout
+Agent Plugins 1.0 specifies (immediate children of `skills/`, one `SKILL.md`
+each), so the adapter is metadata only: a committed `plugin.json` at the
+repository root carrying the spec's `$schema` and `name`. Committed rather
+than generated on purpose — a plain `git clone` is then a complete, loadable
+plugin in every 1.0 client, with no build step. Both this manifest and the
+Claude manifest (`.claude-plugin/plugin.json`) describe the same `skills/`
+tree; neither copies skill content, so the expose-not-copy rule holds. The
+repo ships no MCP servers, so there is no `mcp.json`. Same versioning
+convention as the Claude manifest: no `version` field — updates track git
+commits.
+
+`validate.py` checks the manifest whenever `plugin.json` exists at the repo
+root, and `--require-agent-plugins-manifest` (used by this repo's CI) makes
+its absence an error. The check is deliberately stricter than the spec in
+one respect: unknown top-level fields are errors here, not warnings, so CI
+stays deterministic.
 
 ## Public boundary
 
