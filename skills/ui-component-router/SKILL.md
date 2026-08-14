@@ -14,7 +14,7 @@ component systems in one project.
 
 | Source | What it is | Local/Cloud | Cost | Use for |
 |--------|-----------|-------------|------|---------|
-| **shadcn/ui CLI** (`npx shadcn@latest add <name>`) | copy-in registry, code lands in the repo | local | free | standard primitives in React/Tailwind — button, dialog, table, form, dropdown… |
+| **shadcn/ui CLI** (`npx shadcn@latest add <name>`) | copy-in registry, code lands in the repo | local | free | primitives and registry blocks in React/Tailwind — button, dialog, table, form, login, sidebar, dashboard… |
 | **shadcn-ui MCP** | MCP serving the same registry (source + demos + metadata) | MCP | free | inspecting a component's source/demo before adding; block/pattern lookup |
 | **magic-mcp** (21st.dev) | MCP generating full sections from the community library | MCP | metered | complete sections/patterns — pricing, hero, landing blocks — or "find me a component like X" community search |
 | **Ant Design** (`antd`) | full component library, imported as a dependency | local | free | projects already on antd / enterprise-style data-heavy UIs that chose it |
@@ -47,16 +47,21 @@ Stop at the first match:
    own skips them entirely and lands on step 4 — an incompatible source is
    never a match, however well the need's shape fits.*
 
-2. **Standard primitive in a React/Tailwind project** (button, dialog,
-   table, form, tabs, dropdown, toast…)? → **shadcn**. Use the shadcn-ui
-   MCP to inspect source/demos when it answers; the add itself goes through
-   `npx shadcn@latest add <name>` — the free path that works in any session.
-3. **Full section or pattern in a React project** (pricing section, hero,
-   navbar, dashboard shell, landing block) **or a community search**
-   ("something like X")? → **magic-mcp** — after the free rungs don't cover
-   it: a standard primitive is never a magic-mcp job, and a section
-   shadcn's registry already ships goes through shadcn first. magic-mcp is
-   metered — spend only for what the free paths can't produce.
+2. **Anything the shadcn registry ships, in a React/Tailwind project** —
+   standard primitives (button, dialog, table, form, tabs, dropdown,
+   toast…) **and registry blocks** (login/signup, sidebars, dashboard
+   shells, calendars…)? → **shadcn**. For a section-shaped need, this step
+   includes an operative check, not an assumption: **look the section up in
+   the registry first** — the shadcn-ui MCP listing when it answers,
+   otherwise the public registry index — and only a miss falls through to
+   step 3. The lookup is free; step 3 is not. The add itself goes through
+   `npx shadcn@latest add <name>` — the free path that works in any
+   session.
+3. **Full section or pattern in a React project that the registry lookup
+   in step 2 missed** (pricing section, hero, landing block…) **or a
+   community search** ("something like X")? → **magic-mcp**. magic-mcp is
+   metered — spend only for what the free paths can't produce; reaching
+   this step without the step-2 lookup having happened is a routing error.
 4. **Nothing fits** (non-React stack with no system, unique bespoke need)?
    → **declared custom build**: say explicitly that no source covers this,
    then build following the project's own conventions. A custom build is a
