@@ -45,7 +45,11 @@ Stop at the first match:
    project-internal design system) → **use that system**; this router adds
    nothing and must not introduce a second one. The existing stack wins
    over everything below — a "better" component from another system is
-   never a reason to mix.
+   never a reason to mix. **When that system does not cover the need**
+   (a specialized component or section it simply doesn't ship), the route
+   is a **declared custom build following that system's conventions and
+   primitives** — the coverage gap changes the build, never the system;
+   steps 2–3 stay closed to a project that already has one.
    *Steps 2–3 are stack-gated: every source below emits React code (shadcn
    additionally assumes Tailwind), so they apply only where that code can
    run. A non-React stack (Vue, Svelte, …) with no component system of its
