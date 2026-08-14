@@ -41,16 +41,22 @@ Stop at the first match:
    nothing and must not introduce a second one. The existing stack wins
    over everything below — a "better" component from another system is
    never a reason to mix.
+   *Steps 2–3 are stack-gated: every source below emits React code (shadcn
+   additionally assumes Tailwind), so they apply only where that code can
+   run. A non-React stack (Vue, Svelte, …) with no component system of its
+   own skips them entirely and lands on step 4 — an incompatible source is
+   never a match, however well the need's shape fits.*
+
 2. **Standard primitive in a React/Tailwind project** (button, dialog,
    table, form, tabs, dropdown, toast…)? → **shadcn**. Use the shadcn-ui
    MCP to inspect source/demos when it answers; the add itself goes through
    `npx shadcn@latest add <name>` — the free path that works in any session.
-3. **Full section or pattern** (pricing section, hero, navbar, dashboard
-   shell, landing block) **or a community search** ("something like X")?
-   → **magic-mcp** — after the free rungs don't cover it: a standard
-   primitive is never a magic-mcp job, and a section shadcn's registry
-   already ships goes through shadcn first. magic-mcp is metered — spend
-   only for what the free paths can't produce.
+3. **Full section or pattern in a React project** (pricing section, hero,
+   navbar, dashboard shell, landing block) **or a community search**
+   ("something like X")? → **magic-mcp** — after the free rungs don't cover
+   it: a standard primitive is never a magic-mcp job, and a section
+   shadcn's registry already ships goes through shadcn first. magic-mcp is
+   metered — spend only for what the free paths can't produce.
 4. **Nothing fits** (non-React stack with no system, unique bespoke need)?
    → **declared custom build**: say explicitly that no source covers this,
    then build following the project's own conventions. A custom build is a
@@ -78,8 +84,12 @@ layer:
 - **magic-mcp missing or out of credits** → compose the section from shadcn
   primitives (free), or declare a custom build (step 4). Never substitute a
   different metered service without saying so.
-- **npx/network unavailable** → say so and deliver the component code as a
-  patch the user can apply, following the registry's source.
+- **npx/network unavailable** → say so. Deliver the component as a patch
+  **only when the registry source is actually readable** — a cached copy,
+  a vendored registry, an MCP that still answers. With no reachable source
+  there is nothing to copy from: report the blockage rather than
+  reconstructing the component from memory — that fabricates provenance
+  and is the hand-rolled lookalike this router exists to prevent.
 
 ## Design constraints (conditional design-dna link)
 
