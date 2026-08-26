@@ -1,6 +1,6 @@
 ---
 name: safe-prod-db-write
-description: Safely run a one-off write, backfill, or data-mutating script against a PRODUCTION database — pull the connection from the platform, dry-run, get explicit human authorization, execute, verify, clean up. Use before running any script that inserts/updates/deletes prod data (generating codes, backfills, one-off fixes, seed data), when the user asks to write/mutate production data, or when a task needs a real prod DB connection. Also use when adding a DB model/table/migration, when applying a migration to a hosted project through a dashboard or MCP tool (Supabase `apply_migration`, Neon, PlanetScale) — see "Migrations applied by a hosted tool" — or when setting up a CI guard that enforces a per-table invariant (RLS enabled, tenant column, required index) — see "Enforce schema invariants in CI". Assumes a Neon/Vercel-style setup with the platform CLI, but the protocol generalizes.
+description: Safely run a one-off write, backfill, or data-mutating script against a PRODUCTION database — pull the connection from the platform, dry-run, get explicit human authorization, execute, verify, clean up. Use before running any script that inserts/updates/deletes prod data (generating codes, backfills, one-off fixes, seed data), when the user asks to write/mutate production data, or when a task needs a real prod DB connection. Also use when adding a DB model/table/migration, when applying a migration to a hosted project through a dashboard or MCP tool (Supabase `apply_migration`, Neon, PlanetScale) — see "Migrations applied by a hosted tool" — or when setting up a CI guard that enforces a per-table invariant (RLS enabled, tenant column, required index) — see "Enforce schema invariants in CI". Also use when a permission layer blocks a production write you were authorized to make — see "When the harness refuses the write" — and whenever the project keeps a dev twin of production (a Neon/Supabase branch, a staging cluster), since naming the target host is step 0. Assumes a Neon/Vercel-style setup with the platform CLI, but the protocol generalizes.
 compatibility: Needs a way to reach the production database — a deployment platform CLI (e.g. `vercel`) to pull the connection string plus a client (`psql`, `prisma`), or a hosted tool that executes SQL directly (e.g. the Supabase MCP server) — in which case protocol steps 1 and 6 do not apply, see the note under the protocol. The verification steps assume you can run arbitrary reads against the target.
 ---
 
@@ -9,6 +9,21 @@ compatibility: Needs a way to reach the production database — a deployment pla
 **Never write prod blind.** Every production mutation follows the same protocol: pull the connection → dry-run → authorize → execute → verify → clean up. Skipping any step is how a one-off script silently corrupts live data.
 
 ## The protocol
+
+0. **Name the target host out loud before you read or write anything.** Modern
+   setups keep a *dev twin* of production — a Neon branch, a Supabase branch, a
+   staging cluster — and the local `.env` usually points at the twin, by design.
+   So "the database" is ambiguous in both directions: a write you meant for
+   production can land in the twin and look like it worked, and a destructive
+   local command can land in production if the twin is younger than the habit.
+   Before acting, state which host you are on and how you know — the endpoint
+   id from the connection string, not the name of the env file. Say it in the
+   message where you ask for authorization, so the human is approving a *target*
+   and not just an operation.
+
+   The corollary for verification: after a production write, a read through
+   local tooling proves nothing if that tooling points at the twin. Verify
+   through the same path you wrote through.
 
 1. **Pull the connection into a private temp file.** Create it with `mktemp` — never a predictable path like `/tmp/op.env`, which can collide with a concurrent run or be a planted symlink on a shared runner — and arm a cleanup trap **up front** so the creds file is removed on every exit path:
    ```bash
@@ -34,6 +49,7 @@ Step 2 on this path splits by what you are running, and **the two halves are not
 - **Least blast radius.** Scope every mutation by batch / id / explicit filter. Never an unbounded `UPDATE`/`DELETE` — add the `WHERE` and prove it selects only what you intend (count it first).
 - **Idempotent + unique.** Use `skipDuplicates` / unique keys / random tokens so a re-run or partial failure can't double-insert or collide.
 - **Know the undo before you run.** If you can't state how to reverse it, you're not ready to run it.
+- **A feature that issues credentials needs a revoke path before it issues the first one.** Codes, tokens, API keys, invites, coupons — anything a third party can later present for value. Ask where the `revokedAt` / `expiresAt` / disable switch is *while the generator is being written*, because the moment you need it, you need it urgently and it does not exist. Observed: 2,000 lifetime-deal codes were generated, handed to a marketplace, and then had to be neutralized when the deal fell through — the table had no revoke column and the admin surface only generated and listed, so the only available move was a manual production `DELETE` of the unredeemed rows. That worked because none had been redeemed; had even one been, there would have been no clean answer at all.
 - **A verification step must fail LOUD, never produce an answer from missing input.** The dangerous bug in a check is not that it breaks — it is that a failed input silently becomes an empty one, and the check then reports a confident result derived from nothing. An empty query result reads as "no rows match"; an empty file list reads as "nothing exists"; an error on stderr is invisible in a pipeline. Guard the inputs and let errors print, because here the false branch prescribes a **production write**.
 - **Separate generation from distribution — and test on a *different* batch.** Burn throwaway/smoke-test rows from a batch you are **not** shipping, so the live batch you hand off stays pristine.
 - **The connection is a secret.** Never echo the URL, never commit the pulled env file, never paste creds into chat.
@@ -106,6 +122,31 @@ When **every** table/model must satisfy a rule — RLS enabled, a tenant column,
 
 This catches the gap at **PR time** instead of in production, and it's portable (pure file parsing). Prove it both ways: green on the current schema, and **red when you add a throwaway model** without the invariant. Caveat: the guard only proves the invariant is *declared* — runtime enforcement (real RLS *policies*, a working index plan) is a separate concern, so don't let a green guard imply the behavior is actually enforced.
 
+## When the harness refuses the write
+
+A permission layer — a classifier, a sandbox, an approval gate — can deny the
+production write even after the human authorized it. That denial is not an
+obstacle to solve. **Hand the operation to the human; do not reach for another
+tool that would accomplish the same mutation.** Using `psql` because the MCP
+tool was blocked is not a workaround, it is a bypass, and the fact that it is
+technically available is exactly what the denial was expressing distrust of.
+
+Hand off properly — the human is now the executor, so give them what an
+executor needs, in one message:
+
+- the exact statement, scoped and copy-pasteable;
+- the **pre-check** to run first, with the result that means "safe to proceed"
+  (`expect 2000 / 0`) and an instruction to stop and report if it differs;
+- the **post-check** and its expected result;
+- where to run it — the console, the project, and *which branch or host*.
+
+**Expect the denial to be sticky.** After a blocked write, the same tool may
+refuse subsequent *read-only* queries against that database too. Plan for
+verification to move to the human as well, rather than promising a confirmation
+you will not be able to produce. Say plainly that you cannot verify it yourself
+and ask for the output — a write reported as done on the strength of the
+human's "ran it" is a write nobody checked.
+
 ## Red flags — stop
 
 | Thought | Reality |
@@ -116,3 +157,6 @@ This catches the gap at **PR time** instead of in production, and it's portable 
 | "Done — it inserted" | Not done until a read verifies count + invariants. |
 | "The migration tool returned success" | It reports that *it* ran, not what landed. Check the catalog **and** that the recorded version matches your filename. |
 | "I'll clean up the env file later" | Clean up now, on every exit path — it holds prod creds. |
+| "The tool blocked it, I'll use psql instead" | That's a bypass, not a workaround. Hand the statement to the human with pre/post checks. |
+| "The local admin/console shows the change" | Local tooling usually points at the dev twin. Verify through the path you wrote through. |
+| "I'll generate the codes now, revocation can come later" | If it can be presented for value, the revoke path ships first. |
