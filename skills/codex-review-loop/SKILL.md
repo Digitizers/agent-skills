@@ -179,9 +179,17 @@ goal untrue. That is the whole list.
 | A reviewer *preference* with no defect behind it | 👎 with a one-line rationale — a preference is not a finding |
 | Docs beyond the behaviour this PR changes | issue |
 
-Filing is a real outcome, not a dodge: `gh issue create` takes a minute, keeps
-the finding from being lost, and leaves the PR reviewable. Say so in the reply
-so the human sees the finding was *judged*, not dropped.
+Filing is a real outcome, not a dodge: it takes a minute, keeps the finding
+from being lost, and leaves the PR reviewable. Say so in the reply so the human
+sees the finding was *judged*, not dropped.
+
+What "filed" requires is a **durable record outside this PR**, not GitHub
+Issues specifically — plenty of repos have Issues disabled, and a review
+credential that can comment cannot always open one. In order: `gh issue
+create`; else the project's own tracker (Linear, Jira, a `TODO`/backlog file
+committed on its own branch); else, if none is reachable, hand the finding to
+the human and let them place it, quoting the finding in full. What is never
+acceptable is the finding evaporating because the tracker was inconvenient.
 
 **Keep each fix inside the blast radius of the change it repairs.** The test
 is **necessity**, not membership in the opening diff: a fix may touch whatever
@@ -209,11 +217,12 @@ while it is still one commit:
   human and let them widen the goal. Never quietly rewrite the anchor to fit
   the diff: that erases the only evidence the drift happened.
 - **`git diff --stat <base>...HEAD` grows every round.** Resolve `<base>` to a
-  revision that exists and is current — `gh pr view <PR> --json baseRefOid -q
-  .baseRefOid`, or `git fetch -q origin <branch>` then `FETCH_HEAD`. A bare
-  branch name is read from the local repo only: it fails outright when there is
-  no local ref, and when the ref is stale it reports unrelated base movement as
-  your scope growth. Fixes shrink or hold
+  revision that is current *and present locally*: take the OID
+  (`gh pr view <PR> --json baseRefOid -q .baseRefOid`) and `git fetch` it, or
+  `git fetch -q origin <branch>` and use `FETCH_HEAD`. `gh` prints the OID but
+  does not download it, and a bare branch name is read from the local repo
+  only — it fails outright with no local ref (a shallow CI checkout has none),
+  and a stale ref reports unrelated base movement as your scope growth. Fixes shrink or hold
   the diff as often as they grow it. A monotonically growing diff across 3+
   rounds is expansion, not convergence — unless each round's growth is a fix
   and its regression test, which is the loop doing its job.
