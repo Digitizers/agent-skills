@@ -74,8 +74,12 @@ Two consequences worth stating, because both have burned rounds:
   This is the only exception to "Codex's clean verdict ends the loop", and it
   is narrow by construction: it needs **every blocking (P0/P1/P2)** finding
   live at HEAD triaged **this round** — re-read at HEAD, not remembered from an
-  earlier one — and each carrying its evidence (a tracker reference, a 👎 with
-  a rationale, or a fix). "I don't think that one matters" is not a terminal
+  earlier one — and each carrying its evidence: a tracker reference, a fix, or
+  a refutation. The refutation is a 👎 where the surface takes reactions and a
+  quoted conversation reply carrying the rationale where it does not (a review
+  body has no reactions endpoint) — what matters is that the rationale is
+  written down somewhere the human review will see it, not which button it
+  came with. "I don't think that one matters" is not a terminal
   state, and neither is a finding you have not re-read. Non-blocking nits need
   none of this; they never gated the loop.
 - **Filing is not a way out of a finding you simply don't want to fix.** It
