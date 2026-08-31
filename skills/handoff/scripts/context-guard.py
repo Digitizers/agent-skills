@@ -22,12 +22,14 @@ Two things keep the measurement honest across a restart (#35):
   fact: a session on a 1M-context model whose settings still say 200000 was
   reported at ">= 300%". The largest context any single call in this
   transcript actually carried is a proven lower bound on the real window, so
-  the window grows to the smallest known tier that fits it. Evidence is
-  scoped to **this session and this model**: a transcript outlives the
-  settings it was written under (a resume can change the model, or the same
-  model's window mode), and evidence that outlives its window is the original
-  lie with the sign flipped — the guard goes quiet at the real ceiling. With
-  no evidence from this session, the configured window stands.
+  the window grows to the smallest known tier that fits it. The evidence is
+  the **most recent call only**, never a historical maximum: a transcript
+  outlives the settings it was written under (a resume can change the model,
+  or the same model's window mode, under the same session id), and evidence
+  that outlives its window is the original lie with the sign flipped — the
+  guard goes quiet at the real ceiling. The latest call cannot outlive
+  anything: whatever context it carried, the window in force right now is at
+  least that big.
 
 Env:
   HANDOFF_THRESHOLD_PCT   default 70
@@ -72,7 +74,7 @@ def context_sent(usage: dict) -> int:
 
 
 def fit_window(configured: int, observed: int) -> int:
-    """Widen a configured window that the transcript has already disproved."""
+    """Widen a configured window that the latest call has already disproved."""
     if observed <= configured:
         return configured
     for tier in WINDOW_TIERS:
@@ -103,17 +105,14 @@ def main() -> None:
     # fire earlier, never later — the safe direction for a handoff reminder.
     tokens = 0
     tail_tokens = 0
-    # Window evidence is a fact about the RUN that produced it — its model and
-    # its window mode — not about the conversation. A transcript outlives both:
-    # a resume can pick a different model, or the same model with a different
-    # window mode (a 1M-context session and a 200k one log the same model id).
-    # Changing either takes a restart, and a restart means a new session id, so
-    # evidence is keyed by (session, model) and only this session's counts.
-    # Without evidence the configured window stands, which is the early-firing
-    # direction. Compaction does NOT reset it: the window is the same size on
-    # both sides of a compact boundary.
-    observed_by_run = {}
-    last_run = (session_id, "")
+    # Window evidence is the LATEST call's context, never a maximum over the
+    # transcript. Nothing in a transcript states the window size, and every
+    # attempt to keep an older observation alive needs an identity the file
+    # does not carry: a resume can change the model, or the same model's window
+    # mode, and it may reuse the session id while doing so. So no historical
+    # observation can be trusted to describe the window in force now — but the
+    # most recent call always does, because it fit.
+    latest_context = 0
     with open(transcript, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             try:
@@ -131,13 +130,8 @@ def main() -> None:
             message = rec.get("message") or {}
             usage = message.get("usage")
             if usage:
-                run = (rec.get("sessionId") or session_id,
-                       message.get("model") or "")
-                last_run = run
-                observed_by_run[run] = max(
-                    observed_by_run.get(run, 0), context_sent(usage)
-                )
-                tokens = context_sent(usage) + usage.get("output_tokens", 0)
+                latest_context = context_sent(usage)
+                tokens = latest_context + usage.get("output_tokens", 0)
                 tail_tokens = 0
             else:
                 tail_tokens += estimate_tokens(line)
@@ -151,8 +145,7 @@ def main() -> None:
 
     tokens += tail_tokens + payload_tokens
 
-    evidence = observed_by_run.get(last_run, 0) if last_run[0] == session_id else 0
-    window = fit_window(window, evidence)
+    window = fit_window(window, latest_context)
 
     pct = tokens * 100.0 / window
     if pct < threshold:

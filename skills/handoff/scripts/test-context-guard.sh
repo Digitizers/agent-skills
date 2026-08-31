@@ -166,9 +166,9 @@ assert used <= window, msg
 PYX
 echo "PASS never reports an impossible percentage"
 
-# 14. Window evidence is per model (Codex round-1 P2): a session that carried
-#     600k on a 1M model and then switched to a 200k model must be measured
-#     against 200k again — 150k on the small model is 75%, not 15%.
+# 14. A model switch re-narrows the window (Codex round-1 P2): a session that
+#     carried 600k on a 1M model and then switched to a 200k model must be
+#     measured against 200k again — 150k on the small model is 75%, not 15%.
 mk_transcript "$WORK/swap.jsonl" 1
 python3 - "$WORK/swap.jsonl" <<'PYX'
 import json, sys
@@ -184,10 +184,10 @@ PYX
 printf '{"transcript_path":"%s","session_id":"cg-test-swap","hook_event_name":"UserPromptSubmit"}' "$WORK/swap.jsonl" > "$WORK/in-swap.json"
 OUT="$(run_guard "$WORK/in-swap.json")"
 echo "$OUT" | grep -q "additionalContext" || fail "kept a wider model's window after switching to a smaller model"
-echo "PASS window evidence scoped per model"
+echo "PASS model switch re-narrows the window"
 
-# 15. ...and the evidence is still used for the model it belongs to: the same
-#     switch back to the 1M model reads 600k as 60% of 1M, not 300% of 200k.
+# 15. ...and switching back reads the wide window again: a 600k call on the 1M
+#     model is 60% of 1M, not 300% of 200k.
 python3 - "$WORK/swap.jsonl" <<'PYX'
 import json, sys
 with open(sys.argv[1], "a") as f:
@@ -199,12 +199,12 @@ PYX
 printf '{"transcript_path":"%s","session_id":"cg-test-swap-back","hook_event_name":"UserPromptSubmit"}' "$WORK/swap.jsonl" > "$WORK/in-swap-back.json"
 OUT="$(run_guard "$WORK/in-swap-back.json")"
 [ -z "$OUT" ] || fail "dropped the active model's own window evidence"
-echo "PASS window evidence kept for the model it belongs to"
+echo "PASS switching back reads the wide window again"
 
 # 16. Evidence does not outlive the session that produced it (Codex round-2
 #     P2): the same model id covers both a 1M and a 200k window mode, and
-#     changing mode takes a restart. A 600k call logged under the PREVIOUS
-#     session must not widen the window for this one — 150k is 75% of 200k.
+#     a 600k call logged under a PREVIOUS session must not widen the window
+#     for this one — 150k is 75% of 200k.
 python3 - "$WORK/mode.jsonl" <<'PYX'
 import json, sys
 def usage(session, tokens):
@@ -220,7 +220,7 @@ PYX
 printf '{"transcript_path":"%s","session_id":"cg-test-mode","hook_event_name":"UserPromptSubmit"}' "$WORK/mode.jsonl" > "$WORK/in-mode.json"
 OUT="$(run_guard "$WORK/in-mode.json")"
 echo "$OUT" | grep -q "additionalContext" || fail "carried a previous session's window evidence across a restart"
-echo "PASS window evidence scoped to this session"
+echo "PASS a previous session's call is not window evidence"
 
 # 17. ...and this session's own evidence still counts: the same 600k call,
 #     logged under the CURRENT session, is 60% of 1M and stays silent.
@@ -236,6 +236,28 @@ PYX
 printf '{"transcript_path":"%s","session_id":"cg-test-mode-own","hook_event_name":"UserPromptSubmit"}' "$WORK/mode-own.jsonl" > "$WORK/in-mode-own.json"
 OUT="$(run_guard "$WORK/in-mode-own.json")"
 [ -z "$OUT" ] || fail "ignored this session's own window evidence"
-echo "PASS this session's own evidence still widens the window"
+echo "PASS a live 600k call still widens the window"
+
+# 18. Evidence is the LATEST call, not a maximum (Codex round-3 P2): a resume
+#     into a smaller window mode can keep the SAME session id and the SAME
+#     model id, so nothing in the transcript distinguishes it. A 600k call
+#     earlier in this very session must not widen the window for a current
+#     150k call — 150k is 75% of 200k and must fire.
+python3 - "$WORK/resume.jsonl" <<'PYX'
+import json, sys
+def usage(tokens):
+    return json.dumps({"sessionId": "cg-test-resume",
+                       "message": {"model": "claude-opus-5",
+                                   "usage": {"input_tokens": tokens,
+                                             "cache_read_input_tokens": 0,
+                                             "cache_creation_input_tokens": 0}}})
+with open(sys.argv[1], "w") as f:
+    f.write(usage(600000) + "\n")
+    f.write(usage(150000) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-resume","hook_event_name":"UserPromptSubmit"}' "$WORK/resume.jsonl" > "$WORK/in-resume.json"
+OUT="$(run_guard "$WORK/in-resume.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "kept a pre-resume observation as window evidence"
+echo "PASS evidence is the latest call, not a maximum"
 
 echo "all context-guard tests passed"

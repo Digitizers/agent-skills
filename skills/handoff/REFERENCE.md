@@ -35,12 +35,15 @@ on:
    floor: the largest context any single call in the transcript actually
    carried proves the window is at least that big, so a 1M-context session
    left on the 200k default is measured against 1M instead of being read as
-   300% full. Evidence is scoped to **this session and this model**: a
-   transcript outlives the settings it was written under (a resume can change
-   the model, or the same model's window mode — a 1M and a 200k session log
-   the same model id), and evidence that outlives its window is the same lie
-   with the sign flipped, the guard going quiet at the real ceiling. With no
-   evidence from this session, the configured window stands. The reported percentage is also capped at 100 — the byte-floor
+   300% full. The evidence is the **most recent call only**, never a maximum
+   over the transcript: a transcript outlives the settings it was written
+   under — a resume can change the model, or the same model's window mode,
+   and may keep the same session id doing it — and an observation that
+   outlives its window is the same lie with the sign flipped, the guard going
+   quiet at the real ceiling. The latest call cannot outlive anything: the
+   window in force now is at least as big as the context it just carried.
+   A session whose latest call is small is measured against the configured
+   window, so on a 1M model the setting is still worth getting right. The reported percentage is also capped at 100 — the byte-floor
    estimate deliberately over-counts, and an impossible figure is a lie even
    when the nudge itself is warranted.
 5. At `>= HANDOFF_THRESHOLD_PCT` (default 70) of `CONTEXT_WINDOW_TOKENS`
