@@ -53,8 +53,8 @@ Converged = Codex's latest review is against **current HEAD**, its findings have
 There are four terminal states, not two. A finding is cleared when it is
 **fixed**, **stale** (already handled in an earlier round), **refuted** (a
 verified false positive, with the rationale written where the human review will
-see it), **or tracked** — real, out of this PR's scope, now recorded outside
-the PR with its thread saying so (see [Scope
+see it), **or tracked** — real, out of this PR's scope, now recorded
+somewhere that outlives this checkout, with its thread saying so (see [Scope
 boundaries](#scope-boundaries--the-prs-subject-is-the-diff)). Tracked is a
 *decision*, not a deferral of one, so it clears the finding the way a fix does.
 
