@@ -245,49 +245,23 @@ at P0/P1/P2 is already in a terminal triage state, re-verified this round
 ## Convergence checklist
 
 - [ ] Codex's **latest** review commit == PR **HEAD**.
-- [ ] Zero open inline findings at P0/P1/P2 — every one in a terminal state: fixed, `line:null`/re-anchored (stale), verified-FP, or **filed** as out-of-scope with a durable record outside the PR + an audit trail naming it (SKILL.md -> Scope boundaries lists both fallbacks).
-- [ ] **Every OTHER reviewer bot's live findings triaged** (fixed / 👍 / 👎-with-rationale) — they don't gate convergence, but merging over an untriaged one ships it unexamined.
+- [ ] Every blocking (P0/P1/P2) finding live at HEAD is in a terminal state — fixed, stale (`line:null`/re-anchored), refuted, or tracked (SKILL.md → Convergence).
+- [ ] **Every OTHER reviewer bot's live findings triaged** — they don't gate convergence, but merging over an untriaged one ships it unexamined.
 - [ ] CI green on HEAD.
 - [ ] Any owner-decision findings escalated to the human, not guessed.
-- [ ] **Out-of-scope findings filed, not built** — each has a durable, referenceable record that outlives this checkout (a GitHub issue, else a tracker URL, else a pushed backlog entry, else a comment on this PR quoting the finding and handing it to the human — never a local note or an unpushed branch) and, as its audit trail, whichever applies: a reply naming it, or a line in the PR body naming it when the finding was filed during Round 0 and there was no comment to reply to (SKILL.md → Scope boundaries).
-- [ ] **The stated goal still describes the diff** — the goal written down before Round 0 (or recovered when joining an open PR), which the PR body restates rather than replaces. Size it with `gh pr view <PR> --json changedFiles,additions,deletions` — measured against the PR's own base by GitHub, so no local ref, fetch or full clone is involved. If the body claims more than the goal, or the branch outgrew its own description, scope crept: a human widens it, you don't.
+- [ ] **Out-of-scope findings tracked, not built** — each recorded somewhere that outlives this checkout, and its own thread (or, for one raised in Round 0, the PR body) saying where it went.
+- [ ] **The stated goal still describes the diff** — if the branch outgrew its own description, scope crept: a human widens it, you don't.
 - [ ] → human review (once, at the end of the batch — not per round).
 
-### Filing an out-of-scope finding
+### Tracking an out-of-scope finding
 
-During **Round 0** there is no PR and no comment to reply to: file the issue
-against the branch (drop the `#<PR>` references below, name the branch), and
-list the issue number in the PR body you write next, under what you chose not
-to fix. That line is the audit trail. Steps 2 and 3 below apply once a PR
-exists.
-
-```bash
-# 1. File it, capturing the URL.
-ISSUE=$(gh issue create -R <owner>/<repo> \
-  --title "<the defect, not the finding's wording>" \
-  --body "Raised by Codex on #<PR> but outside that PR's scope: <what it is, where, why it is real>.
-
-Not fixed in #<PR> because <pre-existing / unrelated surface / new feature>.")
-
-# 2. Reply on the finding so the human sees it was judged, not dropped.
-#    WHICH endpoint depends on the SURFACE the finding came from (§2): only
-#    inline review comments have a reply thread. A finding posted in a review
-#    body or a top-level issue comment has no compatible <COMMENT_ID> for the
-#    replies endpoint, so it is answered in the conversation instead.
-
-# (a) inline review comment -> reply in its thread:
-gh api -X POST repos/<owner>/<repo>/pulls/<PR>/comments/<COMMENT_ID>/replies \
-  -f body="Real, but pre-existing and outside this PR's scope — tracked in ${ISSUE}."
-
-# (b) review body / (c) issue comment -> conversation comment, QUOTING the
-#     finding so the reply stays attributable (a bare "tracked in #12" on a
-#     busy PR names nothing):
-gh pr comment <PR> -R <owner>/<repo> --body "> <first line of the finding>
-
-Real, but outside this PR's scope — tracked in ${ISSUE}."
-
-# 3. 👍 it (real finding), per §4 — react on the id of the surface it came
-#    from: pulls/comments/<id> for (a), issues/comments/<id> for (c). A review
-#    body (b) has no reactions endpoint; react on the bot's issue comment if
-#    there is one, otherwise the reply above is the audit trail.
-```
+Record the defect where it will outlive this checkout — `gh issue create`, the
+project's tracker, or (failing both) a comment on the PR quoting the finding
+and handing it to the human — then answer the finding's own thread with that
+reference, so the end-of-loop human review sees the decision. Reply in-thread
+for an inline comment (`pulls/<PR>/comments/<id>/replies`); a review body or a
+top-level issue comment has no reply thread, so answer with `gh pr comment`
+quoting the finding. React 👍 where the surface takes reactions — inline
+comments and issue comments do, review bodies do not, and there the written
+reply is the audit trail. During **Round 0** no PR exists yet: record it
+against the branch and name it in the PR body you write next.

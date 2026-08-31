@@ -14,8 +14,8 @@ Claude develops, Codex reviews, Claude fixes — **in a loop** — the human rev
 2. **Round 0 — local pre-review of the built branch diff, when the Codex plugin is installed** (see below). If the PR **already exists**, skip this step and continue at step 3 — Round 0 is the pre-PR round only. Otherwise: fix its real, **in-scope** findings — the same scope rules apply before a PR exists, and an out-of-scope one is tracked, not built (see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff)) — re-run the relevant test suite until green again — fixes invalidate step 1's green — then **push the post-Round-0 HEAD** and open the PR. A PR created by a non-pushing flow from the stale remote SHA omits the reviewed fixes.
 3. Trigger: `gh pr comment <PR> -R <owner>/<repo> --body "@codex review"`.
 4. Pull findings from **all three surfaces** (see REFERENCE) — and from **every reviewer bot on the PR, not just Codex** (Copilot and friends post to the same surfaces; see "Other reviewer bots"). **Verify each against HEAD** — Codex re-posts stale + false-positive findings every round.
-5. Fix the **real, in-scope** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed). A real finding that is *outside this PR's scope* gets tracked outside the PR, not a commit — see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff).
-6. Re-trigger and repeat 3–5 until Codex says **"Didn't find any major issues"** *against the current HEAD* — or until every **blocking** finding (P0/P1/P2) it still returns at that HEAD is one you have already put in a terminal triage state and re-verified this round — non-blocking nits never gated the loop and do not now (see [Convergence](#convergence)). Some findings can be re-posted for ever — a filed out-of-scope defect is still in the tree, and a false positive stays false — so a clean verdict is not always reachable; that is the only way the loop ends without one.
+5. Fix the **real, in-scope** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed; where a surface takes no reaction, a written reply is that record). A real finding that is *outside this PR's scope* gets tracked, not committed — see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff).
+6. Re-trigger and repeat 3–5 until Codex says **"Didn't find any major issues"** *against the current HEAD* — or until every **blocking** finding (P0/P1/P2) it still returns at that HEAD is one you have already put in a terminal triage state and re-verified this round — non-blocking nits never gated the loop and do not now (see [Convergence](#convergence)). Some findings can be re-posted for ever — a tracked out-of-scope defect is still in the tree, and a false positive stays false — so a clean verdict is not always reachable; that is the only way the loop ends without one.
 7. **Human reviews once**, at the end. Never auto-merge a substantial PR without a nod.
 
 ## Round 0 — local Codex pre-review
@@ -34,11 +34,10 @@ Round 0 runs through the plugin's slash commands only. Do **not** shell out to `
 
 Triage its findings exactly like cloud findings: verify against the code, fix the real **in-scope** ones with regression tests, ignore false positives. There is no PR body to anchor scope against yet, so write the branch's goal down before triaging — see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff).
 
-**Filing during Round 0 differs in one respect: there is nothing to reply to.**
-No PR exists, so a real out-of-scope finding is filed against the *branch*
-(`gh issue create`, naming the branch instead of a PR number) and the issue
-number goes into the PR body you write next, under what you deliberately did
-not fix. That body line is the audit trail the inline reply would have been. Re-run the relevant test suite until it is green again — fixes invalidate the pre-Round-0 green. Then push the post-Round-0 HEAD, open the PR, and continue from step 3.
+Tracking differs in one respect during Round 0: there is nothing to reply to,
+so record the finding against the *branch* and name it in the PR body you write
+next, under what you deliberately did not fix — that line is the audit trail
+the reply would have been. Re-run the relevant test suite until it is green again — fixes invalidate the pre-Round-0 green. Then push the post-Round-0 HEAD, open the PR, and continue from step 3.
 
 **Why:** the cloud bot's round-trip is minutes per round, and its early rounds are dominated by findings a local pass catches in seconds. The local and cloud reviewers share a model family, so a local pre-pass mostly *de-duplicates* the first cloud rounds rather than adding a new defect class — that is exactly the point: spend the cheap reviewer first.
 
@@ -52,39 +51,32 @@ not fix. That body line is the audit trail the inline reply would have been. Re-
 Converged = Codex's latest review is against **current HEAD**, its findings have **fully landed** (see the race below), *and* every blocking finding (P0/P1/P2) has reached a **terminal triage state**. Do **not** declare convergence off a single comment surface — a PR clean on `/reviews` can still carry an un-triaged finding on the inline or issue surface.
 
 There are four terminal states, not two. A finding is cleared when it is
-**fixed**, **stale** (already handled in an earlier round), **a verified false
-positive** (👎 + rationale), **or filed** — real, out of this PR's scope, now
-carrying a tracker reference and an audit trail naming it (see [Scope
-boundaries](#scope-boundaries--the-prs-subject-is-the-diff)). Filed is a
-*decision*, not a deferral of one, so it clears the finding for this PR the way
-a fix does.
+**fixed**, **stale** (already handled in an earlier round), **refuted** (a
+verified false positive, with the rationale written where the human review will
+see it), **or tracked** — real, out of this PR's scope, now recorded outside
+the PR with its thread saying so (see [Scope
+boundaries](#scope-boundaries--the-prs-subject-is-the-diff)). Tracked is a
+*decision*, not a deferral of one, so it clears the finding the way a fix does.
 
 Two consequences worth stating, because both have burned rounds:
 
 - **A finding in a terminal state may come back — and that is what ends the
-  loop when a clean verdict cannot.** A filed defect is still in the tree and a
-  false positive stays false, so Codex can re-post either every round and never
-  go clean. Answer it as before (the issue number, or the 👎 and its rationale)
-  and move on: it never re-enters the fix loop. When every **blocking** finding
-  left at HEAD is in a terminal state, the PR is converged without a clean
-  verdict and step 6 stops there — a lingering nit is not a reason to keep
-  looping, and filing polish just to clear the list is the scope creep this
-  skill spends a whole section on.
+  loop when a clean verdict cannot.** A tracked defect is still in the tree and
+  a false positive stays false, so Codex can re-post either every round and
+  never go clean. Answer it as before and move on; it never re-enters the fix
+  loop. When every **blocking** finding live at HEAD is in a terminal state,
+  the PR is converged without a clean verdict and step 6 stops there. Nits
+  never gated the loop and do not now — tracking polish just to clear the list
+  is the scope creep this skill spends a section on.
 
   This is the only exception to "Codex's clean verdict ends the loop", and it
-  is narrow by construction: it needs **every blocking (P0/P1/P2)** finding
-  live at HEAD triaged **this round** — re-read at HEAD, not remembered from an
-  earlier one — and each carrying its evidence: a tracker reference, a fix, or
-  a refutation. The refutation is a 👎 where the surface takes reactions and a
-  quoted conversation reply carrying the rationale where it does not (a review
-  body has no reactions endpoint) — what matters is that the rationale is
-  written down somewhere the human review will see it, not which button it
-  came with. "I don't think that one matters" is not a terminal
-  state, and neither is a finding you have not re-read. Non-blocking nits need
-  none of this; they never gated the loop.
-- **Filing is not a way out of a finding you simply don't want to fix.** It
+  is narrow by construction: **every** blocking finding live at HEAD must be
+  triaged **this round** — re-read at HEAD, not remembered from an earlier one
+  — and carry its evidence. "I don't think that one matters" is not a terminal
+  state, and neither is a finding you have not re-read.
+- **Tracking is not a way out of a finding you simply don't want to fix.** It
   applies only where the scope table says it applies. A defect the diff
-  *introduced* is in scope at any severity — filing that is shipping a known
+  *introduced* is in scope at any severity — tracking that is shipping a known
   bug, and the human review at the end is entitled to say so.
 
 **Codex posts its outcome on different surfaces depending on the result — poll BOTH or you will misread the loop:**
@@ -139,137 +131,105 @@ fix into a redesign. **The scope is fixed before the first review round, and
 no round raises it.**
 
 The anchor is *what the branch set out to do* — the issue it closes, the task
-you were given, or two lines you write down before the first review round.
-**Write it down before Round 0**, which runs before any PR exists, and then
-**keep it**: the PR body restates that goal, it does not replace it. A body
-written to describe whatever the diff has become is not an anchor, it is a
-mirror.
+you were given, or two lines you write down before reviewing. **Write it down
+before Round 0**, which runs before any PR exists, and then **keep it**: the PR
+body restates that goal, it does not replace it. A body written to describe
+whatever the diff has become is not an anchor, it is a mirror.
+
+Round 0 is where an unanchored scope does the most damage and is hardest to see
+afterwards: absorb an adjacent refactor there and it lands in the opening diff,
+a body written from the diff describes the expanded work as if it were always
+the plan, and every drift check below then compares the branch to that inflated
+baseline and finds nothing wrong. So when the body would have to claim more
+than the goal, that *is* the drift signal — growing the scope is the human's
+call, and you get a yes before the wider goal becomes the baseline.
 
 **Joining a PR that is already open** — the loop's other entry point, where
-Round 0 is skipped and no goal was ever written down — means recovering the
-anchor before triaging anything. In order: the **linked issue or task**; else
-the PR body **as first opened**, from the body's edit history; else **ask the
-human** what this PR is for, in one line.
-
-Do not try to reconstruct the goal from the opening *diff*. Git and the API
-cannot tell you reliably where "opening" was — a PR created from several
-commits contains all of them, later commits are indistinguishable from them in
-the timeline, and each near-miss makes legitimate opening work read as
-review-driven expansion. A one-line answer from the human costs a minute and
-is actually correct. What you must not do is adopt the current body as the
-baseline by default: on a PR that has already been through review-driven
-expansion, that ratifies exactly the drift this section exists to catch.
-
-That is the whole point of writing it early. Round 0 is where an unanchored
-scope does the most damage and is hardest to see afterwards: absorb an
-adjacent refactor there and it lands in the opening diff, a body written from
-the diff describes the expanded work as if it were always the plan, and every
-drift check below then compares the branch to that inflated baseline and finds
-nothing wrong. So when the body would have to claim more than the original
-goal, that *is* the drift signal — the scope grew, and growing it is the
-human's call: say so explicitly and get a yes before the wider goal becomes
-the new baseline.
+Round 0 is skipped and nothing was written down — means recovering the anchor
+before triaging anything: the linked issue or task, else the body as first
+opened, else one line from the human on what this PR is for. Don't reconstruct
+it from the opening diff — nothing tells you reliably where "opening" was — and
+don't adopt the current body by default, which on an already-expanded PR
+ratifies the drift this section exists to catch.
 
 **In scope** — a defect the diff *introduces*, or one that makes the stated
 goal untrue. That is the whole list.
 
-**Out of scope by default** — file it, don't build it:
+**Out of scope by default** — track it, don't build it:
 
 | Finding | What the loop does |
 |---|---|
-| A pre-existing bug the diff merely sits next to | 👍, track it outside the PR, reply with its reference |
-| A refactor / rename / restructure "while we're here" | issue, not this PR |
-| A new feature, option, env knob or config surface the change didn't need | issue — new surface is new scope, however small |
-| Hardening against a failure mode the change did not create | issue, unless the PR's goal is that hardening |
-| A reviewer *preference* with no defect behind it | 👎 with a one-line rationale — a preference is not a finding |
-| Docs beyond the behaviour this PR changes | issue |
+| A pre-existing bug the diff merely sits next to | 👍, track it, answer with the reference |
+| A refactor / rename / restructure "while we're here" | track, not this PR |
+| A new feature, option, env knob or config surface the change didn't need | track — new surface is new scope, however small |
+| Hardening against a failure mode the change did not create | track, unless the PR's goal is that hardening |
+| A reviewer *preference* with no defect behind it | refute it — a preference is not a finding |
+| Docs beyond the behaviour this PR changes | track |
 
-Filing is a real outcome, not a dodge: it takes a minute, keeps the finding
-from being lost, and leaves the PR reviewable. Say so in the reply so the human
-sees the finding was *judged*, not dropped.
+Tracking is a real outcome, not a dodge: it costs a minute, keeps the finding
+from being lost, and leaves the PR reviewable. Two properties make it real —
+the record **outlives this checkout** (an issue or tracker item, else something
+pushed, else a comment on the PR itself quoting the finding; never a local note
+or an unpushed branch), and the finding's own thread **says where it went**, so
+the human review sees it was judged rather than dropped. Which button or
+endpoint that takes depends on the surface; that it is written down does not.
 
-What "filed" requires is a **durable, referenceable record that outlives this
-checkout** — not GitHub Issues specifically, since plenty of repos have Issues
-disabled and a review credential that can comment cannot always open one. In
-order: `gh issue create`; else the project's own tracker (Linear, Jira, …) by
-URL; else a backlog entry **pushed** to the remote; else a comment **on this
-PR** quoting the finding in full and naming it as deliberately not fixed, with
-an explicit hand-off to the human.
-
-Two things that look like filing and are not: a note in a local file or an
-unpushed branch, which dies with an ephemeral CI checkout, and telling the
-human about it in chat, which records nothing. If the only reachable option is
-the PR comment, say so there — the finding then rides the human review at the
-end of the loop, which is the point. What is never acceptable is the finding
-evaporating because the tracker was inconvenient.
-
-**Keep each fix inside the blast radius of the change it repairs.** The test
-is **necessity**, not membership in the opening diff: a fix may touch whatever
+**Keep each fix inside the blast radius of the change it repairs.** The test is
+**necessity**, not membership in the opening diff: a fix may touch whatever
 repairing the defect actually requires — a caller the change broke, a new test
-file for the regression test, a doc that states the behaviour being corrected.
-What it may not do is carry passengers. A fix that introduces an abstraction
-the repair does not need, edits a file for reasons unrelated to the defect, or
-is substantially larger than the change it repairs, is a second PR wearing a
-fix's commit message — stop and put it to the human.
-
-Read the growth the same way: the diff-stat tell below asks *why* a file
-joined the diff, not *whether* one did. "The regression test needed a new
-file" is an answer; "I was in there anyway" is the drift this section exists
-to catch.
+file for the regression test, a doc stating the behaviour being corrected. What
+it may not do is carry passengers. A fix that introduces an abstraction the
+repair does not need, edits a file for reasons unrelated to the defect, or is
+substantially larger than the change it repairs, is a second PR wearing a fix's
+commit message — stop and put it to the human.
 
 ### The tells, and what to do about them
 
-Check these at the end of every round — they are cheap and they catch drift
+Check these at the end of every round — they are cheap, and they catch drift
 while it is still one commit:
 
 - **The stated goal no longer describes the diff.** The single most reliable
-  signal. Re-read the goal you wrote before Round 0 (the PR body should be
-  restating it); if it under-sells what the branch does, scope crept — either
-  revert the excess or, if it is genuinely required, say so explicitly to the
-  human and let them widen the goal. Never quietly rewrite the anchor to fit
-  the diff: that erases the only evidence the drift happened.
-- **The diff grows every round.** Ask GitHub for the size rather than
-  computing it locally — `gh pr view <PR> --json changedFiles,additions,deletions`
-  (and `gh pr diff <PR>` for the content). It is already measured against the
-  PR's own base, needs no local objects, and cannot be thrown by a missing
-  ref, a stale ref, or a shallow checkout — three ways the obvious
-  `git diff <base>...HEAD` fails or silently measures the wrong thing. Fixes shrink or hold
-  the diff as often as they grow it. A monotonically growing diff across 3+
-  rounds is expansion, not convergence — unless each round's growth is a fix
-  and its regression test, which is the loop doing its job.
-- **New files, new dependencies, or new configuration appear after round 1.**
-  Ask what put them there. A test file a regression test needed is the loop
-  working; a dependency or a config surface the change did not need at open is
-  scope.
+  signal. If the goal under-sells what the branch does, scope crept — revert
+  the excess, or say so explicitly and let the human widen the goal. Never
+  quietly rewrite the anchor to fit the diff: that erases the only evidence the
+  drift happened.
+- **The diff grows every round.** Fixes shrink or hold the diff as often as
+  they grow it, so a monotonically growing one across 3+ rounds is expansion —
+  unless each round's growth is a fix and its regression test, which is the
+  loop working. Ask *why* a file joined the diff, not *whether* one did: "the
+  regression test needed a new file" is an answer, "I was in there anyway" is
+  the drift. Read the size from the PR itself (`gh pr view <PR> --json
+  changedFiles,additions,deletions`) — it is already measured against the PR's
+  base, and needs nothing of your local checkout.
+- **New dependencies or new configuration appear after round 1.** Ask what put
+  them there; the change did not need them at open.
 - **You are writing design rationale in a fix commit.** If the commit needs a
-  paragraph arguing for a new approach, it is a design decision — human's
-  call, per the rule below.
+  paragraph arguing for a new approach, it is a design decision — human's call,
+  per the rule below.
 
 ### Redesign is proposed, never performed
 
-The "escalate the mechanism by round 3–4" rule above says when to *notice*
-that patching won't converge. It does not authorise the rewrite. When the
-mechanism looks wrong: **stop the loop, write at most a paragraph** — what
-keeps failing, why the current mechanism cannot hold, what you would replace
-it with, and what it costs — and hand it to the human. Then do what they say.
-Deleting or restructuring working code, and expanding the change to reach a
-better design, are the two decisions the loop is not allowed to make for
-itself.
+The "escalate the mechanism by round 3–4" rule above says when to *notice* that
+patching won't converge. It does not authorise the rewrite. When the mechanism
+looks wrong: **stop the loop, write at most a paragraph** — what keeps failing,
+why the current mechanism cannot hold, what you would replace it with, and what
+it costs — and hand it to the human. Then do what they say. Deleting or
+restructuring working code, and expanding the change to reach a better design,
+are the two decisions the loop is not allowed to make for itself.
 
-The same boundary applies to the **fix-the-rule-not-the-line sweep**: the
-sweep covers every place that teaches *the same claim the finding is about*.
-It is not licence for a general cleanup of the files it visits.
+The same boundary applies to the **fix-the-rule-not-the-line sweep**: it covers
+every place that teaches *the same claim the finding is about*, and is not
+licence for a general cleanup of the files it visits.
 
 ### Rounds are for defects, not for polish
 
-Convergence means no actionable finding at a blocking severity (P0/P1/P2) —
-not that the reviewer has run out of suggestions. A reviewer will keep
-producing nits indefinitely; a PR that only accumulates non-blocking polish
-across a round is done, and the remaining suggestions belong in an issue.
-**Round 0 obeys every rule in this section too**, measured against the
-written-down goal above rather than a PR body that does not exist yet — a
-local review before the PR exists is where an unbounded "improve it" pass is
-cheapest to start and most expensive to notice.
+Convergence means no actionable finding at a blocking severity (P0/P1/P2) — not
+that the reviewer has run out of suggestions. A reviewer will keep producing
+nits indefinitely; a PR that only accumulates non-blocking polish across a
+round is done, and the rest is tracked, not built. **Round 0 obeys every rule
+in this section too**, measured against the written-down goal rather than a PR
+body that does not exist yet — a local review before the PR exists is where an
+unbounded "improve it" pass is cheapest to start and most expensive to notice.
 
 ## Reviewer failure modes
 
