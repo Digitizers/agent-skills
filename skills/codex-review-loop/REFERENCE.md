@@ -249,7 +249,7 @@ at P0/P1/P2 is already in a terminal triage state, re-verified this round
 - [ ] **Every OTHER reviewer bot's live findings triaged** (fixed / 👍 / 👎-with-rationale) — they don't gate convergence, but merging over an untriaged one ships it unexamined.
 - [ ] CI green on HEAD.
 - [ ] Any owner-decision findings escalated to the human, not guessed.
-- [ ] **Out-of-scope findings filed, not built** — each has a durable record outside the PR (a GitHub issue, else the project's tracker, else handed to the human) and, as its audit trail, whichever applies: a reply naming it, or a line in the PR body naming it when the finding was filed during Round 0 and there was no comment to reply to (SKILL.md → Scope boundaries).
+- [ ] **Out-of-scope findings filed, not built** — each has a durable, referenceable record that outlives this checkout (a GitHub issue, else a tracker URL, else a pushed backlog entry, else a comment on this PR quoting the finding and handing it to the human — never a local note or an unpushed branch) and, as its audit trail, whichever applies: a reply naming it, or a line in the PR body naming it when the finding was filed during Round 0 and there was no comment to reply to (SKILL.md → Scope boundaries).
 - [ ] **The stated goal still describes the diff** — the goal written down before Round 0 (or recovered when joining an open PR), which the PR body restates rather than replaces. Size it with `gh pr view <PR> --json changedFiles,additions,deletions` — measured against the PR's own base by GitHub, so no local ref, fetch or full clone is involved. If the body claims more than the goal, or the branch outgrew its own description, scope crept: a human widens it, you don't.
 - [ ] → human review (once, at the end of the batch — not per round).
 

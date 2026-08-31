@@ -184,13 +184,20 @@ Filing is a real outcome, not a dodge: it takes a minute, keeps the finding
 from being lost, and leaves the PR reviewable. Say so in the reply so the human
 sees the finding was *judged*, not dropped.
 
-What "filed" requires is a **durable record outside this PR**, not GitHub
-Issues specifically — plenty of repos have Issues disabled, and a review
-credential that can comment cannot always open one. In order: `gh issue
-create`; else the project's own tracker (Linear, Jira, a `TODO`/backlog file
-committed on its own branch); else, if none is reachable, hand the finding to
-the human and let them place it, quoting the finding in full. What is never
-acceptable is the finding evaporating because the tracker was inconvenient.
+What "filed" requires is a **durable, referenceable record that outlives this
+checkout** — not GitHub Issues specifically, since plenty of repos have Issues
+disabled and a review credential that can comment cannot always open one. In
+order: `gh issue create`; else the project's own tracker (Linear, Jira, …) by
+URL; else a backlog entry **pushed** to the remote; else a comment **on this
+PR** quoting the finding in full and naming it as deliberately not fixed, with
+an explicit hand-off to the human.
+
+Two things that look like filing and are not: a note in a local file or an
+unpushed branch, which dies with an ephemeral CI checkout, and telling the
+human about it in chat, which records nothing. If the only reachable option is
+the PR comment, say so there — the finding then rides the human review at the
+end of the loop, which is the point. What is never acceptable is the finding
+evaporating because the tracker was inconvenient.
 
 **Keep each fix inside the blast radius of the change it repairs.** The test
 is **necessity**, not membership in the opening diff: a fix may touch whatever
