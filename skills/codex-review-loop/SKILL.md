@@ -140,20 +140,18 @@ mirror.
 
 **Joining a PR that is already open** — the loop's other entry point, where
 Round 0 is skipped and no goal was ever written down — means recovering the
-anchor before triaging anything: take the linked issue or task if there is
-one, else the PR body **as first opened** (`gh pr view <PR> --json body` shows
-the current one; the opening text is in the PR's edit history), and write it
-down as the baseline. If you reconstruct the baseline from the opening *diff*
-instead, it is `<base>...<the head SHA when the PR was opened>` — read that
-SHA from the PR timeline (`gh api repos/<o>/<r>/issues/<PR>/timeline`), not
-from the branch's first commit: a PR opened with several commits already
-contained all of them, and `<base>...<first commit>` makes the rest look like
-review-driven expansion. If the
-PR has already been through review-driven expansion, neither may describe what
-it set out to do — then ask the human what this PR is for, in one line, and
-use their answer. What you must not do is adopt the current body as the
-baseline by default: on an expanded PR that ratifies exactly the drift this
-section exists to catch.
+anchor before triaging anything. In order: the **linked issue or task**; else
+the PR body **as first opened**, from the body's edit history; else **ask the
+human** what this PR is for, in one line.
+
+Do not try to reconstruct the goal from the opening *diff*. Git and the API
+cannot tell you reliably where "opening" was — a PR created from several
+commits contains all of them, later commits are indistinguishable from them in
+the timeline, and each near-miss makes legitimate opening work read as
+review-driven expansion. A one-line answer from the human costs a minute and
+is actually correct. What you must not do is adopt the current body as the
+baseline by default: on a PR that has already been through review-driven
+expansion, that ratifies exactly the drift this section exists to catch.
 
 That is the whole point of writing it early. Round 0 is where an unanchored
 scope does the most damage and is hardest to see afterwards: absorb an
