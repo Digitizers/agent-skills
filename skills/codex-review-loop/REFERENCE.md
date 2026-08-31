@@ -224,7 +224,10 @@ Optionally reply in-thread with a one-line reason (esp. for a re-posted FP:
 gh pr checks <PR> -R <owner>/<repo>
 ```
 
-A round isn't done until CI is green AND Codex is clean on that HEAD.
+A round isn't done until CI is green AND Codex is clean on that HEAD — or,
+in the one documented exception, every finding it still returns at that HEAD
+at P0/P1/P2 is already in a terminal triage state, re-verified this round
+(SKILL.md -> Convergence).
 
 ---
 
@@ -242,8 +245,23 @@ A round isn't done until CI is green AND Codex is clean on that HEAD.
 ## Convergence checklist
 
 - [ ] Codex's **latest** review commit == PR **HEAD**.
-- [ ] Zero open inline findings (all `line:null`/re-anchored/verified-FP) at P0/P1/P2.
-- [ ] **Every OTHER reviewer bot's live findings triaged** (fixed / 👍 / 👎-with-rationale) — they don't gate convergence, but merging over an untriaged one ships it unexamined.
+- [ ] Every blocking (P0/P1/P2) finding live at HEAD is in a terminal state — fixed, stale (`line:null`/re-anchored), refuted, or tracked (SKILL.md → Convergence).
+- [ ] **Every OTHER reviewer bot's live findings triaged** — they don't gate convergence, but merging over an untriaged one ships it unexamined.
 - [ ] CI green on HEAD.
 - [ ] Any owner-decision findings escalated to the human, not guessed.
+- [ ] **Out-of-scope findings tracked, not built** — each recorded somewhere that outlives this checkout, and its own thread (or, for one raised in Round 0, the PR body) saying where it went.
+- [ ] **The stated goal still describes the diff** — if the branch outgrew its own description, scope crept: a human widens it, you don't.
 - [ ] → human review (once, at the end of the batch — not per round).
+
+### Tracking an out-of-scope finding
+
+Record the defect where it will outlive this checkout — `gh issue create`, the
+project's tracker, or (failing both) a comment on the PR quoting the finding
+and handing it to the human — then answer the finding's own thread with that
+reference, so the end-of-loop human review sees the decision. Reply in-thread
+for an inline comment (`pulls/<PR>/comments/<id>/replies`); a review body or a
+top-level issue comment has no reply thread, so answer with `gh pr comment`
+quoting the finding. React 👍 where the surface takes reactions — inline
+comments and issue comments do, review bodies do not, and there the written
+reply is the audit trail. During **Round 0** no PR exists yet: record it
+against the branch and name it in the PR body you write next.
