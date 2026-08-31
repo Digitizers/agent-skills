@@ -166,7 +166,7 @@ while it is still one commit:
   during Round 0; if it under-sells what the branch does, scope crept — either
   revert the excess or (if it is genuinely required) say so explicitly to the
   human and update the anchor.
-- **`git diff --stat main...HEAD` grows every round.** Fixes shrink or hold
+- **`git diff --stat <base>...HEAD` grows every round** — `<base>` being the PR's own base branch, which is not always `main`. Fixes shrink or hold
   the diff as often as they grow it. A monotonically growing diff across 3+
   rounds is expansion, not convergence — unless each round's growth is a fix
   and its regression test, which is the loop doing its job.
