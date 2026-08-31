@@ -225,8 +225,17 @@ licence for a general cleanup of the files it visits.
 
 Convergence means no actionable finding at a blocking severity (P0/P1/P2) — not
 that the reviewer has run out of suggestions. A reviewer will keep producing
-nits indefinitely; a PR that only accumulates non-blocking polish across a
-round is done, and the rest is tracked, not built. **Round 0 obeys every rule
+nits indefinitely; a PR that only accumulates non-blocking *polish* across a
+round is done, and that polish is tracked, not built.
+
+Severity decides when the loop may **stop**, never what is **in scope**. A
+defect this diff introduced is in scope at any severity, P3 included — fix it,
+with its regression test, exactly as you would a P1. What a low severity buys
+you is the right to stop looping *for it*: a real in-scope P3 is fixed on the
+round you see it, not carried; only a suggestion with no defect behind it is
+tracked or refuted. Shipping a known regression because the reviewer labelled
+it P3 is the failure this whole section is meant to prevent, wearing a
+severity badge. **Round 0 obeys every rule
 in this section too**, measured against the written-down goal rather than a PR
 body that does not exist yet — a local review before the PR exists is where an
 unbounded "improve it" pass is cheapest to start and most expensive to notice.
