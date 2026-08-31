@@ -246,4 +246,20 @@ A round isn't done until CI is green AND Codex is clean on that HEAD.
 - [ ] **Every OTHER reviewer bot's live findings triaged** (fixed / 👍 / 👎-with-rationale) — they don't gate convergence, but merging over an untriaged one ships it unexamined.
 - [ ] CI green on HEAD.
 - [ ] Any owner-decision findings escalated to the human, not guessed.
+- [ ] **Out-of-scope findings filed, not built** — each has a follow-up issue and a reply naming it (SKILL.md → Scope boundaries).
+- [ ] **The PR body still describes the diff.** Re-read it against `git diff --stat <base>...HEAD`; if the branch outgrew its own description, scope crept.
 - [ ] → human review (once, at the end of the batch — not per round).
+
+### Filing an out-of-scope finding
+
+```bash
+# 1. File it, capturing the URL.
+ISSUE=$(gh issue create -R <owner>/<repo>   --title "<the defect, not the finding's wording>"   --body "Raised by Codex on #<PR> but outside that PR's scope: <what it is, where, why it is real>.
+
+Not fixed in #<PR> because <pre-existing / unrelated surface / new feature>.")
+
+# 2. Reply on the finding so the human sees it was judged, not dropped.
+gh api -X POST repos/<owner>/<repo>/pulls/<PR>/comments/<COMMENT_ID>/replies   -f body="Real, but pre-existing and outside this PR's scope — tracked in ${ISSUE}."
+
+# 3. 👍 it (real finding), per §4.
+```

@@ -14,7 +14,7 @@ Claude develops, Codex reviews, Claude fixes — **in a loop** — the human rev
 2. **Round 0 — local pre-review of the built branch diff, when the Codex plugin is installed** (see below). If the PR **already exists**, skip this step and continue at step 3 — Round 0 is the pre-PR round only. Otherwise: fix its real findings, re-run the relevant test suite until green again — fixes invalidate step 1's green — then **push the post-Round-0 HEAD** and open the PR. A PR created by a non-pushing flow from the stale remote SHA omits the reviewed fixes.
 3. Trigger: `gh pr comment <PR> -R <owner>/<repo> --body "@codex review"`.
 4. Pull findings from **all three surfaces** (see REFERENCE) — and from **every reviewer bot on the PR, not just Codex** (Copilot and friends post to the same surfaces; see "Other reviewer bots"). **Verify each against HEAD** — Codex re-posts stale + false-positive findings every round.
-5. Fix the **real** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed).
+5. Fix the **real, in-scope** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed). A real finding that is *outside this PR's scope* gets a follow-up issue, not a commit — see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff).
 6. Re-trigger and repeat 3–5 until Codex says **"Didn't find any major issues"** *against the current HEAD*.
 7. **Human reviews once**, at the end. Never auto-merge a substantial PR without a nod.
 
@@ -85,9 +85,82 @@ Codex posts the **review object first** (state `COMMENTED`, body = a generic *"�
 
   **Count findings by SOURCE, not just by rule — "different bugs" is not a clean bill of health.** The test above clears you when each round finds something new, and that is the hole: findings can be genuinely distinct and still all trace to one artifact, in which case the artifact is the bug. Observed: seven rounds on a skill doc produced a mismatched sort, a `NULL` concatenation, a `nullglob` hole, and a swallowed exit status — four unrelated bugs by any normal reading, so the "different bugs = working" test said keep going. Six of the seven traced to **one optional shell snippet**, and all six were one class (a stage failing open). Deleting the snippet retired the class in a single commit; six rounds of patching had not. So tally each round's findings against the file, function, or block they came from — when one source keeps producing them, ask what that source is *for* and whether it earns its place, instead of fixing the next instance.
 - **Stay inside the project's constraints.** Match its language/runtime version matrix, lint rules, framework, and conventions. A "fix" that breaks the CI matrix (e.g. a newer-language builtin on an older runtime) is itself a new finding — check the CI config before writing the fix.
-- **Surface owner decisions; don't guess.** A finding whose fix is a product / design / security / API tradeoff goes to the human, not an autonomous guess.
-- **Escalate the mechanism by round 3–4, not round 7.** The signal is a *repeat*: a second round patching the same invariant, or a new finding sharing a **failure class** with an earlier one (both fail open, both trust an unchecked input, both re-derive the same unsound proof). Note it the round you see it, and if the next round confirms the pattern, put the decision to the human — by round 3–4, not round 7. **Co-location alone is not the signal**: two unrelated bugs in one file usually just means a small PR, and the "different bugs = the loop working" test above still governs. What escalates is a repeated class or a proof that cannot hold, never a shared line range. When it is real, ask whether the **proof mechanism** is wrong rather than the patch: patching an unsound mechanism converges slowly or never, while replacing it converges in one commit. The redesign itself is the human's call — deleting or restructuring someone's code is the one decision the loop cannot make for itself. This applies to any change, not only the distributed-state kind below: a doc that ships a paste-able command owns that command's failure modes exactly the way code does, and one fail-open surface per pipeline stage is a mechanism problem, not a series of typos.
+- **Surface owner decisions; don't guess.** A finding whose fix is a product / design / security / API tradeoff goes to the human, not an autonomous guess. So does any fix that would widen the PR — see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff).
+- **Escalate the mechanism by round 3–4, not round 7.** The signal is a *repeat*: a second round patching the same invariant, or a new finding sharing a **failure class** with an earlier one (both fail open, both trust an unchecked input, both re-derive the same unsound proof). Note it the round you see it, and if the next round confirms the pattern, put the decision to the human — by round 3–4, not round 7. **Co-location alone is not the signal**: two unrelated bugs in one file usually just means a small PR, and the "different bugs = the loop working" test above still governs. What escalates is a repeated class or a proof that cannot hold, never a shared line range. When it is real, ask whether the **proof mechanism** is wrong rather than the patch: patching an unsound mechanism converges slowly or never, while replacing it converges in one commit. The redesign itself is the human's call — deleting or restructuring someone's code is the one decision the loop cannot make for itself, and noticing that a mechanism is wrong is not permission to replace it (see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff)). This applies to any change, not only the distributed-state kind below: a doc that ships a paste-able command owns that command's failure modes exactly the way code does, and one fail-open surface per pipeline stage is a mechanism problem, not a series of typos.
 - **Fixes get their own commit, naming the round**, e.g. `fix(auth): register category before abilities (Codex round-3 P1)` — keeps the loop auditable.
+
+## Scope boundaries — the PR's subject is the diff
+
+The loop's strength is also its failure mode: a reviewer asked "what is wrong
+here?" always answers something, and answering everything turns a three-file
+fix into a redesign. **The scope of the PR is fixed when the PR opens.** Every
+round after that spends the budget the PR already has; it does not raise it.
+
+**In scope** — a defect the diff *introduces*, or one that makes the PR's own
+stated goal untrue. That is the whole list.
+
+**Out of scope by default** — file it, don't build it:
+
+| Finding | What the loop does |
+|---|---|
+| A pre-existing bug the diff merely sits next to | 👍, open a follow-up issue, reply with its number |
+| A refactor / rename / restructure "while we're here" | issue, not this PR |
+| A new feature, option, env knob or config surface the change didn't need | issue — new surface is new scope, however small |
+| Hardening against a failure mode the change did not create | issue, unless the PR's goal is that hardening |
+| A reviewer *preference* with no defect behind it | 👎 with a one-line rationale — a preference is not a finding |
+| Docs beyond the behaviour this PR changes | issue |
+
+Filing is a real outcome, not a dodge: `gh issue create` takes a minute, keeps
+the finding from being lost, and leaves the PR reviewable. Say so in the reply
+so the human sees the finding was *judged*, not dropped.
+
+**Keep each fix inside the blast radius of the change it repairs.** A fix that
+touches files the PR never touched, adds an abstraction, or is larger than the
+original change is not a fix — it is a second PR wearing a fix's commit
+message. Stop and put it to the human.
+
+### The tells, and what to do about them
+
+Check these at the end of every round — they are cheap and they catch drift
+while it is still one commit:
+
+- **The PR body no longer describes the diff.** The single most reliable
+  signal. Re-read the body you wrote at open; if it now under-sells what the
+  branch does, scope crept — either revert the excess or (if it is genuinely
+  required) say so explicitly to the human and update the body.
+- **`git diff --stat main...HEAD` grows every round.** Fixes shrink or hold
+  the diff as often as they grow it. A monotonically growing diff across 3+
+  rounds is expansion, not convergence.
+- **New files, new dependencies, or new configuration appear after round 1.**
+  Almost always scope; the change did not need them at open.
+- **You are writing design rationale in a fix commit.** If the commit needs a
+  paragraph arguing for a new approach, it is a design decision — human's
+  call, per the rule below.
+
+### Redesign is proposed, never performed
+
+The "escalate the mechanism by round 3–4" rule above says when to *notice*
+that patching won't converge. It does not authorise the rewrite. When the
+mechanism looks wrong: **stop the loop, write at most a paragraph** — what
+keeps failing, why the current mechanism cannot hold, what you would replace
+it with, and what it costs — and hand it to the human. Then do what they say.
+Deleting or restructuring working code, and expanding the change to reach a
+better design, are the two decisions the loop is not allowed to make for
+itself.
+
+The same boundary applies to the **fix-the-rule-not-the-line sweep**: the
+sweep covers every place that teaches *the same claim the finding is about*.
+It is not licence for a general cleanup of the files it visits.
+
+### Rounds are for defects, not for polish
+
+Convergence means no actionable finding at a blocking severity (P0/P1/P2) —
+not that the reviewer has run out of suggestions. A reviewer will keep
+producing nits indefinitely; a PR that only accumulates non-blocking polish
+across a round is done, and the remaining suggestions belong in an issue.
+**Round 0 obeys every rule in this section too** — a local review before the
+PR even exists is where an unbounded "improve it" pass is cheapest to start
+and most expensive to notice.
 
 ## Reviewer failure modes
 
