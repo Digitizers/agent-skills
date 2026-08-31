@@ -254,12 +254,31 @@ A round isn't done until CI is green AND Codex is clean on that HEAD.
 
 ```bash
 # 1. File it, capturing the URL.
-ISSUE=$(gh issue create -R <owner>/<repo>   --title "<the defect, not the finding's wording>"   --body "Raised by Codex on #<PR> but outside that PR's scope: <what it is, where, why it is real>.
+ISSUE=$(gh issue create -R <owner>/<repo> \
+  --title "<the defect, not the finding's wording>" \
+  --body "Raised by Codex on #<PR> but outside that PR's scope: <what it is, where, why it is real>.
 
 Not fixed in #<PR> because <pre-existing / unrelated surface / new feature>.")
 
 # 2. Reply on the finding so the human sees it was judged, not dropped.
-gh api -X POST repos/<owner>/<repo>/pulls/<PR>/comments/<COMMENT_ID>/replies   -f body="Real, but pre-existing and outside this PR's scope — tracked in ${ISSUE}."
+#    WHICH endpoint depends on the SURFACE the finding came from (§2): only
+#    inline review comments have a reply thread. A finding posted in a review
+#    body or a top-level issue comment has no compatible <COMMENT_ID> for the
+#    replies endpoint, so it is answered in the conversation instead.
 
-# 3. 👍 it (real finding), per §4.
+# (a) inline review comment -> reply in its thread:
+gh api -X POST repos/<owner>/<repo>/pulls/<PR>/comments/<COMMENT_ID>/replies \
+  -f body="Real, but pre-existing and outside this PR's scope — tracked in ${ISSUE}."
+
+# (b) review body / (c) issue comment -> conversation comment, QUOTING the
+#     finding so the reply stays attributable (a bare "tracked in #12" on a
+#     busy PR names nothing):
+gh pr comment <PR> -R <owner>/<repo> --body "> <first line of the finding>
+
+Real, but outside this PR's scope — tracked in ${ISSUE}."
+
+# 3. 👍 it (real finding), per §4 — react on the id of the surface it came
+#    from: pulls/comments/<id> for (a), issues/comments/<id> for (c). A review
+#    body (b) has no reactions endpoint; react on the bot's issue comment if
+#    there is one, otherwise the reply above is the audit trail.
 ```
