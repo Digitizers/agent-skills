@@ -22,10 +22,12 @@ Two things keep the measurement honest across a restart (#35):
   fact: a session on a 1M-context model whose settings still say 200000 was
   reported at ">= 300%". The largest context any single call in this
   transcript actually carried is a proven lower bound on the real window, so
-  the window grows to the smallest known tier that fits it. That evidence is
-  kept **per model** and read for the model of the most recent call: a
-  session that switches from a 1M model to a 200k one must not keep the 1M
-  denominator, or the guard goes quiet at the smaller model's ceiling.
+  the window grows to the smallest known tier that fits it. Evidence is
+  scoped to **this session and this model**: a transcript outlives the
+  settings it was written under (a resume can change the model, or the same
+  model's window mode), and evidence that outlives its window is the original
+  lie with the sign flipped — the guard goes quiet at the real ceiling. With
+  no evidence from this session, the configured window stands.
 
 Env:
   HANDOFF_THRESHOLD_PCT   default 70
@@ -101,14 +103,17 @@ def main() -> None:
     # fire earlier, never later — the safe direction for a handoff reminder.
     tokens = 0
     tail_tokens = 0
-    # Window evidence is a fact about a MODEL, not about a conversation: it
-    # survives compaction, but it does not transfer to a different model. A
-    # session that drops from a 1M model to a 200k one would otherwise keep
-    # the 1M denominator and stay silent at the smaller model's ceiling.
-    # Records with no model share one bucket, so a transcript that never
-    # names a model still accumulates evidence normally.
-    observed_by_model = {}
-    last_model = ""
+    # Window evidence is a fact about the RUN that produced it — its model and
+    # its window mode — not about the conversation. A transcript outlives both:
+    # a resume can pick a different model, or the same model with a different
+    # window mode (a 1M-context session and a 200k one log the same model id).
+    # Changing either takes a restart, and a restart means a new session id, so
+    # evidence is keyed by (session, model) and only this session's counts.
+    # Without evidence the configured window stands, which is the early-firing
+    # direction. Compaction does NOT reset it: the window is the same size on
+    # both sides of a compact boundary.
+    observed_by_run = {}
+    last_run = (session_id, "")
     with open(transcript, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             try:
@@ -126,9 +131,11 @@ def main() -> None:
             message = rec.get("message") or {}
             usage = message.get("usage")
             if usage:
-                last_model = message.get("model") or ""
-                observed_by_model[last_model] = max(
-                    observed_by_model.get(last_model, 0), context_sent(usage)
+                run = (rec.get("sessionId") or session_id,
+                       message.get("model") or "")
+                last_run = run
+                observed_by_run[run] = max(
+                    observed_by_run.get(run, 0), context_sent(usage)
                 )
                 tokens = context_sent(usage) + usage.get("output_tokens", 0)
                 tail_tokens = 0
@@ -144,7 +151,8 @@ def main() -> None:
 
     tokens += tail_tokens + payload_tokens
 
-    window = fit_window(window, observed_by_model.get(last_model, 0))
+    evidence = observed_by_run.get(last_run, 0) if last_run[0] == session_id else 0
+    window = fit_window(window, evidence)
 
     pct = tokens * 100.0 / window
     if pct < threshold:

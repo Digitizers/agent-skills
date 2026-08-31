@@ -201,4 +201,41 @@ OUT="$(run_guard "$WORK/in-swap-back.json")"
 [ -z "$OUT" ] || fail "dropped the active model's own window evidence"
 echo "PASS window evidence kept for the model it belongs to"
 
+# 16. Evidence does not outlive the session that produced it (Codex round-2
+#     P2): the same model id covers both a 1M and a 200k window mode, and
+#     changing mode takes a restart. A 600k call logged under the PREVIOUS
+#     session must not widen the window for this one — 150k is 75% of 200k.
+python3 - "$WORK/mode.jsonl" <<'PYX'
+import json, sys
+def usage(session, tokens):
+    return json.dumps({"sessionId": session,
+                       "message": {"model": "claude-opus-5",
+                                   "usage": {"input_tokens": tokens,
+                                             "cache_read_input_tokens": 0,
+                                             "cache_creation_input_tokens": 0}}})
+with open(sys.argv[1], "w") as f:
+    f.write(usage("cg-test-oldrun", 600000) + "\n")
+    f.write(usage("cg-test-mode", 150000) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-mode","hook_event_name":"UserPromptSubmit"}' "$WORK/mode.jsonl" > "$WORK/in-mode.json"
+OUT="$(run_guard "$WORK/in-mode.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "carried a previous session's window evidence across a restart"
+echo "PASS window evidence scoped to this session"
+
+# 17. ...and this session's own evidence still counts: the same 600k call,
+#     logged under the CURRENT session, is 60% of 1M and stays silent.
+python3 - "$WORK/mode-own.jsonl" <<'PYX'
+import json, sys
+with open(sys.argv[1], "w") as f:
+    f.write(json.dumps({"sessionId": "cg-test-mode-own",
+                        "message": {"model": "claude-opus-5",
+                                    "usage": {"input_tokens": 600000,
+                                              "cache_read_input_tokens": 0,
+                                              "cache_creation_input_tokens": 0}}}) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-mode-own","hook_event_name":"UserPromptSubmit"}' "$WORK/mode-own.jsonl" > "$WORK/in-mode-own.json"
+OUT="$(run_guard "$WORK/in-mode-own.json")"
+[ -z "$OUT" ] || fail "ignored this session's own window evidence"
+echo "PASS this session's own evidence still widens the window"
+
 echo "all context-guard tests passed"
