@@ -250,7 +250,7 @@ is already in a terminal triage state, re-verified this round
 - [ ] CI green on HEAD.
 - [ ] Any owner-decision findings escalated to the human, not guessed.
 - [ ] **Out-of-scope findings filed, not built** — each has a follow-up issue and a reply naming it (SKILL.md → Scope boundaries).
-- [ ] **The stated goal still describes the diff** — the goal written down before Round 0, which the PR body restates rather than replaces. If the body claims more than that goal, scope grew: a human widens it, you don't. Re-read it against `git diff --stat <base>...HEAD`; if the branch outgrew its own description, scope crept.
+- [ ] **The stated goal still describes the diff** — the goal written down before Round 0 (or recovered when joining an open PR), which the PR body restates rather than replaces. Compare with `git diff --stat $(gh pr view <PR> --json baseRefOid -q .baseRefOid)...HEAD` — a bare base branch name may be missing or stale locally. If the body claims more than the goal, scope grew: a human widens it, you don't. Re-read it against `git diff --stat <base>...HEAD`; if the branch outgrew its own description, scope crept.
 - [ ] → human review (once, at the end of the batch — not per round).
 
 ### Filing an out-of-scope finding

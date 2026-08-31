@@ -138,6 +138,18 @@ you were given, or two lines you write down before the first review round.
 written to describe whatever the diff has become is not an anchor, it is a
 mirror.
 
+**Joining a PR that is already open** — the loop's other entry point, where
+Round 0 is skipped and no goal was ever written down — means recovering the
+anchor before triaging anything: take the linked issue or task if there is
+one, else the PR body **as first opened** (`gh pr view <PR> --json body` shows
+the current one; the opening text is in the PR's edit history, and the opening
+diff is `<base>...<first commit>`), and write it down as the baseline. If the
+PR has already been through review-driven expansion, neither may describe what
+it set out to do — then ask the human what this PR is for, in one line, and
+use their answer. What you must not do is adopt the current body as the
+baseline by default: on an expanded PR that ratifies exactly the drift this
+section exists to catch.
+
 That is the whole point of writing it early. Round 0 is where an unanchored
 scope does the most damage and is hardest to see afterwards: absorb an
 adjacent refactor there and it lands in the opening diff, a body written from
@@ -191,7 +203,12 @@ while it is still one commit:
   revert the excess or, if it is genuinely required, say so explicitly to the
   human and let them widen the goal. Never quietly rewrite the anchor to fit
   the diff: that erases the only evidence the drift happened.
-- **`git diff --stat <base>...HEAD` grows every round** — `<base>` being the PR's own base branch, which is not always `main`. Fixes shrink or hold
+- **`git diff --stat <base>...HEAD` grows every round.** Resolve `<base>` to a
+  revision that exists and is current — `gh pr view <PR> --json baseRefOid -q
+  .baseRefOid`, or `git fetch -q origin <branch>` then `FETCH_HEAD`. A bare
+  branch name is read from the local repo only: it fails outright when there is
+  no local ref, and when the ref is stale it reports unrelated base movement as
+  your scope growth. Fixes shrink or hold
   the diff as often as they grow it. A monotonically growing diff across 3+
   rounds is expansion, not convergence — unless each round's growth is a fix
   and its regression test, which is the loop doing its job.
