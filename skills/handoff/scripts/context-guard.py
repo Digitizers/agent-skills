@@ -12,9 +12,28 @@ tool_response would exceed the OS per-argument limit ("Argument list too
 long") exactly on the large context-growing operations this hook exists to
 catch.
 
+Two things keep the measurement honest across a restart (#35):
+
+* A `system` / `compact_boundary` record means everything before it left the
+  context window. Baseline and tail are reset there, so the first hook event
+  after an auto-compact prices the compacted conversation, not the 600k one
+  it replaced.
+* The window size is evidence-led. `CONTEXT_WINDOW_TOKENS` is a floor, not a
+  fact: a session on a 1M-context model whose settings still say 200000 was
+  reported at ">= 300%". The largest context any single call in this
+  transcript actually carried is a proven lower bound on the real window, so
+  the window grows to the smallest known tier that fits it. The evidence is
+  the **most recent call only**, never a historical maximum: a transcript
+  outlives the settings it was written under (a resume can change the model,
+  or the same model's window mode, under the same session id), and evidence
+  that outlives its window is the original lie with the sign flipped — the
+  guard goes quiet at the real ceiling. The latest call cannot outlive
+  anything: whatever context it carried, the window in force right now is at
+  least that big.
+
 Env:
   HANDOFF_THRESHOLD_PCT   default 70
-  CONTEXT_WINDOW_TOKENS   default 200000
+  CONTEXT_WINDOW_TOKENS   default 200000 (a floor — see above)
 """
 import json
 import os
@@ -34,8 +53,34 @@ import tempfile
 # next hook event reads a usage block that prices this content exactly.
 
 
+# Known context-window tiers, ascending. A transcript proves the window is at
+# least as large as the biggest context a single call carried; the real window
+# is then the smallest tier that fits that evidence.
+WINDOW_TIERS = (200_000, 500_000, 1_000_000)
+
+
 def estimate_tokens(text: str) -> int:
     return len(text.encode("utf-8", "replace")) // 2
+
+
+def context_sent(usage: dict) -> int:
+    """Tokens sent INTO a call — its own output excluded. This is the part
+    bounded by the context window, so it is what proves the window's size."""
+    return (
+        usage.get("input_tokens", 0)
+        + usage.get("cache_read_input_tokens", 0)
+        + usage.get("cache_creation_input_tokens", 0)
+    )
+
+
+def fit_window(configured: int, observed: int) -> int:
+    """Widen a configured window that the latest call has already disproved."""
+    if observed <= configured:
+        return configured
+    for tier in WINDOW_TIERS:
+        if tier >= observed and tier > configured:
+            return tier
+    return observed
 
 
 def main() -> None:
@@ -60,6 +105,14 @@ def main() -> None:
     # fire earlier, never later — the safe direction for a handoff reminder.
     tokens = 0
     tail_tokens = 0
+    # Window evidence is the LATEST call's context, never a maximum over the
+    # transcript. Nothing in a transcript states the window size, and every
+    # attempt to keep an older observation alive needs an identity the file
+    # does not carry: a resume can change the model, or the same model's window
+    # mode, and it may reuse the session id while doing so. So no historical
+    # observation can be trusted to describe the window in force now — but the
+    # most recent call always does, because it fit.
+    latest_context = 0
     with open(transcript, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             try:
@@ -67,14 +120,18 @@ def main() -> None:
             except json.JSONDecodeError:
                 tail_tokens += estimate_tokens(line)
                 continue
-            usage = (rec.get("message") or {}).get("usage")
+            if rec.get("subtype") == "compact_boundary":
+                # Everything above this line is gone from the window. Keeping
+                # it is the restart lie: the pre-compact usage block priced a
+                # context that no longer exists.
+                tokens = 0
+                tail_tokens = 0
+                continue
+            message = rec.get("message") or {}
+            usage = message.get("usage")
             if usage:
-                tokens = (
-                    usage.get("input_tokens", 0)
-                    + usage.get("cache_read_input_tokens", 0)
-                    + usage.get("cache_creation_input_tokens", 0)
-                    + usage.get("output_tokens", 0)
-                )
+                latest_context = context_sent(usage)
+                tokens = latest_context + usage.get("output_tokens", 0)
                 tail_tokens = 0
             else:
                 tail_tokens += estimate_tokens(line)
@@ -88,9 +145,16 @@ def main() -> None:
 
     tokens += tail_tokens + payload_tokens
 
+    window = fit_window(window, latest_context)
+
     pct = tokens * 100.0 / window
     if pct < threshold:
         return
+    # The tail/payload estimate is a deliberate over-count, so a number above
+    # 100% is an artefact of the floor, not a measurement. Report the fact
+    # (past the threshold) without the impossible figure.
+    pct = min(pct, 100.0)
+    tokens = min(tokens, window)
 
     open(marker, "w").close()
     msg = (

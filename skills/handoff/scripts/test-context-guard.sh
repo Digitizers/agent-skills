@@ -99,4 +99,165 @@ OUT="$(run_guard "$WORK/in-emoji.json")"
 echo "$OUT" | grep -q "additionalContext" || fail "emoji payload under-counted"
 echo "PASS emoji-payload byte floor"
 
+# 10. A compact boundary drops everything above it (#35): 600k of recorded
+#     pre-compact context followed by a compact_boundary and a small tail is
+#     a ~0% window, not the ">100%" the hook used to report on the first
+#     prompt after a restart.
+mk_transcript "$WORK/compact.jsonl" 600000
+python3 - "$WORK/compact.jsonl" <<'PYX'
+import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"type": "system", "subtype": "compact_boundary",
+                        "compactMetadata": {"trigger": "auto",
+                                            "preTokens": 600000}}) + "\n")
+    f.write(json.dumps({"type": "user", "message": {"content": "resumed"}}) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-compact","hook_event_name":"UserPromptSubmit"}' "$WORK/compact.jsonl" > "$WORK/in-compact.json"
+OUT="$(run_guard "$WORK/in-compact.json")"
+[ -z "$OUT" ] || fail "fired on pre-compaction context after a compact boundary"
+echo "PASS compact-boundary resets the baseline"
+
+# 11. Post-compaction usage is still measured (#35): the reset must not
+#     blind the hook — 150k recorded AFTER the boundary still fires. The
+#     pre-compact side stays inside the 200k window here, so this tests the
+#     reset alone and not the window-widening of test 12.
+mk_transcript "$WORK/compact-hi.jsonl" 190000
+python3 - "$WORK/compact-hi.jsonl" <<'PYX'
+import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"type": "system", "subtype": "compact_boundary"}) + "\n")
+    f.write(json.dumps({"message": {"usage": {"input_tokens": 150000,
+                                              "cache_read_input_tokens": 0,
+                                              "cache_creation_input_tokens": 0}}}) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-compact-hi","hook_event_name":"UserPromptSubmit"}' "$WORK/compact-hi.jsonl" > "$WORK/in-compact-hi.json"
+OUT="$(run_guard "$WORK/in-compact-hi.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "compact boundary suppressed a real post-compaction threshold crossing"
+echo "PASS post-compaction usage still fires"
+
+# 12. A 1M-context session with the 200k default configured (#35): a single
+#     call carrying 600k of context proves the window is bigger than the
+#     setting says, so 600k is 60% of 1M — silent, not ">= 300%".
+mk_transcript "$WORK/wide.jsonl" 600000
+printf '{"transcript_path":"%s","session_id":"cg-test-wide","hook_event_name":"UserPromptSubmit"}' "$WORK/wide.jsonl" > "$WORK/in-wide.json"
+OUT="$(run_guard "$WORK/in-wide.json")"
+[ -z "$OUT" ] || fail "misread a 1M-context session as past the threshold"
+echo "PASS window widened by observed evidence"
+
+# 13. The reported figure is never impossible (#35): the over-counting byte
+#     floor may exceed the window, but the message must not claim >100%.
+mk_transcript "$WORK/over.jsonl" 199000
+python3 - "$WORK/over.jsonl" <<'PYX'
+import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"type": "user", "message": {"content": "z" * 400000}}) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-over","hook_event_name":"UserPromptSubmit"}' "$WORK/over.jsonl" > "$WORK/in-over.json"
+OUT="$(run_guard "$WORK/in-over.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "did not fire when well past the threshold"
+python3 - "$OUT" <<'PYX'
+import json, re, sys
+msg = json.loads(sys.argv[1])["hookSpecificOutput"]["additionalContext"]
+pct = float(re.search(r"~(\d+)% of \d+ tokens", msg).group(1))
+used = float(re.search(r"~(\d+) used", msg).group(1))
+window = float(re.search(r"of (\d+) tokens", msg).group(1))
+assert pct <= 100, msg
+assert used <= window, msg
+PYX
+echo "PASS never reports an impossible percentage"
+
+# 14. A model switch re-narrows the window (Codex round-1 P2): a session that
+#     carried 600k on a 1M model and then switched to a 200k model must be
+#     measured against 200k again — 150k on the small model is 75%, not 15%.
+mk_transcript "$WORK/swap.jsonl" 1
+python3 - "$WORK/swap.jsonl" <<'PYX'
+import json, sys
+def usage(model, tokens):
+    return json.dumps({"message": {"model": model,
+                                   "usage": {"input_tokens": tokens,
+                                             "cache_read_input_tokens": 0,
+                                             "cache_creation_input_tokens": 0}}})
+with open(sys.argv[1], "w") as f:
+    f.write(usage("claude-opus-5-1m", 600000) + "\n")
+    f.write(usage("claude-sonnet-5", 150000) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-swap","hook_event_name":"UserPromptSubmit"}' "$WORK/swap.jsonl" > "$WORK/in-swap.json"
+OUT="$(run_guard "$WORK/in-swap.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "kept a wider model's window after switching to a smaller model"
+echo "PASS model switch re-narrows the window"
+
+# 15. ...and switching back reads the wide window again: a 600k call on the 1M
+#     model is 60% of 1M, not 300% of 200k.
+python3 - "$WORK/swap.jsonl" <<'PYX'
+import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"message": {"model": "claude-opus-5-1m",
+                                    "usage": {"input_tokens": 600000,
+                                              "cache_read_input_tokens": 0,
+                                              "cache_creation_input_tokens": 0}}}) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-swap-back","hook_event_name":"UserPromptSubmit"}' "$WORK/swap.jsonl" > "$WORK/in-swap-back.json"
+OUT="$(run_guard "$WORK/in-swap-back.json")"
+[ -z "$OUT" ] || fail "dropped the active model's own window evidence"
+echo "PASS switching back reads the wide window again"
+
+# 16. Evidence does not outlive the session that produced it (Codex round-2
+#     P2): the same model id covers both a 1M and a 200k window mode, and
+#     a 600k call logged under a PREVIOUS session must not widen the window
+#     for this one — 150k is 75% of 200k.
+python3 - "$WORK/mode.jsonl" <<'PYX'
+import json, sys
+def usage(session, tokens):
+    return json.dumps({"sessionId": session,
+                       "message": {"model": "claude-opus-5",
+                                   "usage": {"input_tokens": tokens,
+                                             "cache_read_input_tokens": 0,
+                                             "cache_creation_input_tokens": 0}}})
+with open(sys.argv[1], "w") as f:
+    f.write(usage("cg-test-oldrun", 600000) + "\n")
+    f.write(usage("cg-test-mode", 150000) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-mode","hook_event_name":"UserPromptSubmit"}' "$WORK/mode.jsonl" > "$WORK/in-mode.json"
+OUT="$(run_guard "$WORK/in-mode.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "carried a previous session's window evidence across a restart"
+echo "PASS a previous session's call is not window evidence"
+
+# 17. ...and this session's own evidence still counts: the same 600k call,
+#     logged under the CURRENT session, is 60% of 1M and stays silent.
+python3 - "$WORK/mode-own.jsonl" <<'PYX'
+import json, sys
+with open(sys.argv[1], "w") as f:
+    f.write(json.dumps({"sessionId": "cg-test-mode-own",
+                        "message": {"model": "claude-opus-5",
+                                    "usage": {"input_tokens": 600000,
+                                              "cache_read_input_tokens": 0,
+                                              "cache_creation_input_tokens": 0}}}) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-mode-own","hook_event_name":"UserPromptSubmit"}' "$WORK/mode-own.jsonl" > "$WORK/in-mode-own.json"
+OUT="$(run_guard "$WORK/in-mode-own.json")"
+[ -z "$OUT" ] || fail "ignored this session's own window evidence"
+echo "PASS a live 600k call still widens the window"
+
+# 18. Evidence is the LATEST call, not a maximum (Codex round-3 P2): a resume
+#     into a smaller window mode can keep the SAME session id and the SAME
+#     model id, so nothing in the transcript distinguishes it. A 600k call
+#     earlier in this very session must not widen the window for a current
+#     150k call — 150k is 75% of 200k and must fire.
+python3 - "$WORK/resume.jsonl" <<'PYX'
+import json, sys
+def usage(tokens):
+    return json.dumps({"sessionId": "cg-test-resume",
+                       "message": {"model": "claude-opus-5",
+                                   "usage": {"input_tokens": tokens,
+                                             "cache_read_input_tokens": 0,
+                                             "cache_creation_input_tokens": 0}}})
+with open(sys.argv[1], "w") as f:
+    f.write(usage(600000) + "\n")
+    f.write(usage(150000) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-resume","hook_event_name":"UserPromptSubmit"}' "$WORK/resume.jsonl" > "$WORK/in-resume.json"
+OUT="$(run_guard "$WORK/in-resume.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "kept a pre-resume observation as window evidence"
+echo "PASS evidence is the latest call, not a maximum"
+
 echo "all context-guard tests passed"

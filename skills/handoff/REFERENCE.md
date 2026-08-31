@@ -27,7 +27,26 @@ on:
    early, never late. Any residual undercount (tokenizer byte-fallback on
    pathological input) self-heals: the next hook event reads a usage block
    that already prices this content exactly.
-3. At `>= HANDOFF_THRESHOLD_PCT` (default 70) of `CONTEXT_WINDOW_TOKENS`
+3. A `system` / `compact_boundary` record resets the running total: an
+   auto-compact leaves the pre-compact conversation in the transcript file
+   but not in the window, and pricing it after a restart is what made the
+   hook report ">100%" on the first prompt of a resumed session (#35).
+4. The window size is evidence-led. `CONTEXT_WINDOW_TOKENS` is treated as a
+   floor: the largest context any single call in the transcript actually
+   carried proves the window is at least that big, so a 1M-context session
+   left on the 200k default is measured against 1M instead of being read as
+   300% full. The evidence is the **most recent call only**, never a maximum
+   over the transcript: a transcript outlives the settings it was written
+   under — a resume can change the model, or the same model's window mode,
+   and may keep the same session id doing it — and an observation that
+   outlives its window is the same lie with the sign flipped, the guard going
+   quiet at the real ceiling. The latest call cannot outlive anything: the
+   window in force now is at least as big as the context it just carried.
+   A session whose latest call is small is measured against the configured
+   window, so on a 1M model the setting is still worth getting right. The reported percentage is also capped at 100 — the byte-floor
+   estimate deliberately over-counts, and an impossible figure is a lie even
+   when the nudge itself is warranted.
+5. At `>= HANDOFF_THRESHOLD_PCT` (default 70) of `CONTEXT_WINDOW_TOKENS`
    (default 200000) it emits `additionalContext` instructing the agent to
    invoke the handoff skill, and drops a per-session marker file so it fires
    **once per session**.
@@ -81,10 +100,15 @@ Tune via env (e.g. in the same settings file's `env` block):
 
 ### Caveats
 
-- The threshold is measured against a fixed window size; set
-  `CONTEXT_WINDOW_TOKENS` to match the model in use (200k default; 1M-context
-  models need the larger value or the hook fires far too early).
+- `CONTEXT_WINDOW_TOKENS` is a floor, not a fact — the hook widens it to the
+  smallest known tier (200k / 500k / 1M) that fits the largest context the
+  transcript proves was sent. Setting it correctly is still worth doing: the
+  evidence only arrives once a call has actually carried that much context,
+  so early in a 1M session the default can still fire early.
 - Auto-compaction may summarize the conversation before any user prompt if a
   single turn overshoots — the `PostToolUse` variant closes most of that gap.
+  After a compaction the count restarts from the boundary, so the hook can
+  legitimately fire a second time later in a long session (the marker is per
+  session, so in practice it fires once).
 - The marker file lives in the OS temp dir and is keyed by session id;
   deleting it re-arms the hook for the same session.
