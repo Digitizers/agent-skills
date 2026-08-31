@@ -226,7 +226,8 @@ gh pr checks <PR> -R <owner>/<repo>
 
 A round isn't done until CI is green AND Codex is clean on that HEAD — or,
 in the one documented exception, every finding it still returns at that HEAD
-is an already-filed out-of-scope defect (SKILL.md -> Convergence).
+is already in a terminal triage state, re-verified this round
+(SKILL.md -> Convergence).
 
 ---
 
