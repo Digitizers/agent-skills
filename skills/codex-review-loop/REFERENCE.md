@@ -245,12 +245,12 @@ at P0/P1/P2 is already in a terminal triage state, re-verified this round
 ## Convergence checklist
 
 - [ ] Codex's **latest** review commit == PR **HEAD**.
-- [ ] Zero open inline findings at P0/P1/P2 — every one in a terminal state: fixed, `line:null`/re-anchored (stale), verified-FP, or **filed** as out-of-scope with an issue + a reply naming it.
+- [ ] Zero open inline findings at P0/P1/P2 — every one in a terminal state: fixed, `line:null`/re-anchored (stale), verified-FP, or **filed** as out-of-scope with a durable record outside the PR + an audit trail naming it (SKILL.md -> Scope boundaries lists both fallbacks).
 - [ ] **Every OTHER reviewer bot's live findings triaged** (fixed / 👍 / 👎-with-rationale) — they don't gate convergence, but merging over an untriaged one ships it unexamined.
 - [ ] CI green on HEAD.
 - [ ] Any owner-decision findings escalated to the human, not guessed.
-- [ ] **Out-of-scope findings filed, not built** — each has a follow-up issue and, as its audit trail, either a reply naming it or (for one filed during Round 0, where no comment existed to reply to) a line in the PR body naming it (SKILL.md → Scope boundaries).
-- [ ] **The stated goal still describes the diff** — the goal written down before Round 0 (or recovered when joining an open PR), which the PR body restates rather than replaces. Size it with `gh pr view <PR> --json changedFiles,additions,deletions` — measured against the PR's own base by GitHub, so no local ref, fetch or full clone is involved. If the body claims more than the goal, scope grew: a human widens it, you don't. Re-read it against `git diff --stat <base>...HEAD`; if the branch outgrew its own description, scope crept.
+- [ ] **Out-of-scope findings filed, not built** — each has a durable record outside the PR (a GitHub issue, else the project's tracker, else handed to the human) and, as its audit trail, whichever applies: a reply naming it, or a line in the PR body naming it when the finding was filed during Round 0 and there was no comment to reply to (SKILL.md → Scope boundaries).
+- [ ] **The stated goal still describes the diff** — the goal written down before Round 0 (or recovered when joining an open PR), which the PR body restates rather than replaces. Size it with `gh pr view <PR> --json changedFiles,additions,deletions` — measured against the PR's own base by GitHub, so no local ref, fetch or full clone is involved. If the body claims more than the goal, or the branch outgrew its own description, scope crept: a human widens it, you don't.
 - [ ] → human review (once, at the end of the batch — not per round).
 
 ### Filing an out-of-scope finding

@@ -14,7 +14,7 @@ Claude develops, Codex reviews, Claude fixes — **in a loop** — the human rev
 2. **Round 0 — local pre-review of the built branch diff, when the Codex plugin is installed** (see below). If the PR **already exists**, skip this step and continue at step 3 — Round 0 is the pre-PR round only. Otherwise: fix its real findings, re-run the relevant test suite until green again — fixes invalidate step 1's green — then **push the post-Round-0 HEAD** and open the PR. A PR created by a non-pushing flow from the stale remote SHA omits the reviewed fixes.
 3. Trigger: `gh pr comment <PR> -R <owner>/<repo> --body "@codex review"`.
 4. Pull findings from **all three surfaces** (see REFERENCE) — and from **every reviewer bot on the PR, not just Codex** (Copilot and friends post to the same surfaces; see "Other reviewer bots"). **Verify each against HEAD** — Codex re-posts stale + false-positive findings every round.
-5. Fix the **real, in-scope** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed). A real finding that is *outside this PR's scope* gets a follow-up issue, not a commit — see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff).
+5. Fix the **real, in-scope** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed). A real finding that is *outside this PR's scope* gets tracked outside the PR, not a commit — see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff).
 6. Re-trigger and repeat 3–5 until Codex says **"Didn't find any major issues"** *against the current HEAD* — or until every **blocking** finding (P0/P1/P2) it still returns at that HEAD is one you have already put in a terminal triage state and re-verified this round — non-blocking nits never gated the loop and do not now (see [Convergence](#convergence)). Some findings can be re-posted for ever — a filed out-of-scope defect is still in the tree, and a false positive stays false — so a clean verdict is not always reachable; that is the only way the loop ends without one.
 7. **Human reviews once**, at the end. Never auto-merge a substantial PR without a nod.
 
@@ -54,7 +54,7 @@ Converged = Codex's latest review is against **current HEAD**, its findings have
 There are four terminal states, not two. A finding is cleared when it is
 **fixed**, **stale** (already handled in an earlier round), **a verified false
 positive** (👎 + rationale), **or filed** — real, out of this PR's scope, now
-carrying a follow-up issue and a reply naming it (see [Scope
+carrying a tracker reference and an audit trail naming it (see [Scope
 boundaries](#scope-boundaries--the-prs-subject-is-the-diff)). Filed is a
 *decision*, not a deferral of one, so it clears the finding for this PR the way
 a fix does.
@@ -72,11 +72,12 @@ Two consequences worth stating, because both have burned rounds:
   skill spends a whole section on.
 
   This is the only exception to "Codex's clean verdict ends the loop", and it
-  is narrow by construction: it needs **every** live finding at HEAD triaged
-  **this round** — re-read at HEAD, not remembered from an earlier one — and
-  each carrying its evidence (an issue number, a 👎 with a rationale, or a
-  fix). "I don't think that one matters" is not a terminal state, and neither
-  is a finding you have not re-read.
+  is narrow by construction: it needs **every blocking (P0/P1/P2)** finding
+  live at HEAD triaged **this round** — re-read at HEAD, not remembered from an
+  earlier one — and each carrying its evidence (a tracker reference, a 👎 with
+  a rationale, or a fix). "I don't think that one matters" is not a terminal
+  state, and neither is a finding you have not re-read. Non-blocking nits need
+  none of this; they never gated the loop.
 - **Filing is not a way out of a finding you simply don't want to fix.** It
   applies only where the scope table says it applies. A defect the diff
   *introduced* is in scope at any severity — filing that is shipping a known
@@ -172,7 +173,7 @@ goal untrue. That is the whole list.
 
 | Finding | What the loop does |
 |---|---|
-| A pre-existing bug the diff merely sits next to | 👍, open a follow-up issue, reply with its number |
+| A pre-existing bug the diff merely sits next to | 👍, track it outside the PR, reply with its reference |
 | A refactor / rename / restructure "while we're here" | issue, not this PR |
 | A new feature, option, env knob or config surface the change didn't need | issue — new surface is new scope, however small |
 | Hardening against a failure mode the change did not create | issue, unless the PR's goal is that hardening |
