@@ -166,4 +166,39 @@ assert used <= window, msg
 PYX
 echo "PASS never reports an impossible percentage"
 
+# 14. Window evidence is per model (Codex round-1 P2): a session that carried
+#     600k on a 1M model and then switched to a 200k model must be measured
+#     against 200k again — 150k on the small model is 75%, not 15%.
+mk_transcript "$WORK/swap.jsonl" 1
+python3 - "$WORK/swap.jsonl" <<'PYX'
+import json, sys
+def usage(model, tokens):
+    return json.dumps({"message": {"model": model,
+                                   "usage": {"input_tokens": tokens,
+                                             "cache_read_input_tokens": 0,
+                                             "cache_creation_input_tokens": 0}}})
+with open(sys.argv[1], "w") as f:
+    f.write(usage("claude-opus-5-1m", 600000) + "\n")
+    f.write(usage("claude-sonnet-5", 150000) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-swap","hook_event_name":"UserPromptSubmit"}' "$WORK/swap.jsonl" > "$WORK/in-swap.json"
+OUT="$(run_guard "$WORK/in-swap.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "kept a wider model's window after switching to a smaller model"
+echo "PASS window evidence scoped per model"
+
+# 15. ...and the evidence is still used for the model it belongs to: the same
+#     switch back to the 1M model reads 600k as 60% of 1M, not 300% of 200k.
+python3 - "$WORK/swap.jsonl" <<'PYX'
+import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"message": {"model": "claude-opus-5-1m",
+                                    "usage": {"input_tokens": 600000,
+                                              "cache_read_input_tokens": 0,
+                                              "cache_creation_input_tokens": 0}}}) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-swap-back","hook_event_name":"UserPromptSubmit"}' "$WORK/swap.jsonl" > "$WORK/in-swap-back.json"
+OUT="$(run_guard "$WORK/in-swap-back.json")"
+[ -z "$OUT" ] || fail "dropped the active model's own window evidence"
+echo "PASS window evidence kept for the model it belongs to"
+
 echo "all context-guard tests passed"

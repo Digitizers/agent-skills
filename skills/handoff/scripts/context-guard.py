@@ -22,7 +22,10 @@ Two things keep the measurement honest across a restart (#35):
   fact: a session on a 1M-context model whose settings still say 200000 was
   reported at ">= 300%". The largest context any single call in this
   transcript actually carried is a proven lower bound on the real window, so
-  the window grows to the smallest known tier that fits it.
+  the window grows to the smallest known tier that fits it. That evidence is
+  kept **per model** and read for the model of the most recent call: a
+  session that switches from a 1M model to a 200k one must not keep the 1M
+  denominator, or the guard goes quiet at the smaller model's ceiling.
 
 Env:
   HANDOFF_THRESHOLD_PCT   default 70
@@ -98,7 +101,14 @@ def main() -> None:
     # fire earlier, never later — the safe direction for a handoff reminder.
     tokens = 0
     tail_tokens = 0
-    observed_window = 0
+    # Window evidence is a fact about a MODEL, not about a conversation: it
+    # survives compaction, but it does not transfer to a different model. A
+    # session that drops from a 1M model to a 200k one would otherwise keep
+    # the 1M denominator and stay silent at the smaller model's ceiling.
+    # Records with no model share one bucket, so a transcript that never
+    # names a model still accumulates evidence normally.
+    observed_by_model = {}
+    last_model = ""
     with open(transcript, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             try:
@@ -113,9 +123,13 @@ def main() -> None:
                 tokens = 0
                 tail_tokens = 0
                 continue
-            usage = (rec.get("message") or {}).get("usage")
+            message = rec.get("message") or {}
+            usage = message.get("usage")
             if usage:
-                observed_window = max(observed_window, context_sent(usage))
+                last_model = message.get("model") or ""
+                observed_by_model[last_model] = max(
+                    observed_by_model.get(last_model, 0), context_sent(usage)
+                )
                 tokens = context_sent(usage) + usage.get("output_tokens", 0)
                 tail_tokens = 0
             else:
@@ -130,7 +144,7 @@ def main() -> None:
 
     tokens += tail_tokens + payload_tokens
 
-    window = fit_window(window, observed_window)
+    window = fit_window(window, observed_by_model.get(last_model, 0))
 
     pct = tokens * 100.0 / window
     if pct < threshold:
