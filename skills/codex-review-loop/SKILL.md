@@ -15,7 +15,7 @@ Claude develops, Codex reviews, Claude fixes — **in a loop** — the human rev
 3. Trigger: `gh pr comment <PR> -R <owner>/<repo> --body "@codex review"`.
 4. Pull findings from **all three surfaces** (see REFERENCE) — and from **every reviewer bot on the PR, not just Codex** (Copilot and friends post to the same surfaces; see "Other reviewer bots"). **Verify each against HEAD** — Codex re-posts stale + false-positive findings every round.
 5. Fix the **real, in-scope** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed). A real finding that is *outside this PR's scope* gets a follow-up issue, not a commit — see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff).
-6. Re-trigger and repeat 3–5 until Codex says **"Didn't find any major issues"** *against the current HEAD* — or until every finding it still returns at that HEAD is one you have already put in a terminal triage state and re-verified this round (see [Convergence](#convergence)). Some findings can be re-posted for ever — a filed out-of-scope defect is still in the tree, and a false positive stays false — so a clean verdict is not always reachable; that is the only way the loop ends without one.
+6. Re-trigger and repeat 3–5 until Codex says **"Didn't find any major issues"** *against the current HEAD* — or until every **blocking** finding (P0/P1/P2) it still returns at that HEAD is one you have already put in a terminal triage state and re-verified this round — non-blocking nits never gated the loop and do not now (see [Convergence](#convergence)). Some findings can be re-posted for ever — a filed out-of-scope defect is still in the tree, and a false positive stays false — so a clean verdict is not always reachable; that is the only way the loop ends without one.
 7. **Human reviews once**, at the end. Never auto-merge a substantial PR without a nod.
 
 ## Round 0 — local Codex pre-review
@@ -65,9 +65,11 @@ Two consequences worth stating, because both have burned rounds:
   loop when a clean verdict cannot.** A filed defect is still in the tree and a
   false positive stays false, so Codex can re-post either every round and never
   go clean. Answer it as before (the issue number, or the 👎 and its rationale)
-  and move on: it never re-enters the fix loop. When *every* finding left at
-  HEAD is in a terminal state, the PR is converged without a clean verdict and
-  step 6 stops there.
+  and move on: it never re-enters the fix loop. When every **blocking** finding
+  left at HEAD is in a terminal state, the PR is converged without a clean
+  verdict and step 6 stops there — a lingering nit is not a reason to keep
+  looping, and filing polish just to clear the list is the scope creep this
+  skill spends a whole section on.
 
   This is the only exception to "Codex's clean verdict ends the loop", and it
   is narrow by construction: it needs **every** live finding at HEAD triaged
@@ -268,7 +270,7 @@ A repo often has more than one reviewer bot. **Filter your polls by nothing narr
 
 Division of roles:
 
-- **Codex is the only convergence gate.** Its explicit clean verdict at HEAD ends the loop — as does the one documented exception in [Convergence](#convergence): every finding still live at HEAD is in a terminal triage state, re-verified this round and carrying its evidence. Nothing else does.
+- **Codex is the only convergence gate.** Its explicit clean verdict at HEAD ends the loop — as does the one documented exception in [Convergence](#convergence): every blocking finding still live at HEAD is in a terminal triage state, re-verified this round and carrying its evidence. Nothing else does.
 - **Copilot (and similar) are findings sources, never gates.** They emit no clean-verdict signal — silence is indistinguishable from "hasn't reviewed" — so they cannot prove convergence. But every live finding of theirs must be triaged (fix / 👍 / 👎-with-rationale) **before merge**, same as a Codex finding. Add their triage to the convergence checklist, not to the convergence definition.
 
 ## Design the evidence model before the code (distributed-state work)

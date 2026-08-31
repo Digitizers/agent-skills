@@ -226,7 +226,7 @@ gh pr checks <PR> -R <owner>/<repo>
 
 A round isn't done until CI is green AND Codex is clean on that HEAD — or,
 in the one documented exception, every finding it still returns at that HEAD
-is already in a terminal triage state, re-verified this round
+at P0/P1/P2 is already in a terminal triage state, re-verified this round
 (SKILL.md -> Convergence).
 
 ---
