@@ -43,7 +43,26 @@ Triage its findings exactly like cloud findings: verify against the code, fix th
 
 ## Convergence
 
-Converged = Codex's latest review is against **current HEAD**, its findings have **fully landed** (see the race below), *and* none is a new actionable finding at any blocking severity (P0/P1/P2). Do **not** declare convergence off a single comment surface — a PR clean on `/reviews` can still carry an un-triaged finding on the inline or issue surface.
+Converged = Codex's latest review is against **current HEAD**, its findings have **fully landed** (see the race below), *and* every blocking finding (P0/P1/P2) has reached a **terminal triage state**. Do **not** declare convergence off a single comment surface — a PR clean on `/reviews` can still carry an un-triaged finding on the inline or issue surface.
+
+There are four terminal states, not two. A finding is cleared when it is
+**fixed**, **stale** (already handled in an earlier round), **a verified false
+positive** (👎 + rationale), **or filed** — real, out of this PR's scope, now
+carrying a follow-up issue and a reply naming it (see [Scope
+boundaries](#scope-boundaries--the-prs-subject-is-the-diff)). Filed is a
+*decision*, not a deferral of one, so it clears the finding for this PR the way
+a fix does.
+
+Two consequences worth stating, because both have burned rounds:
+
+- **A filed finding may come back.** The defect is still in the tree, so a
+  later round can re-post it with a new comment id. That is not a new finding
+  and not a regression: reply with the issue number again, 👍, and move on. It
+  never re-enters the fix loop and never blocks convergence.
+- **Filing is not a way out of a finding you simply don't want to fix.** It
+  applies only where the scope table says it applies. A defect the diff
+  *introduced* is in scope at any severity — filing that is shipping a known
+  bug, and the human review at the end is entitled to say so.
 
 **Codex posts its outcome on different surfaces depending on the result — poll BOTH or you will misread the loop:**
 

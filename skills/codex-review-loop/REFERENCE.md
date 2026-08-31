@@ -242,7 +242,7 @@ A round isn't done until CI is green AND Codex is clean on that HEAD.
 ## Convergence checklist
 
 - [ ] Codex's **latest** review commit == PR **HEAD**.
-- [ ] Zero open inline findings (all `line:null`/re-anchored/verified-FP) at P0/P1/P2.
+- [ ] Zero open inline findings at P0/P1/P2 — every one in a terminal state: fixed, `line:null`/re-anchored (stale), verified-FP, or **filed** as out-of-scope with an issue + a reply naming it.
 - [ ] **Every OTHER reviewer bot's live findings triaged** (fixed / 👍 / 👎-with-rationale) — they don't gate convergence, but merging over an untriaged one ships it unexamined.
 - [ ] CI green on HEAD.
 - [ ] Any owner-decision findings escalated to the human, not guessed.
