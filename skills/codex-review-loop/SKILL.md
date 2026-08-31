@@ -122,13 +122,21 @@ fix into a redesign. **The scope is fixed before the first review round, and
 no round raises it.**
 
 The anchor is *what the branch set out to do* — the issue it closes, the task
-you were given, or two lines you write down before reviewing. Once the PR
-exists its body is that anchor; **before then — which is exactly when Round 0
-runs — write the goal down first.** Round 0 is where an unanchored scope does
-the most damage and is hardest to see afterwards: absorb an adjacent refactor
-there and it lands in the opening diff, the PR body you write next describes
-the expanded work as if it were always the plan, and every drift check below
-compares the branch to that inflated baseline and finds nothing wrong.
+you were given, or two lines you write down before the first review round.
+**Write it down before Round 0**, which runs before any PR exists, and then
+**keep it**: the PR body restates that goal, it does not replace it. A body
+written to describe whatever the diff has become is not an anchor, it is a
+mirror.
+
+That is the whole point of writing it early. Round 0 is where an unanchored
+scope does the most damage and is hardest to see afterwards: absorb an
+adjacent refactor there and it lands in the opening diff, a body written from
+the diff describes the expanded work as if it were always the plan, and every
+drift check below then compares the branch to that inflated baseline and finds
+nothing wrong. So when the body would have to claim more than the original
+goal, that *is* the drift signal — the scope grew, and growing it is the
+human's call: say so explicitly and get a yes before the wider goal becomes
+the new baseline.
 
 **In scope** — a defect the diff *introduces*, or one that makes the stated
 goal untrue. That is the whole list.
@@ -168,10 +176,11 @@ Check these at the end of every round — they are cheap and they catch drift
 while it is still one commit:
 
 - **The stated goal no longer describes the diff.** The single most reliable
-  signal. Re-read the anchor — the PR body after open, the written-down goal
-  during Round 0; if it under-sells what the branch does, scope crept — either
-  revert the excess or (if it is genuinely required) say so explicitly to the
-  human and update the anchor.
+  signal. Re-read the goal you wrote before Round 0 (the PR body should be
+  restating it); if it under-sells what the branch does, scope crept — either
+  revert the excess or, if it is genuinely required, say so explicitly to the
+  human and let them widen the goal. Never quietly rewrite the anchor to fit
+  the diff: that erases the only evidence the drift happened.
 - **`git diff --stat <base>...HEAD` grows every round** — `<base>` being the PR's own base branch, which is not always `main`. Fixes shrink or hold
   the diff as often as they grow it. A monotonically growing diff across 3+
   rounds is expansion, not convergence — unless each round's growth is a fix
