@@ -99,4 +99,71 @@ OUT="$(run_guard "$WORK/in-emoji.json")"
 echo "$OUT" | grep -q "additionalContext" || fail "emoji payload under-counted"
 echo "PASS emoji-payload byte floor"
 
+# 10. A compact boundary drops everything above it (#35): 600k of recorded
+#     pre-compact context followed by a compact_boundary and a small tail is
+#     a ~0% window, not the ">100%" the hook used to report on the first
+#     prompt after a restart.
+mk_transcript "$WORK/compact.jsonl" 600000
+python3 - "$WORK/compact.jsonl" <<'PYX'
+import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"type": "system", "subtype": "compact_boundary",
+                        "compactMetadata": {"trigger": "auto",
+                                            "preTokens": 600000}}) + "\n")
+    f.write(json.dumps({"type": "user", "message": {"content": "resumed"}}) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-compact","hook_event_name":"UserPromptSubmit"}' "$WORK/compact.jsonl" > "$WORK/in-compact.json"
+OUT="$(run_guard "$WORK/in-compact.json")"
+[ -z "$OUT" ] || fail "fired on pre-compaction context after a compact boundary"
+echo "PASS compact-boundary resets the baseline"
+
+# 11. Post-compaction usage is still measured (#35): the reset must not
+#     blind the hook — 150k recorded AFTER the boundary still fires. The
+#     pre-compact side stays inside the 200k window here, so this tests the
+#     reset alone and not the window-widening of test 12.
+mk_transcript "$WORK/compact-hi.jsonl" 190000
+python3 - "$WORK/compact-hi.jsonl" <<'PYX'
+import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"type": "system", "subtype": "compact_boundary"}) + "\n")
+    f.write(json.dumps({"message": {"usage": {"input_tokens": 150000,
+                                              "cache_read_input_tokens": 0,
+                                              "cache_creation_input_tokens": 0}}}) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-compact-hi","hook_event_name":"UserPromptSubmit"}' "$WORK/compact-hi.jsonl" > "$WORK/in-compact-hi.json"
+OUT="$(run_guard "$WORK/in-compact-hi.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "compact boundary suppressed a real post-compaction threshold crossing"
+echo "PASS post-compaction usage still fires"
+
+# 12. A 1M-context session with the 200k default configured (#35): a single
+#     call carrying 600k of context proves the window is bigger than the
+#     setting says, so 600k is 60% of 1M — silent, not ">= 300%".
+mk_transcript "$WORK/wide.jsonl" 600000
+printf '{"transcript_path":"%s","session_id":"cg-test-wide","hook_event_name":"UserPromptSubmit"}' "$WORK/wide.jsonl" > "$WORK/in-wide.json"
+OUT="$(run_guard "$WORK/in-wide.json")"
+[ -z "$OUT" ] || fail "misread a 1M-context session as past the threshold"
+echo "PASS window widened by observed evidence"
+
+# 13. The reported figure is never impossible (#35): the over-counting byte
+#     floor may exceed the window, but the message must not claim >100%.
+mk_transcript "$WORK/over.jsonl" 199000
+python3 - "$WORK/over.jsonl" <<'PYX'
+import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"type": "user", "message": {"content": "z" * 400000}}) + "\n")
+PYX
+printf '{"transcript_path":"%s","session_id":"cg-test-over","hook_event_name":"UserPromptSubmit"}' "$WORK/over.jsonl" > "$WORK/in-over.json"
+OUT="$(run_guard "$WORK/in-over.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "did not fire when well past the threshold"
+python3 - "$OUT" <<'PYX'
+import json, re, sys
+msg = json.loads(sys.argv[1])["hookSpecificOutput"]["additionalContext"]
+pct = float(re.search(r"~(\d+)% of \d+ tokens", msg).group(1))
+used = float(re.search(r"~(\d+) used", msg).group(1))
+window = float(re.search(r"of (\d+) tokens", msg).group(1))
+assert pct <= 100, msg
+assert used <= window, msg
+PYX
+echo "PASS never reports an impossible percentage"
+
 echo "all context-guard tests passed"
