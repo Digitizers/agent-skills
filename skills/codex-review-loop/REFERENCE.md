@@ -247,7 +247,7 @@ A round isn't done until CI is green AND Codex is clean on that HEAD.
 - [ ] CI green on HEAD.
 - [ ] Any owner-decision findings escalated to the human, not guessed.
 - [ ] **Out-of-scope findings filed, not built** — each has a follow-up issue and a reply naming it (SKILL.md → Scope boundaries).
-- [ ] **The PR body still describes the diff.** Re-read it against `git diff --stat <base>...HEAD`; if the branch outgrew its own description, scope crept.
+- [ ] **The stated goal still describes the diff** (the PR body after open; the written-down goal during Round 0). Re-read it against `git diff --stat <base>...HEAD`; if the branch outgrew its own description, scope crept.
 - [ ] → human review (once, at the end of the batch — not per round).
 
 ### Filing an out-of-scope finding

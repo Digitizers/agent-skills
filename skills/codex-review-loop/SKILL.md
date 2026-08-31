@@ -32,7 +32,7 @@ Round 0 runs through the plugin's slash commands only. Do **not** shell out to `
 
 **Round 0 is an accelerator, never a blocker.** If the review has not returned within ~10 minutes, or the plugin's commands are unavailable in the session, kill it and fall back to the no-Round-0 path: push the branch, open the PR (noting the skip in its body), then continue the cloud loop from step 3 — the cloud reviewer remains the convergence gate either way.
 
-Triage its findings exactly like cloud findings: verify against the code, fix the real ones with regression tests, ignore false positives. Re-run the relevant test suite until it is green again — fixes invalidate the pre-Round-0 green. Then push the post-Round-0 HEAD, open the PR, and continue from step 3.
+Triage its findings exactly like cloud findings: verify against the code, fix the real **in-scope** ones with regression tests, ignore false positives. There is no PR body to anchor scope against yet, so write the branch's goal down before triaging — see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff). Re-run the relevant test suite until it is green again — fixes invalidate the pre-Round-0 green. Then push the post-Round-0 HEAD, open the PR, and continue from step 3.
 
 **Why:** the cloud bot's round-trip is minutes per round, and its early rounds are dominated by findings a local pass catches in seconds. The local and cloud reviewers share a model family, so a local pre-pass mostly *de-duplicates* the first cloud rounds rather than adding a new defect class — that is exactly the point: spend the cheap reviewer first.
 
@@ -112,11 +112,20 @@ Codex posts the **review object first** (state `COMMENTED`, body = a generic *"�
 
 The loop's strength is also its failure mode: a reviewer asked "what is wrong
 here?" always answers something, and answering everything turns a three-file
-fix into a redesign. **The scope of the PR is fixed when the PR opens.** Every
-round after that spends the budget the PR already has; it does not raise it.
+fix into a redesign. **The scope is fixed before the first review round, and
+no round raises it.**
 
-**In scope** — a defect the diff *introduces*, or one that makes the PR's own
-stated goal untrue. That is the whole list.
+The anchor is *what the branch set out to do* — the issue it closes, the task
+you were given, or two lines you write down before reviewing. Once the PR
+exists its body is that anchor; **before then — which is exactly when Round 0
+runs — write the goal down first.** Round 0 is where an unanchored scope does
+the most damage and is hardest to see afterwards: absorb an adjacent refactor
+there and it lands in the opening diff, the PR body you write next describes
+the expanded work as if it were always the plan, and every drift check below
+compares the branch to that inflated baseline and finds nothing wrong.
+
+**In scope** — a defect the diff *introduces*, or one that makes the stated
+goal untrue. That is the whole list.
 
 **Out of scope by default** — file it, don't build it:
 
@@ -152,10 +161,11 @@ to catch.
 Check these at the end of every round — they are cheap and they catch drift
 while it is still one commit:
 
-- **The PR body no longer describes the diff.** The single most reliable
-  signal. Re-read the body you wrote at open; if it now under-sells what the
-  branch does, scope crept — either revert the excess or (if it is genuinely
-  required) say so explicitly to the human and update the body.
+- **The stated goal no longer describes the diff.** The single most reliable
+  signal. Re-read the anchor — the PR body after open, the written-down goal
+  during Round 0; if it under-sells what the branch does, scope crept — either
+  revert the excess or (if it is genuinely required) say so explicitly to the
+  human and update the anchor.
 - **`git diff --stat main...HEAD` grows every round.** Fixes shrink or hold
   the diff as often as they grow it. A monotonically growing diff across 3+
   rounds is expansion, not convergence — unless each round's growth is a fix
@@ -189,9 +199,10 @@ Convergence means no actionable finding at a blocking severity (P0/P1/P2) —
 not that the reviewer has run out of suggestions. A reviewer will keep
 producing nits indefinitely; a PR that only accumulates non-blocking polish
 across a round is done, and the remaining suggestions belong in an issue.
-**Round 0 obeys every rule in this section too** — a local review before the
-PR even exists is where an unbounded "improve it" pass is cheapest to start
-and most expensive to notice.
+**Round 0 obeys every rule in this section too**, measured against the
+written-down goal above rather than a PR body that does not exist yet — a
+local review before the PR exists is where an unbounded "improve it" pass is
+cheapest to start and most expensive to notice.
 
 ## Reviewer failure modes
 
