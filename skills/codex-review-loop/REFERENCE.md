@@ -250,7 +250,7 @@ at P0/P1/P2 is already in a terminal triage state, re-verified this round
 - [ ] CI green on HEAD.
 - [ ] Any owner-decision findings escalated to the human, not guessed.
 - [ ] **Out-of-scope findings filed, not built** — each has a follow-up issue and, as its audit trail, either a reply naming it or (for one filed during Round 0, where no comment existed to reply to) a line in the PR body naming it (SKILL.md → Scope boundaries).
-- [ ] **The stated goal still describes the diff** — the goal written down before Round 0 (or recovered when joining an open PR), which the PR body restates rather than replaces. Compare with `BASE=$(gh pr view <PR> --json baseRefOid -q .baseRefOid); git fetch -q origin "$BASE" && git diff --stat "$BASE"...HEAD` — `gh` prints the OID but does not download it, and a bare base branch name may be missing or stale locally (shallow clones have neither). If the body claims more than the goal, scope grew: a human widens it, you don't. Re-read it against `git diff --stat <base>...HEAD`; if the branch outgrew its own description, scope crept.
+- [ ] **The stated goal still describes the diff** — the goal written down before Round 0 (or recovered when joining an open PR), which the PR body restates rather than replaces. Size it with `gh pr view <PR> --json changedFiles,additions,deletions` — measured against the PR's own base by GitHub, so no local ref, fetch or full clone is involved. If the body claims more than the goal, scope grew: a human widens it, you don't. Re-read it against `git diff --stat <base>...HEAD`; if the branch outgrew its own description, scope crept.
 - [ ] → human review (once, at the end of the batch — not per round).
 
 ### Filing an out-of-scope finding

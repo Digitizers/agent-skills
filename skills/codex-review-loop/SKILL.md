@@ -216,13 +216,12 @@ while it is still one commit:
   revert the excess or, if it is genuinely required, say so explicitly to the
   human and let them widen the goal. Never quietly rewrite the anchor to fit
   the diff: that erases the only evidence the drift happened.
-- **`git diff --stat <base>...HEAD` grows every round.** Resolve `<base>` to a
-  revision that is current *and present locally*: take the OID
-  (`gh pr view <PR> --json baseRefOid -q .baseRefOid`) and `git fetch` it, or
-  `git fetch -q origin <branch>` and use `FETCH_HEAD`. `gh` prints the OID but
-  does not download it, and a bare branch name is read from the local repo
-  only — it fails outright with no local ref (a shallow CI checkout has none),
-  and a stale ref reports unrelated base movement as your scope growth. Fixes shrink or hold
+- **The diff grows every round.** Ask GitHub for the size rather than
+  computing it locally — `gh pr view <PR> --json changedFiles,additions,deletions`
+  (and `gh pr diff <PR>` for the content). It is already measured against the
+  PR's own base, needs no local objects, and cannot be thrown by a missing
+  ref, a stale ref, or a shallow checkout — three ways the obvious
+  `git diff <base>...HEAD` fails or silently measures the wrong thing. Fixes shrink or hold
   the diff as often as they grow it. A monotonically growing diff across 3+
   rounds is expansion, not convergence — unless each round's growth is a fix
   and its regression test, which is the loop doing its job.
