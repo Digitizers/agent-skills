@@ -133,10 +133,19 @@ Filing is a real outcome, not a dodge: `gh issue create` takes a minute, keeps
 the finding from being lost, and leaves the PR reviewable. Say so in the reply
 so the human sees the finding was *judged*, not dropped.
 
-**Keep each fix inside the blast radius of the change it repairs.** A fix that
-touches files the PR never touched, adds an abstraction, or is larger than the
-original change is not a fix — it is a second PR wearing a fix's commit
-message. Stop and put it to the human.
+**Keep each fix inside the blast radius of the change it repairs.** The test
+is **necessity**, not membership in the opening diff: a fix may touch whatever
+repairing the defect actually requires — a caller the change broke, a new test
+file for the regression test, a doc that states the behaviour being corrected.
+What it may not do is carry passengers. A fix that introduces an abstraction
+the repair does not need, edits a file for reasons unrelated to the defect, or
+is substantially larger than the change it repairs, is a second PR wearing a
+fix's commit message — stop and put it to the human.
+
+Read the growth the same way: the diff-stat tell below asks *why* a file
+joined the diff, not *whether* one did. "The regression test needed a new
+file" is an answer; "I was in there anyway" is the drift this section exists
+to catch.
 
 ### The tells, and what to do about them
 
@@ -149,9 +158,12 @@ while it is still one commit:
   required) say so explicitly to the human and update the body.
 - **`git diff --stat main...HEAD` grows every round.** Fixes shrink or hold
   the diff as often as they grow it. A monotonically growing diff across 3+
-  rounds is expansion, not convergence.
+  rounds is expansion, not convergence — unless each round's growth is a fix
+  and its regression test, which is the loop doing its job.
 - **New files, new dependencies, or new configuration appear after round 1.**
-  Almost always scope; the change did not need them at open.
+  Ask what put them there. A test file a regression test needed is the loop
+  working; a dependency or a config surface the change did not need at open is
+  scope.
 - **You are writing design rationale in a fix commit.** If the commit needs a
   paragraph arguing for a new approach, it is a design decision — human's
   call, per the rule below.
