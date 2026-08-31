@@ -15,7 +15,7 @@ Claude develops, Codex reviews, Claude fixes — **in a loop** — the human rev
 3. Trigger: `gh pr comment <PR> -R <owner>/<repo> --body "@codex review"`.
 4. Pull findings from **all three surfaces** (see REFERENCE) — and from **every reviewer bot on the PR, not just Codex** (Copilot and friends post to the same surfaces; see "Other reviewer bots"). **Verify each against HEAD** — Codex re-posts stale + false-positive findings every round.
 5. Fix the **real, in-scope** ones — each with a regression test, its own commit. React 👍 to real findings, 👎 to false positives (so the end-of-loop human review sees they were examined, not missed). A real finding that is *outside this PR's scope* gets a follow-up issue, not a commit — see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff).
-6. Re-trigger and repeat 3–5 until Codex says **"Didn't find any major issues"** *against the current HEAD*.
+6. Re-trigger and repeat 3–5 until Codex says **"Didn't find any major issues"** *against the current HEAD* — or until the only findings it still returns are ones already in a terminal triage state (see [Convergence](#convergence)). A **filed** out-of-scope defect is still in the tree, so Codex can re-report it for ever; that one case ends the loop without a clean verdict, and nothing else does.
 7. **Human reviews once**, at the end. Never auto-merge a substantial PR without a nod.
 
 ## Round 0 — local Codex pre-review
@@ -38,7 +38,7 @@ Triage its findings exactly like cloud findings: verify against the code, fix th
 
 **What Round 0 is NOT:**
 
-- **Not a convergence gate.** It reviews local state, not the PR, and emits no authoritative clean verdict. Convergence is decided **only** by the cloud bot's clean verdict at HEAD, per the Convergence section — a clean local review never justifies skipping the cloud loop or merging.
+- **Not a convergence gate.** It reviews local state, not the PR, and emits no authoritative clean verdict. Convergence is decided **only** by the cloud loop, per the Convergence section — a clean local review never justifies skipping it or merging.
 - **Not a substitute for the fix rules.** Round-0 fixes follow the same discipline: regression test per code fix, fix-the-rule-not-the-line, own commit.
 
 ## Convergence
@@ -55,10 +55,16 @@ a fix does.
 
 Two consequences worth stating, because both have burned rounds:
 
-- **A filed finding may come back.** The defect is still in the tree, so a
-  later round can re-post it with a new comment id. That is not a new finding
-  and not a regression: reply with the issue number again, 👍, and move on. It
-  never re-enters the fix loop and never blocks convergence.
+- **A filed finding may come back — and it stops the loop needing a clean
+  verdict.** The defect is still in the tree, so Codex can re-post it every
+  round for ever and never go clean. Reply with the issue number again, 👍, and
+  move on: it never re-enters the fix loop. When the *only* findings left at
+  HEAD are filed ones, the PR is converged without a clean verdict, and step 6
+  of the loop stops there. This is the single exception to "Codex's clean
+  verdict ends the loop" — and it is narrow on purpose: it applies only to
+  findings that already carry an issue and a reply naming it, each re-verified
+  at HEAD this round. A finding you merely disagree with is not filed, and an
+  un-triaged finding is not filed either.
 - **Filing is not a way out of a finding you simply don't want to fix.** It
   applies only where the scope table says it applies. A defect the diff
   *introduced* is in scope at any severity — filing that is shipping a known
@@ -223,7 +229,7 @@ A repo often has more than one reviewer bot. **Filter your polls by nothing narr
 
 Division of roles:
 
-- **Codex is the only convergence gate.** Its explicit clean verdict at HEAD ends the loop — nothing else does.
+- **Codex is the only convergence gate.** Its explicit clean verdict at HEAD ends the loop — as does the one documented exception in [Convergence](#convergence): every remaining finding is a **filed** out-of-scope defect, re-verified at HEAD and answered with its issue number. Nothing else does.
 - **Copilot (and similar) are findings sources, never gates.** They emit no clean-verdict signal — silence is indistinguishable from "hasn't reviewed" — so they cannot prove convergence. But every live finding of theirs must be triaged (fix / 👍 / 👎-with-rationale) **before merge**, same as a Codex finding. Add their triage to the convergence checklist, not to the convergence definition.
 
 ## Design the evidence model before the code (distributed-state work)

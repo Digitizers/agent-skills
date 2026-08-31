@@ -224,7 +224,9 @@ Optionally reply in-thread with a one-line reason (esp. for a re-posted FP:
 gh pr checks <PR> -R <owner>/<repo>
 ```
 
-A round isn't done until CI is green AND Codex is clean on that HEAD.
+A round isn't done until CI is green AND Codex is clean on that HEAD — or,
+in the one documented exception, every finding it still returns at that HEAD
+is an already-filed out-of-scope defect (SKILL.md -> Convergence).
 
 ---
 
