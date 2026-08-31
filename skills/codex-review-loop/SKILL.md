@@ -142,8 +142,13 @@ mirror.
 Round 0 is skipped and no goal was ever written down — means recovering the
 anchor before triaging anything: take the linked issue or task if there is
 one, else the PR body **as first opened** (`gh pr view <PR> --json body` shows
-the current one; the opening text is in the PR's edit history, and the opening
-diff is `<base>...<first commit>`), and write it down as the baseline. If the
+the current one; the opening text is in the PR's edit history), and write it
+down as the baseline. If you reconstruct the baseline from the opening *diff*
+instead, it is `<base>...<the head SHA when the PR was opened>` — read that
+SHA from the PR timeline (`gh api repos/<o>/<r>/issues/<PR>/timeline`), not
+from the branch's first commit: a PR opened with several commits already
+contained all of them, and `<base>...<first commit>` makes the rest look like
+review-driven expansion. If the
 PR has already been through review-driven expansion, neither may describe what
 it set out to do — then ask the human what this PR is for, in one line, and
 use their answer. What you must not do is adopt the current body as the
