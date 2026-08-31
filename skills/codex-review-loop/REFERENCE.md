@@ -255,6 +255,12 @@ is already in a terminal triage state, re-verified this round
 
 ### Filing an out-of-scope finding
 
+During **Round 0** there is no PR and no comment to reply to: file the issue
+against the branch (drop the `#<PR>` references below, name the branch), and
+list the issue number in the PR body you write next, under what you chose not
+to fix. That line is the audit trail. Steps 2 and 3 below apply once a PR
+exists.
+
 ```bash
 # 1. File it, capturing the URL.
 ISSUE=$(gh issue create -R <owner>/<repo> \

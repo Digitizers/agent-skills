@@ -32,7 +32,13 @@ Round 0 runs through the plugin's slash commands only. Do **not** shell out to `
 
 **Round 0 is an accelerator, never a blocker.** If the review has not returned within ~10 minutes, or the plugin's commands are unavailable in the session, kill it and fall back to the no-Round-0 path: push the branch, open the PR (noting the skip in its body), then continue the cloud loop from step 3 — the cloud reviewer remains the convergence gate either way.
 
-Triage its findings exactly like cloud findings: verify against the code, fix the real **in-scope** ones with regression tests, ignore false positives. There is no PR body to anchor scope against yet, so write the branch's goal down before triaging — see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff). Re-run the relevant test suite until it is green again — fixes invalidate the pre-Round-0 green. Then push the post-Round-0 HEAD, open the PR, and continue from step 3.
+Triage its findings exactly like cloud findings: verify against the code, fix the real **in-scope** ones with regression tests, ignore false positives. There is no PR body to anchor scope against yet, so write the branch's goal down before triaging — see [Scope boundaries](#scope-boundaries--the-prs-subject-is-the-diff).
+
+**Filing during Round 0 differs in one respect: there is nothing to reply to.**
+No PR exists, so a real out-of-scope finding is filed against the *branch*
+(`gh issue create`, naming the branch instead of a PR number) and the issue
+number goes into the PR body you write next, under what you deliberately did
+not fix. That body line is the audit trail the inline reply would have been. Re-run the relevant test suite until it is green again — fixes invalidate the pre-Round-0 green. Then push the post-Round-0 HEAD, open the PR, and continue from step 3.
 
 **Why:** the cloud bot's round-trip is minutes per round, and its early rounds are dominated by findings a local pass catches in seconds. The local and cloud reviewers share a model family, so a local pre-pass mostly *de-duplicates* the first cloud rounds rather than adding a new defect class — that is exactly the point: spend the cheap reviewer first.
 
