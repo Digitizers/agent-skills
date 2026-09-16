@@ -47,6 +47,11 @@
       "name": "sumit-mcp",
       "source": { "source": "github", "repo": "Digitizers/sumit-mcp" },
       "description": "SUMIT (OfficeGuy) billing MCP + skill."
+    },
+    {
+      "name": "bunny-mcp",
+      "source": { "source": "github", "repo": "Digitizers/bunny-mcp" },
+      "description": "Bunny.net delivery MCP + skill — CDN, DNS, storage, stream, edge scripting; read-only by default."
     }
   ]
 }

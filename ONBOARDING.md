@@ -27,6 +27,7 @@ cloud sessions don't run plugin installs; phone/web is covered in §6):
 /plugin install siteagent-elementor-studio@digitizer-skills
 /plugin install meta-ads-mcp@digitizer-skills
 /plugin install sumit-mcp@digitizer-skills
+/plugin install bunny-mcp@digitizer-skills
 ```
 
 Then `/plugin` → Marketplaces → `digitizer-skills` → **enable auto-update**.
@@ -75,6 +76,7 @@ so always current). One-time setup:
    Digitizers/siteagent-elementor-studio
    Digitizers/meta-ads-mcp
    Digitizers/sumit-mcp
+   Digitizers/bunny-mcp
    ```
 
    …plus any internal repos from step 5.
@@ -103,6 +105,7 @@ means Claude Code refuses the config and the billing server never launches (fail
 | hostinger-mcp | `HOSTINGER_API_TOKEN` (hPanel → API); optional `HOSTINGER_MCP_BINARY` to load one category binary (e.g. `hostinger-vps-mcp`) instead of all 127 tools |
 | aura-mcp | `AURA_MCP_TOKEN` (`aura_…` management token from Aura → Fleet → Agent Tokens) |
 | sumit-mcp | the `SUMIT_*` set from §4 |
+| bunny-mcp | `BUNNY_API_KEY` (bunny.net → Account Settings → API — one account-level key, no scoped keys, so it can do anything the account can). Optional: `BUNNY_STREAM_KEY`, `BUNNY_STORAGE_KEY` + `BUNNY_STORAGE_REGION` register the stream and storage-file tools; `BUNNY_READONLY=0` opens the write gate (leave it unset on machines that only read) |
 | siteagent-elementor-studio (Elementor MCP) | `WP_URL`, `WP_USERNAME`, `WP_APP_PASSWORD` — same trio wordpress-api-pro reads, so one environment targets one client site with both toolkits |
 
 Notes:
@@ -110,7 +113,7 @@ Notes:
 - **Environment variables are visible to anyone who can edit the environment** (there is
   no dedicated secrets store yet) — use minimum-role, revocable tokens, one per purpose.
 - Restricted network policies must allow the tool endpoints: `mcp.cloudways.com`,
-  `app.my-aura.app`, `api.hostinger.com`, `api.sumit.co.il`, your WordPress site, and the
+  `app.my-aura.app`, `api.hostinger.com`, `api.sumit.co.il`, `api.bunny.net`, your WordPress site, and the
   npm registry (the Hostinger and Elementor connections launch via `npx`).
 - The same `.mcp.json` files work on devices too — export the vars in your shell and the
   connections come up without any `claude mcp add`.

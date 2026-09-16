@@ -39,6 +39,7 @@ one per tool we run:
 | `siteagent-elementor-studio` | [`Digitizers/siteagent-elementor-studio`](https://github.com/Digitizers/siteagent-elementor-studio) | Build WordPress sites via the Elementor MCP. |
 | `meta-ads-mcp` | [`Digitizers/meta-ads-mcp`](https://github.com/Digitizers/meta-ads-mcp) | Meta Ads MCP operational guide. |
 | `sumit-mcp` | [`Digitizers/sumit-mcp`](https://github.com/Digitizers/sumit-mcp) | SUMIT (OfficeGuy) billing MCP + skill. |
+| `bunny-mcp` | [`Digitizers/bunny-mcp`](https://github.com/Digitizers/bunny-mcp) | Bunny.net delivery — CDN, DNS, storage, stream, edge scripting. Read-only by default. |
 
 ## Install — Claude Code (recommended)
 
@@ -56,6 +57,7 @@ One-time per machine, inside any Claude Code session. See
 /plugin install siteagent-elementor-studio@digitizer-skills
 /plugin install meta-ads-mcp@digitizer-skills
 /plugin install sumit-mcp@digitizer-skills
+/plugin install bunny-mcp@digitizer-skills
 ```
 
 Then open `/plugin`, find the `digitizer-skills` marketplace, and **enable
