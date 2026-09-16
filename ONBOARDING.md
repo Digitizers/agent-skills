@@ -113,7 +113,11 @@ Notes:
 - **Environment variables are visible to anyone who can edit the environment** (there is
   no dedicated secrets store yet) — use minimum-role, revocable tokens, one per purpose.
 - Restricted network policies must allow the tool endpoints: `mcp.cloudways.com`,
-  `app.my-aura.app`, `api.hostinger.com`, `api.sumit.co.il`, `api.bunny.net`, your WordPress site, and the
-  npm registry (the Hostinger and Elementor connections launch via `npx`).
+  `app.my-aura.app`, `api.hostinger.com`, `api.sumit.co.il`, your WordPress site, and the
+  npm registry (the Hostinger and Elementor connections launch via `npx`). Bunny spreads
+  across several hosts: `api.bunny.net` plus `cdn-origin-logging.bunny.net` (origin errors)
+  for the core tools, `video.bunnycdn.com` when `BUNNY_STREAM_KEY` is set, and
+  `storage.bunnycdn.com` — or `<region>.storage.bunnycdn.com` when `BUNNY_STORAGE_REGION`
+  names one — when `BUNNY_STORAGE_KEY` is.
 - The same `.mcp.json` files work on devices too — export the vars in your shell and the
   connections come up without any `claude mcp add`.
