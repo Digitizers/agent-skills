@@ -31,9 +31,22 @@ Two things keep the measurement honest across a restart (#35):
   anything: whatever context it carried, the window in force right now is at
   least that big.
 
+One thing the transcript cannot do (#40): prove a large window EARLY. A 1M
+session is indistinguishable from a 200k one until a call passes 200k, and the
+70% threshold of the 200k default (140k) always lands inside that blind zone —
+one false alarm per 1M session, guaranteed. The model id does not settle it
+either: the same id runs in more than one window mode, so a table of "1M
+models" baked in here would be a guess that goes stale. `CONTEXT_WINDOW_BY_MODEL`
+lets the operator state it instead, keyed by the model of the LATEST assistant
+line (latest for the same reason as the evidence above). And when the window is
+neither stated nor proven, the message says "assumed" so the reader can check
+it rather than obey it.
+
 Env:
-  HANDOFF_THRESHOLD_PCT   default 70
-  CONTEXT_WINDOW_TOKENS   default 200000 (a floor — see above)
+  HANDOFF_THRESHOLD_PCT     default 70
+  CONTEXT_WINDOW_TOKENS     default 200000 (a floor — see above)
+  CONTEXT_WINDOW_BY_MODEL   "model-id=tokens,model-id=tokens" — a per-model
+                            floor; beats CONTEXT_WINDOW_TOKENS for that model
 """
 import json
 import os
@@ -83,6 +96,25 @@ def fit_window(configured: int, observed: int) -> int:
     return observed
 
 
+def parse_model_windows(raw: str) -> dict:
+    """"model=tokens,model=tokens" -> {model: tokens}. Malformed or
+    non-positive entries are dropped one by one: this runs on every prompt,
+    so a typo in settings must never break the session."""
+    windows = {}
+    for entry in raw.split(","):
+        model, sep, value = entry.partition("=")
+        model, value = model.strip(), value.strip()
+        if not sep or not model:
+            continue
+        try:
+            tokens = int(value)
+        except ValueError:
+            continue
+        if tokens > 0:
+            windows[model] = tokens
+    return windows
+
+
 def main() -> None:
     inp = json.load(sys.stdin)
     transcript = inp.get("transcript_path") or ""
@@ -90,7 +122,11 @@ def main() -> None:
     event = inp.get("hook_event_name") or "UserPromptSubmit"
 
     threshold = float(os.environ.get("HANDOFF_THRESHOLD_PCT", "70"))
-    window = int(os.environ.get("CONTEXT_WINDOW_TOKENS", "200000"))
+    configured = os.environ.get("CONTEXT_WINDOW_TOKENS")
+    window = int(configured or "200000")
+    model_windows = parse_model_windows(
+        os.environ.get("CONTEXT_WINDOW_BY_MODEL", "")
+    )
 
     marker = os.path.join(tempfile.gettempdir(), f"handoff-guard-{session_id}")
     if os.path.exists(marker) or not transcript or not os.path.exists(transcript):
@@ -113,6 +149,8 @@ def main() -> None:
     # observation can be trusted to describe the window in force now — but the
     # most recent call always does, because it fit.
     latest_context = 0
+    # Same rule for the model: the latest assistant line's, never any line's.
+    latest_model = ""
     with open(transcript, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             try:
@@ -128,6 +166,10 @@ def main() -> None:
                 tail_tokens = 0
                 continue
             message = rec.get("message") or {}
+            model = message.get("model")
+            # "<synthetic>" marks a locally generated message, not a model.
+            if isinstance(model, str) and model and not model.startswith("<"):
+                latest_model = model
             usage = message.get("usage")
             if usage:
                 latest_context = context_sent(usage)
@@ -145,7 +187,13 @@ def main() -> None:
 
     tokens += tail_tokens + payload_tokens
 
+    declared = model_windows.get(latest_model)
+    if declared:
+        window = declared
+    floor = window
     window = fit_window(window, latest_context)
+    # Nobody stated this window and no call has proven it: it is a default.
+    assumed = not declared and not configured and window == floor
 
     pct = tokens * 100.0 / window
     if pct < threshold:
@@ -160,6 +208,17 @@ def main() -> None:
     msg = (
         f"Context window is at ~{pct:.0f}% of {window} tokens (~{tokens} "
         f"used, estimated), past the {threshold:.0f}% handoff threshold. "
+    )
+    if assumed:
+        # An agent once obeyed "70% of 200000" on a 1M session (#40). Say what
+        # is not known, and name the setting that settles it.
+        msg += (
+            f"That {window} is an assumed default — neither configured nor "
+            "proven by this transcript. If this model has a larger window "
+            "(e.g. 1M) this alarm is false: ignore it, and set "
+            "CONTEXT_WINDOW_BY_MODEL or CONTEXT_WINDOW_TOKENS. Otherwise: "
+        )
+    msg += (
         "Invoke the handoff skill NOW to write a handoff document before "
         "context is compacted, then continue the current task."
     )

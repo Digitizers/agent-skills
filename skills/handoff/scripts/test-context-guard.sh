@@ -260,4 +260,84 @@ OUT="$(run_guard "$WORK/in-resume.json")"
 echo "$OUT" | grep -q "additionalContext" || fail "kept a pre-resume observation as window evidence"
 echo "PASS evidence is the latest call, not a maximum"
 
+mk_model_transcript() { # $1=file $2=tokens $3=model [$4=earlier-model]
+  : > "$1"
+  if [ -n "${4:-}" ]; then
+    printf '{"type":"assistant","message":{"model":"%s","usage":{"input_tokens":1000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}\n' "$4" >> "$1"
+  fi
+  printf '{"type":"assistant","message":{"model":"%s","usage":{"input_tokens":%d,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}\n' "$3" "$2" >> "$1"
+}
+mk_input() { # $1=transcript $2=session-id -> payload file path
+  printf '{"transcript_path":"%s","session_id":"%s","hook_event_name":"UserPromptSubmit"}' "$1" "$2" > "$WORK/in-$2.json"
+  echo "$WORK/in-$2.json"
+}
+MAP="big-model=1000000,small-model=200000"
+
+# 19. A declared 1M model is not judged as 200k (#40): 140k used is 14% of the
+#     window the operator declared for this model, so the guard stays silent.
+#     The transcript cannot prove this early — a 1M session looks exactly like
+#     a 200k one until a call passes 200k — so the declaration is the evidence.
+mk_model_transcript "$WORK/m1.jsonl" 140000 big-model
+OUT="$(CONTEXT_WINDOW_BY_MODEL="$MAP" run_guard "$(mk_input "$WORK/m1.jsonl" cg-test-m1)")"
+[ -z "$OUT" ] || fail "fired at 14% of a declared 1M window"
+echo "PASS a declared 1M model is measured against 1M"
+
+# 20. The declaration follows the LATEST model, not any model in the file
+#     (#40): the same session resumed on the 200k model fires at 140k.
+mk_model_transcript "$WORK/m2.jsonl" 140000 small-model big-model
+OUT="$(CONTEXT_WINDOW_BY_MODEL="$MAP" run_guard "$(mk_input "$WORK/m2.jsonl" cg-test-m2)")"
+echo "$OUT" | grep -q "additionalContext" || fail "an earlier 1M model's declaration outlived a switch to a 200k model"
+echo "$OUT" | grep -q "assumed" && fail "called a declared window assumed"
+echo "PASS the declaration follows the latest model"
+
+# 21. The per-model declaration beats the global floor: CONTEXT_WINDOW_TOKENS
+#     says 1M, the map says this model is 200k — the specific statement wins.
+mk_model_transcript "$WORK/m3.jsonl" 150000 small-model
+OUT="$(CONTEXT_WINDOW_TOKENS=1000000 CONTEXT_WINDOW_BY_MODEL="$MAP" run_guard "$(mk_input "$WORK/m3.jsonl" cg-test-m3)")"
+echo "$OUT" | grep -q "additionalContext" || fail "global floor overrode the per-model declaration"
+echo "PASS per-model declaration beats the global floor"
+
+# 22. Evidence still widens a declared window: a 600k call on a model declared
+#     200k proves the declaration stale.
+mk_model_transcript "$WORK/m4.jsonl" 600000 small-model
+OUT="$(CONTEXT_WINDOW_BY_MODEL="$MAP" run_guard "$(mk_input "$WORK/m4.jsonl" cg-test-m4)")"
+[ -z "$OUT" ] || fail "a stale per-model declaration was not widened by evidence"
+echo "PASS evidence widens a stale declaration"
+
+# 23. An unknown model keeps today's behaviour, and the message admits the
+#     window is a guess (#40): an agent told "70% of 200000" obeyed it on a
+#     1M session. "assumed" plus the variable names lets it check instead.
+mk_model_transcript "$WORK/m5.jsonl" 150000 other-model
+OUT="$(CONTEXT_WINDOW_BY_MODEL="$MAP" run_guard "$(mk_input "$WORK/m5.jsonl" cg-test-m5)")"
+echo "$OUT" | grep -q "additionalContext" || fail "unknown model changed the default behaviour"
+echo "$OUT" | grep -q "assumed" || fail "unproven default window not called assumed"
+echo "$OUT" | grep -q "CONTEXT_WINDOW_BY_MODEL" || fail "message does not name the setting that fixes it"
+echo "PASS an unproven default window says so"
+
+# 24. A window the operator stated is not called assumed.
+mk_model_transcript "$WORK/m6.jsonl" 150000 other-model
+OUT="$(CONTEXT_WINDOW_TOKENS=200000 run_guard "$(mk_input "$WORK/m6.jsonl" cg-test-m6)")"
+echo "$OUT" | grep -q "additionalContext" || fail "did not fire with an explicit window"
+echo "$OUT" | grep -q "assumed" && fail "called an explicitly configured window assumed"
+echo "PASS an explicit window is not called assumed"
+
+# 25. A malformed map is ignored entry by entry, never a crash: the hook runs
+#     on every prompt, so a typo in settings must not break the session.
+mk_model_transcript "$WORK/m7.jsonl" 140000 big-model
+OUT="$(CONTEXT_WINDOW_BY_MODEL="garbage,,=5,x=abc,small-model=-1, big-model = 1000000 " run_guard "$(mk_input "$WORK/m7.jsonl" cg-test-m7)")"
+[ -z "$OUT" ] || fail "valid entry lost among malformed ones"
+mk_model_transcript "$WORK/m8.jsonl" 150000 small-model
+OUT="$(CONTEXT_WINDOW_BY_MODEL="small-model=-1,small-model=0" run_guard "$(mk_input "$WORK/m8.jsonl" cg-test-m8)")"
+echo "$OUT" | grep -q "assumed" || fail "a non-positive window was accepted as a declaration"
+echo "PASS malformed map entries are ignored"
+
+# 26. A synthetic assistant line is not a model (#40): Claude Code writes
+#     "<synthetic>" on locally generated messages; it must not erase the real
+#     model seen just before it.
+mk_model_transcript "$WORK/m9.jsonl" 140000 big-model
+printf '{"type":"assistant","message":{"model":"<synthetic>","content":[]}}\n' >> "$WORK/m9.jsonl"
+OUT="$(CONTEXT_WINDOW_BY_MODEL="$MAP" run_guard "$(mk_input "$WORK/m9.jsonl" cg-test-m9)")"
+[ -z "$OUT" ] || fail "a synthetic line replaced the real model"
+echo "PASS synthetic lines are not a model"
+
 echo "all context-guard tests passed"
