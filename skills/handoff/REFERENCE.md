@@ -98,13 +98,32 @@ Tune via env (e.g. in the same settings file's `env` block):
 { "env": { "HANDOFF_THRESHOLD_PCT": "70", "CONTEXT_WINDOW_TOKENS": "200000" } }
 ```
 
+If you move between models with different windows, state the window per model
+instead — it beats `CONTEXT_WINDOW_TOKENS` for the models it names, and any
+other model falls back to it:
+
+```json
+{ "env": { "CONTEXT_WINDOW_BY_MODEL": "claude-fable-5-1=1000000,claude-opus-5=200000" } }
+```
+
+The key is the model id of the **latest** assistant line in the transcript (the
+`message.model` field), so a session resumed on another model is measured
+against that model's entry. Malformed entries are ignored one by one. There is
+deliberately no built-in table of "1M models": the same model id can run in
+more than one window mode, so only you know which one your sessions use.
+
 ### Caveats
 
 - `CONTEXT_WINDOW_TOKENS` is a floor, not a fact — the hook widens it to the
   smallest known tier (200k / 500k / 1M) that fits the largest context the
   transcript proves was sent. Setting it correctly is still worth doing: the
   evidence only arrives once a call has actually carried that much context,
-  so early in a 1M session the default can still fire early.
+  so early in a 1M session the default can still fire early — at ~140k, 70% of
+  the 200k default, which is 14% of the real window. Declare the window
+  (`CONTEXT_WINDOW_BY_MODEL` or `CONTEXT_WINDOW_TOKENS`) to prevent it. When
+  the window is neither declared nor proven, the nudge says the figure is an
+  **assumed default** and that the alarm is false on a larger-window model, so
+  an agent can check instead of obeying.
 - Auto-compaction may summarize the conversation before any user prompt if a
   single turn overshoots — the `PostToolUse` variant closes most of that gap.
   After a compaction the count restarts from the boundary, so the hook can
