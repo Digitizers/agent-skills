@@ -3,6 +3,12 @@
 # first failure, prints PASS lines otherwise.
 set -euo pipefail
 
+# Hermetic: the guard reads these from the environment, and a developer who
+# has configured the hook for their own sessions (e.g. CONTEXT_WINDOW_BY_MODEL
+# for a 1M model) would otherwise run every case against their settings.
+# Cases that need a value set it inline.
+unset CONTEXT_WINDOW_BY_MODEL CONTEXT_WINDOW_TOKENS HANDOFF_THRESHOLD_PCT
+
 GUARD="$(cd "$(dirname "$0")" && pwd)/context-guard.sh"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"; rm -f "${TMPDIR:-/tmp}"/handoff-guard-cg-test-*' EXIT
