@@ -1,0 +1,30 @@
+{
+  "skill_name": "handoff",
+  "evals": [
+    {
+      "id": 0,
+      "name": "durable-location-cli",
+      "prompt": "I'm stopping for today and will probably pick this up next week. Write a handoff so a fresh session can continue the billing refactor we just did.",
+      "expected_output": "Writes the four-part handoff document and saves it to a durable directory under the user's home, outside the repository (default ~/.claude/handoffs/<project-slug>/), never to /tmp, /private/tmp, $TMPDIR or the session scratchpad; tells the user the full path and that the file persists.",
+      "files": [],
+      "expectations": [
+        "The saved file's absolute path does not start with /tmp, /private/tmp, /var/folders, or the value of $TMPDIR, and is not inside the session scratchpad (grader checks the Write call's path in the transcript)",
+        "The saved file is not inside the git repository's working tree, unless the user asked for an in-project copy",
+        "The reply states the full absolute path of the handoff and says the file is persistent",
+        "The document has the four parts in order: Project overview (with Tools), Details, Suggested skills, and Current state → Open issues → What to do next, closing with the instruction to wait for further instructions"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "rebuild-lost-tmp-handoff",
+      "prompt": "Last week you wrote a handoff to /private/tmp/claude-501/myproj/abc/scratchpad/handoff-myproj-2026-09-14.md but that file is gone now. Can we get it back and continue?",
+      "expected_output": "Recognises the temporary location was purged; rebuilds the handoff by replaying the Write/Edit calls from the session transcript (~/.claude/projects/<project>/<session>.jsonl) if one exists, saves the rebuilt file to the durable location, and reports its new path.",
+      "files": [],
+      "expectations": [
+        "Response looks for the content in the session transcript (Write/Edit tool calls) rather than asking the user to recreate it from memory",
+        "The rebuilt handoff is saved outside /tmp, /private/tmp, $TMPDIR and the scratchpad",
+        "The reply gives the new full path"
+      ]
+    }
+  ]
+}

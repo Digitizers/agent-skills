@@ -60,9 +60,22 @@ anything.* The handoff transfers state, it does not assign work.
 
 ## Delivery
 
-- **CLI / IDE sessions:** save the file to the OS temporary directory (or the
-  session scratchpad) — *not* the current workspace — and give the user the
-  full path.
+- **CLI / IDE sessions:** save the file to a **durable** directory under the
+  user's home, outside any repository — by default
+  `~/.claude/handoffs/<project-slug>/handoff-<slug>-<date>.md` (another agent
+  uses its own config directory under home the same way). Give the user the
+  full path and say the file is persistent.
+- **Never** make `/tmp`, `/private/tmp`, `$TMPDIR` or the session scratchpad
+  the only copy. On macOS all of them sit under `/private/tmp`, which the OS
+  purges of files untouched for about three days — and resuming a handoff days
+  later is the normal case, not the exception.
+- **Inside the project** only when the user asks for it, or when the project is
+  not a git repository: a `.handoffs/` folder, git-ignored when the project is
+  a repository, so the handoff never changes tracked state.
+- **Recovery:** if an earlier handoff under a temporary path is gone and the
+  harness keeps a session transcript (Claude Code:
+  `~/.claude/projects/<project>/<session>.jsonl`), rebuild it by replaying the
+  Write/Edit calls that created it, then save it to the durable location.
 - **Chat UIs with downloads/artifacts:** deliver the markdown so it is
   downloadable from within the chat body (artifact or file attachment), and
   also state where it was saved if a filesystem exists.
