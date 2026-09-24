@@ -386,4 +386,18 @@ OUT="$(run_guard "$(mk_input "$WORK/r4.jsonl" cg-test-cap1m)")"
 echo "$OUT" | grep -q "~100% of a 1000000-token window" || fail "comparison figure not capped at 100%"
 echo "PASS the comparison figure is capped"
 
+# 31. A window INFERRED from evidence is a lower bound, not a fact (Codex r3 on
+#     #44): a 350k call proves >= 500k on an unmapped 1M model; the alarm there
+#     must not disarm the guard for the window a later call proves.
+mk_model_transcript "$WORK/r5.jsonl" 360000 model-d
+OUT="$(run_guard "$(mk_input "$WORK/r5.jsonl" cg-test-inferred)")"
+echo "$OUT" | grep -q "of 500000 tokens" || fail "did not alarm against the inferred 500k tier"
+echo "$OUT" | grep -q "smallest window this transcript proves" || fail "inferred tier not described as a lower bound"
+OUT="$(run_guard "$(mk_input "$WORK/r5.jsonl" cg-test-inferred)")"
+[ -z "$OUT" ] || fail "inferred-tier alarm fired twice"
+mk_model_transcript "$WORK/r5.jsonl" 750000 model-d
+OUT="$(run_guard "$(mk_input "$WORK/r5.jsonl" cg-test-inferred)")"
+echo "$OUT" | grep -q "of 1000000 tokens" || fail "an inferred-tier alarm disarmed the guard for the wider proven window"
+echo "PASS an inferred tier re-arms when evidence widens the window"
+
 echo "all context-guard tests passed"

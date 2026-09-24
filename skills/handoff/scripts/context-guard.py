@@ -135,7 +135,7 @@ def main() -> None:
     # written only by an alarm on a declared or proven window.
     # Keyed by the active model too (Codex r2): after a resume onto another
     # unmapped model, the earlier model's assumed alarm must not silence it.
-    if os.path.exists(marker) or not transcript or not os.path.exists(transcript):
+    if not transcript or not os.path.exists(transcript):
         return
 
     # The latest assistant usage block counts only the context sent INTO that
@@ -201,6 +201,14 @@ def main() -> None:
     # Nobody stated this window and no call has proven it: it is a default.
     assumed = not declared and not configured and window == floor
 
+    # Every marker names the window it was raised against (Codex r3 on #44):
+    # a tier inferred from evidence is only a lower bound, so when a later call
+    # proves a wider window the guard must be able to fire again against it.
+    # A declared or configured window never changes, so it still fires once.
+    window_marker = f"{marker}-w{window}"
+    inferred = not declared and not configured and window > floor
+    if not assumed and os.path.exists(window_marker):
+        return
     safe_model = "".join(c if c.isalnum() or c in "-._" else "_" for c in latest_model) or "unknown"
     assumed_marker = f"{marker}-assumed-{safe_model}"
     if assumed and os.path.exists(assumed_marker):
@@ -216,11 +224,17 @@ def main() -> None:
     pct = min(pct, 100.0)
     tokens = min(tokens, window)
 
-    open(assumed_marker if assumed else marker, "w").close()
+    open(assumed_marker if assumed else window_marker, "w").close()
     msg = (
         f"Context window is at ~{pct:.0f}% of {window} tokens (~{tokens} "
         f"used, estimated), past the {threshold:.0f}% handoff threshold. "
     )
+    if inferred:
+        msg += (
+            f"{window} is the smallest window this transcript proves (a lower "
+            "bound — the real window may be larger; set CONTEXT_WINDOW_BY_MODEL "
+            "to state it). "
+        )
     if assumed:
         # An agent once obeyed "70% of 200000" on a 1M session (#40). Say what
         # is not known, and name the setting that settles it.
