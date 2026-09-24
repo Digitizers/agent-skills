@@ -73,7 +73,10 @@ anything.* The handoff transfers state, it does not assign work.
   later is the normal case, not the exception.
 - **Inside the project** only when the user asks for it, or when the project is
   not a git repository: a `.handoffs/` folder. In a git repository ignore it
-  through `.git/info/exclude`, never by editing the tracked `.gitignore` —
+  through the repository's local exclude file — resolve it with
+  `git rev-parse --git-path info/exclude`, since `.git` is a file, not a
+  directory, in a linked worktree or submodule — never by editing the tracked
+  `.gitignore` —
   otherwise the handoff changes tracked state after all.
 - **Recovery:** if an earlier handoff under a temporary path is gone and the
   harness keeps a session transcript (Claude Code:
