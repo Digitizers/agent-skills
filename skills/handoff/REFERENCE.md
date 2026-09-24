@@ -123,7 +123,7 @@ more than one window mode, so only you know which one your sessions use.
   (`CONTEXT_WINDOW_BY_MODEL` or `CONTEXT_WINDOW_TOKENS`) to prevent it. When
   the window is neither declared nor proven, the nudge says the figure is an
   **assumed default** and that the alarm is false on a larger-window model, so
-  an agent can check instead of obeying.
+  an agent can check instead of obeying — as a *possible* false alarm, with the same figure against a 1M window. An alarm on an assumed window uses its own marker, so it never disarms the guard: once a later call proves the real window, the nudge can still fire against it.
 - Auto-compaction may summarize the conversation before any user prompt if a
   single turn overshoots — the `PostToolUse` variant closes most of that gap.
   After a compaction the count restarts from the boundary, so the hook can

@@ -340,4 +340,29 @@ OUT="$(CONTEXT_WINDOW_BY_MODEL="$MAP" run_guard "$(mk_input "$WORK/m9.jsonl" cg-
 [ -z "$OUT" ] || fail "a synthetic line replaced the real model"
 echo "PASS synthetic lines are not a model"
 
+# 27. An alarm raised on an ASSUMED window does not disarm the guard (Codex r1
+#     on #41): the agent is told the figure may be a guess, so the session
+#     must still be warned when a proven window is really crossed later.
+mk_model_transcript "$WORK/r1.jsonl" 150000 unmapped-model
+OUT="$(run_guard "$(mk_input "$WORK/r1.jsonl" cg-test-rearm)")"
+echo "$OUT" | grep -q "assumed" || fail "assumed-window alarm did not fire"
+OUT="$(run_guard "$(mk_input "$WORK/r1.jsonl" cg-test-rearm)")"
+[ -z "$OUT" ] || fail "assumed-window alarm fired twice"
+mk_model_transcript "$WORK/r1.jsonl" 750000 unmapped-model
+OUT="$(run_guard "$(mk_input "$WORK/r1.jsonl" cg-test-rearm)")"
+echo "$OUT" | grep -q "additionalContext" || fail "an assumed-window alarm disarmed the guard for the real threshold"
+echo "$OUT" | grep -q "assumed" && fail "a proven window was called assumed"
+OUT="$(run_guard "$(mk_input "$WORK/r1.jsonl" cg-test-rearm)")"
+[ -z "$OUT" ] || fail "the real alarm fired twice"
+echo "PASS an assumed-window alarm re-arms for the proven window"
+
+# 28. The assumed message never tells the agent the alarm IS false (Codex r1
+#     on #41): it states the figure against the larger window instead.
+mk_model_transcript "$WORK/r2.jsonl" 150000 unmapped-model
+OUT="$(run_guard "$(mk_input "$WORK/r2.jsonl" cg-test-wording)")"
+echo "$OUT" | grep -q "may be a false alarm" || fail "assumed wording is not conditional"
+echo "$OUT" | grep -q "this alarm is false" && fail "assumed wording still declares the alarm false"
+echo "$OUT" | grep -q "of a 1000000-token window" || fail "assumed wording does not state the figure against the larger window"
+echo "PASS the assumed wording is conditional and quantified"
+
 echo "all context-guard tests passed"
