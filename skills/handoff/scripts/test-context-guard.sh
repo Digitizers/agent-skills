@@ -411,4 +411,24 @@ OUT="$(CONTEXT_WINDOW_BY_MODEL="model-f=500000" run_guard "$(mk_input "$WORK/r6.
 echo "$OUT" | grep -q "additionalContext" || fail "an inferred 500k alarm silenced a declared 500k window"
 echo "PASS inferred and declared markers do not collide"
 
+# 33. A stale declaration widened by evidence is inferred, not known (Codex r5
+#     on #44): model-g declared 200k carries 360k (inferred 500k); a resume onto
+#     model-h genuinely declared 500k must still be warned.
+mk_model_transcript "$WORK/r7.jsonl" 360000 model-g
+OUT="$(CONTEXT_WINDOW_BY_MODEL="model-g=200000,model-h=500000" run_guard "$(mk_input "$WORK/r7.jsonl" cg-test-stale)")"
+echo "$OUT" | grep -q "smallest window this transcript proves" || fail "a widened stale declaration was not called a lower bound"
+mk_model_transcript "$WORK/r7.jsonl" 360000 model-h
+OUT="$(CONTEXT_WINDOW_BY_MODEL="model-g=200000,model-h=500000" run_guard "$(mk_input "$WORK/r7.jsonl" cg-test-stale)")"
+echo "$OUT" | grep -q "additionalContext" || fail "a widened stale declaration silenced a genuine 500k declaration"
+echo "PASS a widened stale declaration is inferred"
+
+# 34. Model ids are encoded collision-free in marker names (Codex r5 on #44).
+mk_model_transcript "$WORK/r8.jsonl" 150000 "provider/a"
+OUT="$(run_guard "$(mk_input "$WORK/r8.jsonl" cg-test-hash)")"
+echo "$OUT" | grep -q "assumed" || fail "first assumed alarm did not fire"
+mk_model_transcript "$WORK/r8.jsonl" 150000 "provider_a"
+OUT="$(run_guard "$(mk_input "$WORK/r8.jsonl" cg-test-hash)")"
+echo "$OUT" | grep -q "assumed" || fail "provider/a's marker silenced provider_a"
+echo "PASS model ids do not collide in marker names"
+
 echo "all context-guard tests passed"

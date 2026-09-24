@@ -48,6 +48,7 @@ Env:
   CONTEXT_WINDOW_BY_MODEL   "model-id=tokens,model-id=tokens" — a per-model
                             floor; beats CONTEXT_WINDOW_TOKENS for that model
 """
+import hashlib
 import json
 import os
 import sys
@@ -205,16 +206,20 @@ def main() -> None:
     # a tier inferred from evidence is only a lower bound, so when a later call
     # proves a wider window the guard must be able to fire again against it.
     # A declared or configured window never changes, so it still fires once.
-    inferred = not declared and not configured and window > floor
+    # Any widening is inferred — including one that disproved a stale
+    # declaration (Codex r5): only the tier's lower bound is known.
+    inferred = window > floor
     # An inferred alarm names its model too (Codex r4): its lower-bound tier
     # must not share a marker with a declared or configured window of the
     # same size after a resume onto another model.
-    provenance = "inferred-" + "".join(c if c.isalnum() or c in "-._" else "_" for c in latest_model) if inferred else "known"
+    # Model ids are hashed, not sanitised: `provider/a` and `provider_a` must
+    # not share a marker (Codex r5).
+    model_key = hashlib.sha256(latest_model.encode("utf-8")).hexdigest()[:16]
+    provenance = f"inferred-{model_key}" if inferred else "known"
     window_marker = f"{marker}-{provenance}-w{window}"
     if not assumed and os.path.exists(window_marker):
         return
-    safe_model = "".join(c if c.isalnum() or c in "-._" else "_" for c in latest_model) or "unknown"
-    assumed_marker = f"{marker}-assumed-{safe_model}"
+    assumed_marker = f"{marker}-assumed-{model_key}"
     if assumed and os.path.exists(assumed_marker):
         return
 
