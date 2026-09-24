@@ -365,4 +365,25 @@ echo "$OUT" | grep -q "this alarm is false" && fail "assumed wording still decla
 echo "$OUT" | grep -q "of a 1000000-token window" || fail "assumed wording does not state the figure against the larger window"
 echo "PASS the assumed wording is conditional and quantified"
 
+# 29. The assumed marker is per model (Codex r2 on #44): an assumed alarm on
+#     one unmapped model must not silence a later unmapped model after a resume.
+mk_model_transcript "$WORK/r3.jsonl" 150000 model-a
+OUT="$(run_guard "$(mk_input "$WORK/r3.jsonl" cg-test-permodel)")"
+echo "$OUT" | grep -q "assumed" || fail "first assumed alarm did not fire"
+mk_model_transcript "$WORK/r3.jsonl" 160000 model-b
+OUT="$(run_guard "$(mk_input "$WORK/r3.jsonl" cg-test-permodel)")"
+echo "$OUT" | grep -q "additionalContext" || fail "an assumed alarm on model-a silenced model-b"
+echo "PASS the assumed marker is per model"
+
+# 30. The comparison figure is capped like the primary one (Codex r2 on #44).
+mk_model_transcript "$WORK/r4.jsonl" 150000 model-c
+python3 - "$WORK/r4.jsonl" <<'PYX'
+import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"type": "user", "message": {"content": "z" * 2600000}}) + "\n")
+PYX
+OUT="$(run_guard "$(mk_input "$WORK/r4.jsonl" cg-test-cap1m)")"
+echo "$OUT" | grep -q "~100% of a 1000000-token window" || fail "comparison figure not capped at 100%"
+echo "PASS the comparison figure is capped"
+
 echo "all context-guard tests passed"

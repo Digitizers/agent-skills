@@ -133,7 +133,8 @@ def main() -> None:
     # be a guess, so it must not disarm the guard for the rest of the session
     # (Codex r1 on #41): it gets its own marker, and the session marker is
     # written only by an alarm on a declared or proven window.
-    assumed_marker = marker + "-assumed"
+    # Keyed by the active model too (Codex r2): after a resume onto another
+    # unmapped model, the earlier model's assumed alarm must not silence it.
     if os.path.exists(marker) or not transcript or not os.path.exists(transcript):
         return
 
@@ -200,6 +201,8 @@ def main() -> None:
     # Nobody stated this window and no call has proven it: it is a default.
     assumed = not declared and not configured and window == floor
 
+    safe_model = "".join(c if c.isalnum() or c in "-._" else "_" for c in latest_model) or "unknown"
+    assumed_marker = f"{marker}-assumed-{safe_model}"
     if assumed and os.path.exists(assumed_marker):
         return
 
@@ -228,7 +231,8 @@ def main() -> None:
         msg += (
             f"That {window} is an assumed default — neither configured nor "
             "proven by this transcript — so this may be a false alarm: the "
-            f"same ~{raw_tokens} tokens are ~{raw_tokens * 100.0 / largest:.0f}% "
+            f"same ~{min(raw_tokens, largest)} tokens are "
+            f"~{min(raw_tokens * 100.0 / largest, 100.0):.0f}% "
             f"of a {largest}-token window. If this model's window is larger, "
             "judge against it, and set CONTEXT_WINDOW_BY_MODEL or "
             "CONTEXT_WINDOW_TOKENS so the guard knows. The guard stays armed "
