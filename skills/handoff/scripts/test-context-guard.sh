@@ -431,4 +431,14 @@ OUT="$(run_guard "$(mk_input "$WORK/r8.jsonl" cg-test-hash)")"
 echo "$OUT" | grep -q "assumed" || fail "provider/a's marker silenced provider_a"
 echo "PASS model ids do not collide in marker names"
 
+# 35. Above the largest known tier the marker is stable (Codex r6 on #44): an
+#     unmapped model whose calls keep growing past 1M alarms once, not per call.
+mk_model_transcript "$WORK/r9.jsonl" 1100000 model-big
+OUT="$(run_guard "$(mk_input "$WORK/r9.jsonl" cg-test-above)")"
+echo "$OUT" | grep -q "additionalContext" || fail "no alarm above the largest tier"
+mk_model_transcript "$WORK/r9.jsonl" 1200000 model-big
+OUT="$(run_guard "$(mk_input "$WORK/r9.jsonl" cg-test-above)")"
+[ -z "$OUT" ] || fail "alarm repeated on every growing call above the largest tier"
+echo "PASS one alarm above the largest known tier"
+
 echo "all context-guard tests passed"

@@ -5,7 +5,9 @@ skill once the context window crosses a usage threshold.
 Works as a UserPromptSubmit and/or PostToolUse hook. Reads the hook input
 JSON on stdin, measures token usage from the session transcript, and when
 usage >= threshold prints hookSpecificOutput.additionalContext telling the
-agent to invoke the handoff skill. Fires once per session (marker file).
+agent to invoke the handoff skill. Fires once per session per window
+(marker file): a session that moves to a model with a different declared or
+proven window can be warned again, because that is a new crossing.
 
 The hook JSON is read from stdin, never argv: a large prompt or
 tool_response would exceed the OS per-argument limit ("Argument list too
@@ -216,7 +218,11 @@ def main() -> None:
     # not share a marker (Codex r5).
     model_key = hashlib.sha256(latest_model.encode("utf-8")).hexdigest()[:16]
     provenance = f"inferred-{model_key}" if inferred else "known"
-    window_marker = f"{marker}-{provenance}-w{window}"
+    # Above the largest known tier fit_window() returns the observed context
+    # itself, which grows every call — key it as one bucket, or every hook
+    # would alarm again (Codex r6).
+    window_key = f"w{window}" if window <= WINDOW_TIERS[-1] else f"above-w{WINDOW_TIERS[-1]}"
+    window_marker = f"{marker}-{provenance}-{window_key}"
     if not assumed and os.path.exists(window_marker):
         return
     assumed_marker = f"{marker}-assumed-{model_key}"
