@@ -346,4 +346,105 @@ OUT="$(CONTEXT_WINDOW_BY_MODEL="$MAP" run_guard "$(mk_input "$WORK/m9.jsonl" cg-
 [ -z "$OUT" ] || fail "a synthetic line replaced the real model"
 echo "PASS synthetic lines are not a model"
 
+# 27. An alarm raised on an ASSUMED window does not disarm the guard (Codex r1
+#     on #41): the agent is told the figure may be a guess, so the session
+#     must still be warned when a proven window is really crossed later.
+mk_model_transcript "$WORK/r1.jsonl" 150000 unmapped-model
+OUT="$(run_guard "$(mk_input "$WORK/r1.jsonl" cg-test-rearm)")"
+echo "$OUT" | grep -q "assumed" || fail "assumed-window alarm did not fire"
+OUT="$(run_guard "$(mk_input "$WORK/r1.jsonl" cg-test-rearm)")"
+[ -z "$OUT" ] || fail "assumed-window alarm fired twice"
+mk_model_transcript "$WORK/r1.jsonl" 750000 unmapped-model
+OUT="$(run_guard "$(mk_input "$WORK/r1.jsonl" cg-test-rearm)")"
+echo "$OUT" | grep -q "additionalContext" || fail "an assumed-window alarm disarmed the guard for the real threshold"
+echo "$OUT" | grep -q "assumed" && fail "a proven window was called assumed"
+OUT="$(run_guard "$(mk_input "$WORK/r1.jsonl" cg-test-rearm)")"
+[ -z "$OUT" ] || fail "the real alarm fired twice"
+echo "PASS an assumed-window alarm re-arms for the proven window"
+
+# 28. The assumed message never tells the agent the alarm IS false (Codex r1
+#     on #41): it states the figure against the larger window instead.
+mk_model_transcript "$WORK/r2.jsonl" 150000 unmapped-model
+OUT="$(run_guard "$(mk_input "$WORK/r2.jsonl" cg-test-wording)")"
+echo "$OUT" | grep -q "may be a false alarm" || fail "assumed wording is not conditional"
+echo "$OUT" | grep -q "this alarm is false" && fail "assumed wording still declares the alarm false"
+echo "$OUT" | grep -q "of a 1000000-token window" || fail "assumed wording does not state the figure against the larger window"
+echo "PASS the assumed wording is conditional and quantified"
+
+# 29. The assumed marker is per model (Codex r2 on #44): an assumed alarm on
+#     one unmapped model must not silence a later unmapped model after a resume.
+mk_model_transcript "$WORK/r3.jsonl" 150000 model-a
+OUT="$(run_guard "$(mk_input "$WORK/r3.jsonl" cg-test-permodel)")"
+echo "$OUT" | grep -q "assumed" || fail "first assumed alarm did not fire"
+mk_model_transcript "$WORK/r3.jsonl" 160000 model-b
+OUT="$(run_guard "$(mk_input "$WORK/r3.jsonl" cg-test-permodel)")"
+echo "$OUT" | grep -q "additionalContext" || fail "an assumed alarm on model-a silenced model-b"
+echo "PASS the assumed marker is per model"
+
+# 30. The comparison figure is capped like the primary one (Codex r2 on #44).
+mk_model_transcript "$WORK/r4.jsonl" 150000 model-c
+python3 - "$WORK/r4.jsonl" <<'PYX'
+import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"type": "user", "message": {"content": "z" * 2600000}}) + "\n")
+PYX
+OUT="$(run_guard "$(mk_input "$WORK/r4.jsonl" cg-test-cap1m)")"
+echo "$OUT" | grep -q "~100% of a 1000000-token window" || fail "comparison figure not capped at 100%"
+echo "PASS the comparison figure is capped"
+
+# 31. A window INFERRED from evidence is a lower bound, not a fact (Codex r3 on
+#     #44): a 350k call proves >= 500k on an unmapped 1M model; the alarm there
+#     must not disarm the guard for the window a later call proves.
+mk_model_transcript "$WORK/r5.jsonl" 360000 model-d
+OUT="$(run_guard "$(mk_input "$WORK/r5.jsonl" cg-test-inferred)")"
+echo "$OUT" | grep -q "of 500000 tokens" || fail "did not alarm against the inferred 500k tier"
+echo "$OUT" | grep -q "smallest window this transcript proves" || fail "inferred tier not described as a lower bound"
+OUT="$(run_guard "$(mk_input "$WORK/r5.jsonl" cg-test-inferred)")"
+[ -z "$OUT" ] || fail "inferred-tier alarm fired twice"
+mk_model_transcript "$WORK/r5.jsonl" 750000 model-d
+OUT="$(run_guard "$(mk_input "$WORK/r5.jsonl" cg-test-inferred)")"
+echo "$OUT" | grep -q "of 1000000 tokens" || fail "an inferred-tier alarm disarmed the guard for the wider proven window"
+echo "PASS an inferred tier re-arms when evidence widens the window"
+
+# 32. An inferred alarm does not share a marker with a declared window of the
+#     same size (Codex r4 on #44): 500k inferred on model-e, then a resume on a
+#     model DECLARED 500k must still be warned.
+mk_model_transcript "$WORK/r6.jsonl" 360000 model-e
+OUT="$(run_guard "$(mk_input "$WORK/r6.jsonl" cg-test-ns)")"
+echo "$OUT" | grep -q "smallest window this transcript proves" || fail "inferred alarm did not fire"
+mk_model_transcript "$WORK/r6.jsonl" 360000 model-f
+OUT="$(CONTEXT_WINDOW_BY_MODEL="model-f=500000" run_guard "$(mk_input "$WORK/r6.jsonl" cg-test-ns)")"
+echo "$OUT" | grep -q "additionalContext" || fail "an inferred 500k alarm silenced a declared 500k window"
+echo "PASS inferred and declared markers do not collide"
+
+# 33. A stale declaration widened by evidence is inferred, not known (Codex r5
+#     on #44): model-g declared 200k carries 360k (inferred 500k); a resume onto
+#     model-h genuinely declared 500k must still be warned.
+mk_model_transcript "$WORK/r7.jsonl" 360000 model-g
+OUT="$(CONTEXT_WINDOW_BY_MODEL="model-g=200000,model-h=500000" run_guard "$(mk_input "$WORK/r7.jsonl" cg-test-stale)")"
+echo "$OUT" | grep -q "smallest window this transcript proves" || fail "a widened stale declaration was not called a lower bound"
+mk_model_transcript "$WORK/r7.jsonl" 360000 model-h
+OUT="$(CONTEXT_WINDOW_BY_MODEL="model-g=200000,model-h=500000" run_guard "$(mk_input "$WORK/r7.jsonl" cg-test-stale)")"
+echo "$OUT" | grep -q "additionalContext" || fail "a widened stale declaration silenced a genuine 500k declaration"
+echo "PASS a widened stale declaration is inferred"
+
+# 34. Model ids are encoded collision-free in marker names (Codex r5 on #44).
+mk_model_transcript "$WORK/r8.jsonl" 150000 "provider/a"
+OUT="$(run_guard "$(mk_input "$WORK/r8.jsonl" cg-test-hash)")"
+echo "$OUT" | grep -q "assumed" || fail "first assumed alarm did not fire"
+mk_model_transcript "$WORK/r8.jsonl" 150000 "provider_a"
+OUT="$(run_guard "$(mk_input "$WORK/r8.jsonl" cg-test-hash)")"
+echo "$OUT" | grep -q "assumed" || fail "provider/a's marker silenced provider_a"
+echo "PASS model ids do not collide in marker names"
+
+# 35. Above the largest known tier the marker is stable (Codex r6 on #44): an
+#     unmapped model whose calls keep growing past 1M alarms once, not per call.
+mk_model_transcript "$WORK/r9.jsonl" 1100000 model-big
+OUT="$(run_guard "$(mk_input "$WORK/r9.jsonl" cg-test-above)")"
+echo "$OUT" | grep -q "additionalContext" || fail "no alarm above the largest tier"
+mk_model_transcript "$WORK/r9.jsonl" 1200000 model-big
+OUT="$(run_guard "$(mk_input "$WORK/r9.jsonl" cg-test-above)")"
+[ -z "$OUT" ] || fail "alarm repeated on every growing call above the largest tier"
+echo "PASS one alarm above the largest known tier"
+
 echo "all context-guard tests passed"
