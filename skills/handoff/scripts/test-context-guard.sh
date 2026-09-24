@@ -400,4 +400,15 @@ OUT="$(run_guard "$(mk_input "$WORK/r5.jsonl" cg-test-inferred)")"
 echo "$OUT" | grep -q "of 1000000 tokens" || fail "an inferred-tier alarm disarmed the guard for the wider proven window"
 echo "PASS an inferred tier re-arms when evidence widens the window"
 
+# 32. An inferred alarm does not share a marker with a declared window of the
+#     same size (Codex r4 on #44): 500k inferred on model-e, then a resume on a
+#     model DECLARED 500k must still be warned.
+mk_model_transcript "$WORK/r6.jsonl" 360000 model-e
+OUT="$(run_guard "$(mk_input "$WORK/r6.jsonl" cg-test-ns)")"
+echo "$OUT" | grep -q "smallest window this transcript proves" || fail "inferred alarm did not fire"
+mk_model_transcript "$WORK/r6.jsonl" 360000 model-f
+OUT="$(CONTEXT_WINDOW_BY_MODEL="model-f=500000" run_guard "$(mk_input "$WORK/r6.jsonl" cg-test-ns)")"
+echo "$OUT" | grep -q "additionalContext" || fail "an inferred 500k alarm silenced a declared 500k window"
+echo "PASS inferred and declared markers do not collide"
+
 echo "all context-guard tests passed"

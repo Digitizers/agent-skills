@@ -205,8 +205,12 @@ def main() -> None:
     # a tier inferred from evidence is only a lower bound, so when a later call
     # proves a wider window the guard must be able to fire again against it.
     # A declared or configured window never changes, so it still fires once.
-    window_marker = f"{marker}-w{window}"
     inferred = not declared and not configured and window > floor
+    # An inferred alarm names its model too (Codex r4): its lower-bound tier
+    # must not share a marker with a declared or configured window of the
+    # same size after a resume onto another model.
+    provenance = "inferred-" + "".join(c if c.isalnum() or c in "-._" else "_" for c in latest_model) if inferred else "known"
+    window_marker = f"{marker}-{provenance}-w{window}"
     if not assumed and os.path.exists(window_marker):
         return
     safe_model = "".join(c if c.isalnum() or c in "-._" else "_" for c in latest_model) or "unknown"
