@@ -66,6 +66,10 @@ anything.* The handoff transfers state, it does not assign work.
   agent uses its own config directory under home the same way). Never
   overwrite an earlier handoff: if the path exists, add a suffix (`-2`, `-3`, …)
   — a second handoff the same day must not destroy the first one's state.
+  If that directory is itself inside a git working tree (someone versions
+  `~` or `~/.claude`), ignore it through that repository's local exclude file
+  (`git -C <dir> rev-parse --git-path info/exclude`) so the handoff never
+  becomes untracked state there either.
   Give the user the full path and say the file is persistent.
 - **Never** make `/tmp`, `/private/tmp`, `$TMPDIR` or the session scratchpad
   the only copy. On macOS all of them sit under `/private/tmp`, which the OS
