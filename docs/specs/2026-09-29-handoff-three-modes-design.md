@@ -48,6 +48,11 @@ its own settings file whose hooks dumped stdin:
   threshold cannot be read at runtime. Asking the user to compact is the only
   available action, not a design preference.
 - **`PreCompact` can block** (exit 2), which makes it usable as a safety net.
+- **`CLAUDE_CODE_SESSION_ATTENDED` distinguishes attended from headless runs**:
+  `1` in an interactive session, `0` in a `claude -p` run. Measured the same
+  way — the headless child overwrote the value it inherited, so the variable
+  is set per session rather than passed down. This settles the spec's only
+  open question.
 
 ## Design
 
@@ -148,9 +153,9 @@ Environment variables in the settings `env` block, consistent with today's
 
 Headless `-p` runs and scheduled tasks are never stopped and never asked to
 compact — nobody is there to answer, and stopping only kills the task. They
-still get a handoff written silently. **Open question:** how to detect
-"unattended" reliably. To be settled during implementation by measurement, the
-way the hook payload was, not by guessing.
+still get a handoff written silently. Detection is
+`CLAUDE_CODE_SESSION_ATTENDED != "1"` (measured above), with
+`HANDOFF_UNATTENDED=1` as a manual override for anything the variable misses.
 
 ## Testing
 
