@@ -35,6 +35,8 @@ def main() -> None:
         inp = json.load(sys.stdin)
     except ValueError:
         return
+    if not isinstance(inp, dict):
+        return
     session_id = inp.get("session_id") or "unknown"
     event = inp.get("hook_event_name") or "UserPromptSubmit"
 

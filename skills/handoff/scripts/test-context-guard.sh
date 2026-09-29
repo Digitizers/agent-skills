@@ -487,4 +487,15 @@ echo "$OUT" | grep -q "STOP" && fail "headless run told to stop"
 echo "$OUT" | grep -q "/compact" && fail "headless run asked for compaction"
 echo "PASS headless run writes but does not stop"
 
+# 41. A non-object JSON payload (valid JSON, wrong shape) must not crash the
+#     hook (Fix round 1, Finding 1 + coordinator ruling): a list, a number, or
+#     a string on stdin makes .get() raise on a bare dict-shaped read. Every
+#     failure path here must exit 0 and print nothing.
+printf '[1,2,3]' > "$WORK/in-nonobj.json"
+STATUS=0
+OUT="$(bash "$GUARD" < "$WORK/in-nonobj.json")" || STATUS=$?
+[ "$STATUS" -eq 0 ] || fail "non-object JSON payload exited non-zero"
+[ -z "$OUT" ] || fail "non-object JSON payload produced output"
+echo "PASS non-object JSON payload is silent"
+
 echo "all context-guard tests passed"

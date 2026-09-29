@@ -81,4 +81,26 @@ OUT="$(printf '{"session_id":"qg-test-head","hook_event_name":"UserPromptSubmit"
   | HANDOFF_QUOTA_STATE="$WORK/head.json" CLAUDE_CODE_SESSION_ATTENDED=0 bash "$GUARD")"
 echo "$OUT" | grep -q "STOP" && fail "headless run told to stop"
 echo "PASS headless run does not stop"
+
+# 11. Both windows over their act thresholds at once: the weekly limit has the
+#     higher bar and wins — the message must name the weekly limit, not the
+#     5-hour window, and report the weekly figure (95), not the 5-hour one (85).
+state "$WORK/both.json" 85 95 0
+OUT="$(run qg-test-both "$WORK/both.json")"
+echo "$OUT" | grep -q "STOP" || fail "both-over-threshold did not stop"
+echo "$OUT" | grep -q "weekly limit" || fail "both-over-threshold did not name the weekly limit"
+echo "$OUT" | grep -q "~95%" || fail "both-over-threshold did not report the weekly percentage"
+echo "$OUT" | grep -q "5-hour window" && fail "both-over-threshold named the 5-hour window instead of the weekly limit"
+echo "PASS both windows over threshold names the weekly limit"
+
+# 12. A non-object JSON payload (valid JSON, wrong shape) must not crash the
+#     hook (Fix round 1, Finding 1): a list, a number, or a string on stdin
+#     makes .get() raise on a bare dict-shaped read. Every failure path here
+#     must exit 0 and print nothing.
+STATUS=0
+OUT="$(printf '[1,2,3]' | HANDOFF_QUOTA_STATE="$WORK/act.json" CLAUDE_CODE_SESSION_ATTENDED=1 bash "$GUARD")" || STATUS=$?
+[ "$STATUS" -eq 0 ] || fail "non-object JSON payload exited non-zero"
+[ -z "$OUT" ] || fail "non-object JSON payload produced output"
+echo "PASS non-object JSON payload is silent"
+
 echo "ALL PASS"

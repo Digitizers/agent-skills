@@ -130,7 +130,12 @@ def parse_model_windows(raw: str) -> dict:
 
 
 def main() -> None:
-    inp = json.load(sys.stdin)
+    try:
+        inp = json.load(sys.stdin)
+    except ValueError:
+        return
+    if not isinstance(inp, dict):
+        return
     transcript = inp.get("transcript_path") or ""
     session_id = inp.get("session_id") or "unknown"
     event = inp.get("hook_event_name") or "UserPromptSubmit"
