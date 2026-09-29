@@ -187,4 +187,41 @@ printf 'sk-ant-api03-%s\n' "$(python3 -c 'print("A"*95)')" > "$WORK/nested/conte
 python3 "$GATE" "$WORK/nested" --mode compaction && fail "secret in a nested subdirectory passed"
 echo "PASS secret in a nested subdirectory fails"
 
+# 14. Fix-round-2 finding 2, THE BYPASS this round exists to close: round 1's
+#     PLACEHOLDER_RX ended every alternative in `\S*`, so a real secret that
+#     merely STARTS with an allowlisted word (here "your") matched
+#     your[-_]?\S* in full and the gate printed GATE: PASS on a leaked prod
+#     DB password. A placeholder must be recognised as a whole value, not a
+#     prefix — this pins that regression.
+mkgood "$WORK/prefixbypass"
+python3 - "$WORK/prefixbypass/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\nTOKEN=your-actual-prod-db-password-Xk29fLp3Q7vZ\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+python3 "$GATE" "$WORK/prefixbypass" --mode compaction && fail "REGRESSION: a real secret prefixed with an allowlisted word (your-...) bypassed the gate"
+echo "PASS real secret prefixed with an allowlisted word still fails"
+
+# 15. Fix-round-2 finding 2, a second prefix-bypass shape: a real secret that
+#     starts with a genuine redaction word (REDACTED) but is not made ENTIRELY
+#     of redaction words must still fail.
+mkgood "$WORK/wordprefixbypass"
+python3 - "$WORK/wordprefixbypass/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\nSECRET=REDACTED_BUT_ALSO_hunter2SuperRealValue\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+python3 "$GATE" "$WORK/wordprefixbypass" --mode compaction && fail "REGRESSION: a real secret with a redaction-word prefix bypassed the gate"
+echo "PASS real secret with a redaction-word prefix still fails"
+
 echo "ALL PASS"

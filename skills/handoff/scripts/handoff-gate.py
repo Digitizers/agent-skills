@@ -55,14 +55,37 @@ SECRET_PATTERNS = (
 # never its value, and that must not itself fail the gate.
 GENERIC_CRED_RX = re.compile(
     r"(?i)\b(?:password|secret|token|api[_-]?key)\s*[=:]\s*"
-    r"(['\"]?)([A-Za-z0-9/+_<>.-]{4,})\1"
+    r"(['\"]?)([A-Za-z0-9/+_<>{}$\[\].-]{4,})\1"
 )
+
+# Fix-round-2 pin: a placeholder must be recognisable as a WHOLE value, never
+# as a prefix. The round-1 version ended every alternative in `\S*`, so a
+# *real* secret that merely started with an allowlisted word — e.g.
+# `TOKEN=your-actual-prod-db-password-Xk29fLp3Q7vZ` — matched `your[-_]?\S*`
+# in full and was waved through. Every branch below is bounded: either every
+# separator-delimited word of the value is itself one of a fixed list, or the
+# whole value is a bracketed placeholder, a pure repetition mask, or one of a
+# fixed set of canonical dummy strings matched exactly.
+_REDACTION_WORDS = (
+    "REDACTED", "REDACT", "OMITTED", "HIDDEN", "SANITIZED", "PLACEHOLDER",
+    "EXAMPLE", "DUMMY", "FAKE", "CHANGEME", "TODO", "TBD", "NONE", "NULL",
+    "EMPTY", "DO", "NOT", "COMMIT",
+)
+_WORD_ALT = "|".join(_REDACTION_WORDS)
+_CANONICAL_DUMMIES = (
+    "your-key-here", "your_key_here", "yourkeyhere",
+    "paste-here", "paste_here", "insert-key-here",
+)
+_DUMMY_ALT = "|".join(re.escape(d) for d in _CANONICAL_DUMMIES)
 PLACEHOLDER_RX = re.compile(
     r"(?i)^(?:"
-    r"x{4,}|\*{4,}|<[^<>]*>|"
-    r"redacted\S*|your[-_]?\S*|change[-_]?me\S*|"
-    r"placeholder\S*|example\S*|paste[-_]?here\S*|insert[-_]?here\S*|"
-    r"dummy\S*|sample\S*|fake\S*|todo\S*|n/?a"
+    r"(?:" + _WORD_ALT + r")(?:[-_ .](?:" + _WORD_ALT + r"))*"  # REDACTED_DO_NOT_COMMIT
+    r"|<[^<>]*>"                                                 # <anything>
+    r"|\{\{[^{}]*\}\}"                                           # {{anything}}
+    r"|\$\{[^{}]*\}"                                             # ${anything}
+    r"|\[[^\[\]]*\]"                                             # [anything]
+    r"|[xX]{3,}|\*{3,}|\.{3,}|0{3,}"                              # repetition masks
+    r"|" + _DUMMY_ALT +                                          # canonical dummies, exact
     r")$"
 )
 
