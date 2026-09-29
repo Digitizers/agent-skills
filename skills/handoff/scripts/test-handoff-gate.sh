@@ -849,4 +849,97 @@ echo "$OUT" | grep -q "authorization" || fail "the failure message does not prin
 echo "$OUT" | grep -q "passphrase" || fail "the failure message's label list is missing passphrase: $OUT"
 echo "PASS the failure message's label list is generated from the alternation"
 
+# 53. Codex round 5, P2 — HEADINGS INSIDE A FENCE ARE NOT SECTIONS. sections()
+#     treated any line starting with "#" as a heading, fences included, and
+#     this skill's own documentation tells authors to paste a TEMPLATE in a
+#     code block. So a handoff whose only `## Tried and rejected` was inside a
+#     fenced example could omit the real section entirely and still print
+#     GATE: PASS — the gate certifying sample text.
+mkgood "$WORK/fencedonly"
+python3 - "$WORK/fencedonly/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+# Remove the REAL section and leave it only inside a fenced template.
+s = s.replace(
+    "## Tried and rejected\n- Patching the caller: the bug is in the callee.\n\n",
+    "")
+s = s.replace(
+    "## Open issues\n",
+    "The template every handoff follows:\n\n"
+    "```markdown\n"
+    "## Tried and rejected\n"
+    "- <approach> — rejected because <evidence>\n"
+    "```\n\n"
+    "## Open issues\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+grep -q "## Tried and rejected" "$WORK/fencedonly/HANDOFF.md" || fail "test setup: the fenced heading is not in the document"
+OUT="$(python3 "$GATE" "$WORK/fencedonly" --mode compaction || true)"
+python3 "$GATE" "$WORK/fencedonly" --mode compaction && fail "REGRESSION (P2): a heading that exists only inside a fenced example passed as a real section"
+echo "$OUT" | grep -q "Tried and rejected" || fail "the missing section is not reported: $OUT"
+echo "PASS a heading inside a fenced block does not count as a section"
+
+# 54. ...and the same document WITH a real section outside the fence passes:
+#     tracking fences must not make a fenced template poisonous.
+mkgood "$WORK/fencedplus"
+python3 - "$WORK/fencedplus/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Open issues\n",
+    "The template every handoff follows:\n\n"
+    "```markdown\n"
+    "## Tried and rejected\n"
+    "- <approach> — rejected because <evidence>\n"
+    "## Suggested skills\n"
+    "```\n\n"
+    "## Open issues\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/fencedplus" --mode compaction)" || fail "a fenced template alongside the real sections was rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for a document carrying a fenced template: $OUT"
+echo "PASS a fenced template passes when the real sections are outside it"
+
+# 55. ...and the fence forms that matter all close correctly: tilde fences,
+#     runs longer than three, and an info string on the opener. A fence left
+#     unclosed by a mis-parse would swallow every heading after it and fail a
+#     valid handoff, so this pins the other direction too.
+mkgood "$WORK/fencevariants"
+python3 - "$WORK/fencevariants/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Current state\n",
+    "~~~\n## not a heading (tilde fence)\n~~~\n\n"
+    "````markdown\n## not a heading (four backticks, info string)\n```\nstill inside\n````\n\n"
+    "   ```sh\n   ## not a heading (indented fence)\n   ```\n\n"
+    "## Current state\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/fencevariants" --mode compaction)" || fail "fence variants broke a valid handoff: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line with tilde/longer/indented fences: $OUT"
+echo "PASS tilde, longer-run and indented fences are tracked correctly"
+
+# 56. ...and content inside a fence is still SCANNED for secrets: hiding a
+#     credential in a code block must not become the new way past the gate.
+mkgood "$WORK/fencedsecret"
+python3 - "$WORK/fencedsecret/HANDOFF.md" "sk-ant-api03-$(python3 -c 'print("A"*95)')" <<'PY'
+import sys
+p, value = sys.argv[1], sys.argv[2]
+s = open(p).read().replace(
+    "## Details\n", f"## Details\n```\n{value}\n```\n", 1)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/fencedsecret" --mode compaction || true)"
+python3 "$GATE" "$WORK/fencedsecret" --mode compaction && fail "a secret inside a fenced block passed the gate"
+echo "$OUT" | grep -q "Anthropic API key found in" || fail "the fenced secret was not reported: $OUT"
+echo "PASS a secret inside a fenced block is still caught"
+
 echo "ALL PASS"

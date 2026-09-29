@@ -308,3 +308,12 @@ directory target there finds nothing and, if an older bundle happens to be in
 the same directory, scans handoffs that are not the one being delivered. When
 the gate is handed a directory with no `HANDOFF.md` it now says which of the
 two calls to make instead of only reporting the missing file.
+
+**Headings inside code fences.** The gate collects a section only from a
+heading **outside** a fenced code block (` ``` ` or `~~~`, longer runs and
+info strings included). The skill tells authors to paste templates, and a
+template shows the very headings the gate requires — so a `## Tried and
+rejected` inside a fenced example is sample text, not a section, and a
+handoff carrying only that fails for the missing section. Everything inside
+the fence is still scanned for secrets and paths: a fence hides a heading
+from the section check, never a credential from the secret check.

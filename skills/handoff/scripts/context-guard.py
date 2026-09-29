@@ -217,6 +217,23 @@ def main() -> None:
                     # context that no longer exists.
                     tokens = 0
                     tail_tokens = 0
+                    # Codex r5 on #45: the window EVIDENCE has to go with it.
+                    # latest_context is "a call this big fit", and that call is
+                    # now above the boundary — a 600k call, a boundary, then a
+                    # 150k post-boundary payload was measured against a window
+                    # INFERRED from the dead 600k call and stayed silent, though
+                    # 150k had crossed the real 200k window.
+                    latest_context = 0
+                    # latest_model is deliberately NOT reset. It is not evidence
+                    # derived from a call, it is an identity, and compaction does
+                    # not change the model — the session continues on the same
+                    # one. It feeds CONTEXT_WINDOW_BY_MODEL / the declared
+                    # mapping, which is a STATEMENT about the model rather than
+                    # an inference from a dead call, so clearing it would throw
+                    # away a correct, operator-supplied window and fall back to
+                    # the assumed default: strictly worse. If a post-boundary
+                    # line names a different model, the normal latest-wins rule
+                    # below picks it up.
                     continue
                 message = rec.get("message") or {}
                 model = message.get("model")

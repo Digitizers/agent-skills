@@ -642,4 +642,52 @@ OUT="$(run_guard "$WORK/in-prelow-ord2.json")"
 echo "$OUT" | grep -q "additionalContext" || fail "an ordinary event above the threshold stopped firing: $OUT"
 echo "PASS ordinary events keep their behaviour on both sides of the threshold"
 
+# 54. Codex round 5, P2 — THE WINDOW EVIDENCE MUST DIE AT THE BOUNDARY. The
+#     compact_boundary branch reset tokens and tail_tokens but left
+#     latest_context holding the pre-compaction call's size, so a 600k call,
+#     a boundary, and then a 150k post-boundary payload was measured against
+#     a window INFERRED from the dead 600k call (fit_window widens 200k to
+#     the 1M tier) and stayed silent — although 150k has crossed the real
+#     200k window.
+python3 - "$WORK/boundary.jsonl" "$WORK/in-boundary.json" <<'PY'
+import json, sys
+transcript, payload = sys.argv[1], sys.argv[2]
+with open(transcript, "w") as f:
+    # A pre-compaction call big enough to widen the inferred window to 1M.
+    f.write(json.dumps({"message": {"model": "claude-test-model", "usage": {
+        "input_tokens": 600000, "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0}}}) + "\n")
+    f.write(json.dumps({"subtype": "compact_boundary"}) + "\n")
+# ...and nothing after it: no post-boundary usage block. The 150k arrives as
+# the hook payload (estimate_tokens is bytes // 2).
+with open(payload, "w") as f:
+    json.dump({"transcript_path": transcript, "session_id": "cg-test-boundary",
+               "hook_event_name": "UserPromptSubmit", "prompt": "x" * 300000}, f)
+PY
+OUT="$(run_guard "$WORK/in-boundary.json")"
+[ -n "$OUT" ] || fail "REGRESSION (P2): a dead pre-boundary call's size kept the guard silent at 150k"
+echo "$OUT" | grep -q "additionalContext" || fail "the post-boundary crossing did not fire: $OUT"
+echo "$OUT" | grep -q "of 200000 tokens" || fail "the post-boundary crossing was judged against the pre-boundary window: $OUT"
+echo "PASS window evidence is discarded at a compact boundary"
+
+# 55. ...and the MODEL survives the boundary on purpose: it is an identity,
+#     not evidence from a dead call, and it feeds the operator's own
+#     CONTEXT_WINDOW_BY_MODEL mapping. Clearing it would throw away a
+#     correct, declared window and fall back to the assumed default.
+python3 - "$WORK/boundary2.jsonl" "$WORK/in-boundary2.json" <<'PY'
+import json, sys
+transcript, payload = sys.argv[1], sys.argv[2]
+with open(transcript, "w") as f:
+    f.write(json.dumps({"message": {"model": "big-model", "usage": {
+        "input_tokens": 600000, "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0}}}) + "\n")
+    f.write(json.dumps({"subtype": "compact_boundary"}) + "\n")
+with open(payload, "w") as f:
+    json.dump({"transcript_path": transcript, "session_id": "cg-test-boundary2",
+               "hook_event_name": "UserPromptSubmit", "prompt": "x" * 300000}, f)
+PY
+OUT="$(CONTEXT_WINDOW_BY_MODEL="big-model=1000000" run_guard "$WORK/in-boundary2.json")"
+[ -z "$OUT" ] || fail "the declared window for the model was lost at the boundary: $OUT"
+echo "PASS the declared model mapping survives a compact boundary"
+
 echo "all context-guard tests passed"

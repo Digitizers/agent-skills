@@ -158,4 +158,44 @@ echo "$OUT" | grep -q "It resets at" || fail "the weekly alert does not give the
 [ -z "$(run qg-test-seq "$WORK/seqweek.json")" ] || fail "the weekly act fired twice in one session"
 echo "PASS the 5-hour and weekly act alerts fire independently in one session"
 
+# 17. Codex round 5, P2 — the marker had no RESET CYCLE in it, so a session
+#     resumed after the quota window reset was suppressed forever: the bridge
+#     writes fresh high usage with a NEW resets_at and the guard returned at
+#     the marker left by the previous cycle. Each cycle must be able to warn
+#     once. Same session id throughout, on purpose.
+cycle_state() { # $1=file $2=five pct $3=seven pct $4=five resets_at $5=seven resets_at
+  python3 - "$1" "$2" "$3" "$4" "$5" <<'PY'
+import json, sys, time
+path = sys.argv[1]
+json.dump({"five_hour": {"used_percentage": float(sys.argv[2]), "resets_at": int(sys.argv[4])},
+           "seven_day": {"used_percentage": float(sys.argv[3]), "resets_at": int(sys.argv[5])},
+           "updated_at": int(time.time())}, open(path, "w"))
+PY
+}
+cycle_state "$WORK/cyc1.json" 85 5 1790000000 1790500000
+OUT="$(run qg-test-cycle "$WORK/cyc1.json")"
+echo "$OUT" | grep -q "STOP" || fail "the first cycle's act did not fire"
+# Same cycle, same session: silent, exactly as before.
+[ -z "$(run qg-test-cycle "$WORK/cyc1.json")" ] || fail "the act fired twice within one reset cycle"
+# The window has RESET and refilled: a new resets_at, high usage again.
+cycle_state "$WORK/cyc2.json" 85 5 1790018000 1790500000
+OUT="$(run qg-test-cycle "$WORK/cyc2.json")"
+[ -n "$OUT" ] || fail "REGRESSION (P2): the previous cycle's marker suppressed the new one forever"
+echo "$OUT" | grep -q "STOP" || fail "the new cycle's act did not stop: $OUT"
+# ...and the new cycle is itself once-per-cycle.
+[ -z "$(run qg-test-cycle "$WORK/cyc2.json")" ] || fail "the act fired twice within the new reset cycle"
+echo "PASS each reset cycle warns once, and a new cycle is not suppressed by the old marker"
+
+# 18. ...and the weekly window carries its own cycle key, so a new WEEKLY
+#     reset is not suppressed by the weekly marker from the cycle before.
+cycle_state "$WORK/wcyc1.json" 10 95 1790000000 1790500000
+OUT="$(run qg-test-wcycle "$WORK/wcyc1.json")"
+echo "$OUT" | grep -q "weekly limit" || fail "the first weekly cycle did not fire"
+[ -z "$(run qg-test-wcycle "$WORK/wcyc1.json")" ] || fail "the weekly act fired twice within one cycle"
+cycle_state "$WORK/wcyc2.json" 10 95 1790000000 1791104800
+OUT="$(run qg-test-wcycle "$WORK/wcyc2.json")"
+[ -n "$OUT" ] || fail "REGRESSION (P2): a new weekly cycle was suppressed by the old weekly marker"
+echo "$OUT" | grep -q "weekly limit" || fail "the new weekly cycle does not name the weekly limit: $OUT"
+echo "PASS a new weekly reset cycle warns again"
+
 echo "ALL PASS"

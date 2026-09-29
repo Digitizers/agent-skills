@@ -90,14 +90,30 @@ def main() -> None:
     ) else "5-hour window"
     window_key = "weekly" if window == "weekly limit" else "5h"
 
-    marker = marker_path(session_id, f"quota-{level}-{window_key}")
-    if os.path.exists(marker):
-        return
-
     used = seven if window == "weekly limit" else five
     resets = (state.get("seven_day") if window == "weekly limit"
               else state.get("five_hour")) or {}
     resets_at = resets.get("resets_at")
+
+    # Codex r5 on #45: the marker needs the RESET CYCLE in it, or a session
+    # resumed after the window reset is suppressed forever — the bridge
+    # supplies fresh high usage with a NEW resets_at and the guard returns at
+    # the marker from the cycle before. Keying by the cycle keeps the
+    # once-per-cycle property and lets the next cycle warn once of its own.
+    # A state file with no usable resets_at falls into one shared bucket,
+    # which is the old behaviour for exactly that case.
+    if isinstance(resets_at, (int, float)) and resets_at == resets_at:
+        try:
+            cycle_key = f"c{int(resets_at)}"
+        except (OverflowError, ValueError):
+            cycle_key = "cnone"
+    else:
+        cycle_key = "cnone"
+
+    marker = marker_path(session_id, f"quota-{level}-{window_key}-{cycle_key}")
+    if os.path.exists(marker):
+        return
+
     when = ""
     if isinstance(resets_at, (int, float)):
         when = f" It resets at {time.strftime('%H:%M on %d %b', time.localtime(resets_at))}."

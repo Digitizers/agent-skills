@@ -262,10 +262,40 @@ def iter_files(directory: str):
             yield os.path.relpath(full, directory), full
 
 
+# A fenced code block opener/closer: up to three spaces of indent, then a run
+# of at least three backticks or tildes, then an optional info string.
+FENCE_RX = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
 def sections(text: str) -> dict:
+    """Headings outside fenced code blocks, mapped to their content.
+
+    Codex r5 on #45: this used to treat any line starting with "#" as a
+    heading, fences included. The skill's own documentation tells authors to
+    paste a TEMPLATE in a code block, so a handoff could show
+    `## Tried and rejected` inside a fenced example, omit the real section
+    entirely, and still print GATE: PASS — the gate certifying a section that
+    exists only as sample text.
+    """
     out, current = {}, None
+    fence = ""  # the open fence's run of characters, "" when outside one
     for line in text.splitlines():
-        if line.startswith("#"):
+        match = FENCE_RX.match(line)
+        if match:
+            run, info = match.group(1), match.group(2)
+            if not fence:
+                # A backtick fence's info string may not contain a backtick
+                # (CommonMark), which is what keeps inline code like
+                # ``a ``b`` c`` from opening one.
+                if not (run[0] == "`" and "`" in info):
+                    fence = run
+            elif run[0] == fence[0] and len(run) >= len(fence) and not info.strip():
+                fence = ""
+            # A fence line is never a heading; inside a section it is content.
+            if current is not None:
+                out[current].append(line)
+            continue
+        if not fence and line.startswith("#"):
             current = line.lstrip("#").strip()
             # "Handoff — project (date)" and "Tools" are headings too; keep
             # them all, the required list decides which ones matter.
