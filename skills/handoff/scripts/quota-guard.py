@@ -16,7 +16,18 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from handoff_common import attended, env_float, marker_path  # noqa: E402
+from handoff_common import (  # noqa: E402
+    attended,
+    env_float,
+    marker_path,
+    quota_state_path,
+)
+
+
+# A reset timestamp outside this range cannot be real: 2000-01-01 to
+# 2100-01-01. Values beyond it are corruption, not information.
+EPOCH_FLOOR = 946684800
+EPOCH_CEILING = 4102444800
 
 
 def pct(limits: dict, key: str):
@@ -40,9 +51,13 @@ def main() -> None:
     session_id = inp.get("session_id") or "unknown"
     event = inp.get("hook_event_name") or "UserPromptSubmit"
 
-    path = os.environ.get("HANDOFF_QUOTA_STATE") or os.path.join(
-        os.path.expanduser("~"), ".claude", "handoff", "quota.json"
-    )
+    # This session's own snapshot — never another session's. The same
+    # function the bridge writes through, so the two cannot drift. "" means
+    # the payload identifies no session and there is no override: nothing to
+    # read, and silence is this guard's default for everything unknown.
+    path = quota_state_path(inp.get("session_id"))
+    if not path:
+        return
     try:
         with open(path, "r", encoding="utf-8") as f:
             state = json.load(f)
@@ -114,9 +129,30 @@ def main() -> None:
     if os.path.exists(marker):
         return
 
+    # The bridge stores whatever numeric fields the payload carried, without
+    # validating them, so `resets_at` may be 1e300 or deeply negative — and
+    # time.localtime() raises OverflowError, OSError or ValueError on those,
+    # which platform deciding which. That would make the hook exit nonzero on
+    # EVERY prompt: exactly the failure the never-raise rule exists to stop.
+    # The range check is what makes the outcome the SAME everywhere: macOS
+    # renders localtime(-99999999999999) as a date in the year 830 instead of
+    # raising, and "It resets at 16:34 on 24 Feb" for a window that resets in
+    # an hour is worse than no sentence. A reset time that cannot be true is
+    # worth dropping the sentence for, never the warning.
     when = ""
-    if isinstance(resets_at, (int, float)):
-        when = f" It resets at {time.strftime('%H:%M on %d %b', time.localtime(resets_at))}."
+    if (isinstance(resets_at, (int, float))
+            and not isinstance(resets_at, bool)
+            and resets_at == resets_at                 # not NaN
+            and EPOCH_FLOOR <= resets_at <= EPOCH_CEILING):
+        try:
+            when = (" It resets at "
+                    + time.strftime('%H:%M on %d %b', time.localtime(resets_at))
+                    + ".")
+        except (OverflowError, OSError, ValueError):
+            # Belt and braces: the range check above already rejects the
+            # values that raise, but which ones raise is platform-specific
+            # and this hook runs on every prompt.
+            when = ""
 
     if level == "warn":
         msg = (

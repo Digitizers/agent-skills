@@ -198,4 +198,39 @@ OUT="$(run qg-test-wcycle "$WORK/wcyc2.json")"
 echo "$OUT" | grep -q "weekly limit" || fail "the new weekly cycle does not name the weekly limit: $OUT"
 echo "PASS a new weekly reset cycle warns again"
 
+# 19. Codex round 7, P2 — A MALFORMED resets_at MUST NOT KILL THE HOOK. The
+#     bridge stores whatever numeric fields the payload carried without
+#     validating them, and time.localtime(1e300) raises OverflowError (or
+#     OSError/ValueError, by platform), so the guard exited non-zero on EVERY
+#     prompt — the exact failure the never-raise rule exists to prevent. The
+#     warning must survive; only the reset sentence is dropped.
+bad_resets() { # $1=file $2=json literal for resets_at
+  python3 - "$1" "$2" <<'PY'
+import json, sys, time
+path, raw = sys.argv[1], sys.argv[2]
+json.dump({"five_hour": {"used_percentage": 85.0, "resets_at": json.loads(raw)},
+           "seven_day": {"used_percentage": 5.0, "resets_at": 1790500000},
+           "updated_at": int(time.time())}, open(path, "w"))
+PY
+}
+i=0
+for raw in '1e300' '-1e300' '-99999999999999' '"tomorrow"' 'null' 'true'; do
+  i=$((i + 1))
+  bad_resets "$WORK/bad$i.json" "$raw"
+  STATUS=0
+  OUT="$(printf '{"session_id":"qg-test-badreset%s","hook_event_name":"UserPromptSubmit"}' "$i" \
+    | HANDOFF_QUOTA_STATE="$WORK/bad$i.json" CLAUDE_CODE_SESSION_ATTENDED=1 bash "$GUARD")" || STATUS=$?
+  [ "$STATUS" -eq 0 ] || fail "resets_at=$raw made the guard exit $STATUS"
+  echo "$OUT" | grep -q "STOP" || fail "resets_at=$raw lost the warning itself: $OUT"
+  echo "$OUT" | grep -q "It resets at" && fail "resets_at=$raw produced a reset sentence anyway: $OUT"
+done
+echo "PASS a malformed resets_at drops the reset sentence, never the warning or the exit code"
+
+# 20. ...and a SANE resets_at still produces the sentence: the guard must not
+#     have been made silent about reset times across the board.
+state "$WORK/goodreset.json" 85 5 0
+OUT="$(run qg-test-goodreset "$WORK/goodreset.json")"
+echo "$OUT" | grep -q "It resets at" || fail "a valid resets_at no longer produces the reset sentence: $OUT"
+echo "PASS a valid resets_at still reports when the window resets"
+
 echo "ALL PASS"

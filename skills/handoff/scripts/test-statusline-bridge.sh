@@ -152,4 +152,69 @@ cmp "$WORK/raw-in2.json" "$WORK/raw-out2.json" || fail "a payload with no traili
 [ -f "$WORK/q11.json" ] || fail "a payload with no trailing newline lost the state write"
 echo "PASS a payload with no trailing newline is passed through unchanged"
 
+# 12. Codex round 7, P1 — ONE STATE FILE FOR EVERY SESSION. Concurrent
+#     sessions (a subscription one beside an API-key or another account's)
+#     overwrote and deleted each other's snapshots: a high-usage account
+#     could stop an unrelated low-usage session, and since the round-1 fix an
+#     API-key render DELETED what a subscription session had just written.
+#     The file is per session now. HOME is redirected so these cases use the
+#     real default path scheme (~/.claude/handoff/quota-<session>.json)
+#     rather than the HANDOFF_QUOTA_STATE override the cases above use.
+unset HANDOFF_QUOTA_STATE
+HOMEDIR="$WORK/home"
+mkdir -p "$HOMEDIR"
+sess_payload() { # $1=session id, $2=five_hour pct
+  printf '{"session_id":"%s","model":{"display_name":"Opus"},"rate_limits":{"five_hour":{"used_percentage":%s,"resets_at":1790000000},"seven_day":{"used_percentage":5,"resets_at":1790500000}}}' "$1" "$2"
+}
+sess_payload session-alpha 95 | HOME="$HOMEDIR" bash "$BRIDGE" >/dev/null
+sess_payload session-beta 10 | HOME="$HOMEDIR" bash "$BRIDGE" >/dev/null
+[ -f "$HOMEDIR/.claude/handoff/quota-session-alpha.json" ] || fail "no per-session state file for session-alpha"
+[ -f "$HOMEDIR/.claude/handoff/quota-session-beta.json" ] || fail "no per-session state file for session-beta"
+python3 - "$HOMEDIR/.claude/handoff/quota-session-alpha.json" "$HOMEDIR/.claude/handoff/quota-session-beta.json" <<'PY' || fail "the two sessions share a snapshot"
+import json, sys
+a = json.load(open(sys.argv[1]))
+b = json.load(open(sys.argv[2]))
+assert a["five_hour"]["used_percentage"] == 95, a
+assert b["five_hour"]["used_percentage"] == 10, b
+PY
+echo "PASS each session gets its own state file"
+
+# 13. ...and the high-usage session does not stop the other one: the guard
+#     reads the file for ITS own session id.
+GUARD2="$(cd "$(dirname "$0")" && pwd)/quota-guard.sh"
+OUT="$(printf '{"session_id":"session-beta","hook_event_name":"UserPromptSubmit"}' \
+  | HOME="$HOMEDIR" TMPDIR="$WORK" CLAUDE_CODE_SESSION_ATTENDED=1 bash "$GUARD2")" \
+  || fail "the guard exited non-zero for session-beta"
+[ -z "$OUT" ] || fail "REGRESSION (P1): a different session's high usage stopped session-beta: $OUT"
+OUT="$(printf '{"session_id":"session-alpha","hook_event_name":"UserPromptSubmit"}' \
+  | HOME="$HOMEDIR" TMPDIR="$WORK" CLAUDE_CODE_SESSION_ATTENDED=1 bash "$GUARD2")"
+echo "$OUT" | grep -q "STOP" || fail "the high-usage session's own alarm did not fire: $OUT"
+echo "PASS one session's usage does not stop another"
+
+# 14. ...and an API-key payload with no rate_limits clears only ITS OWN
+#     session's state. This is the case the round-1 deletion fix broke when
+#     it met a shared file.
+printf '{"session_id":"session-beta","model":{"display_name":"Opus"}}' | HOME="$HOMEDIR" bash "$BRIDGE" >/dev/null
+[ ! -f "$HOMEDIR/.claude/handoff/quota-session-beta.json" ] || fail "the no-limits payload did not clear its own session's state"
+[ -f "$HOMEDIR/.claude/handoff/quota-session-alpha.json" ] || fail "REGRESSION (P1): an API-key session deleted another session's snapshot"
+echo "PASS a no-limits payload clears only its own session's state"
+
+# 15. ...and a payload with NO session id writes nothing at all: falling back
+#     to a shared file is the defect, so there is nothing to fall back to.
+before="$(ls "$HOMEDIR/.claude/handoff" | sort)"
+printf '{"model":{"display_name":"Opus"},"rate_limits":{"five_hour":{"used_percentage":99,"resets_at":1790000000}}}' \
+  | HOME="$HOMEDIR" bash "$BRIDGE" >/dev/null
+after="$(ls "$HOMEDIR/.claude/handoff" | sort)"
+[ "$before" = "$after" ] || fail "a payload with no session id wrote a state file: $after"
+echo "PASS a payload with no session id writes nothing"
+
+# 16. ...and HANDOFF_QUOTA_STATE still overrides with one explicit path, for
+#     a payload that carries a session id and for one that does not.
+echo "$PAYLOAD" | HOME="$HOMEDIR" HANDOFF_QUOTA_STATE="$WORK/override.json" bash "$BRIDGE" >/dev/null
+[ -f "$WORK/override.json" ] || fail "the override was ignored for a payload with no session id"
+sess_payload session-gamma 42 | HOME="$HOMEDIR" HANDOFF_QUOTA_STATE="$WORK/override2.json" bash "$BRIDGE" >/dev/null
+[ -f "$WORK/override2.json" ] || fail "the override was ignored for a payload with a session id"
+[ ! -f "$HOMEDIR/.claude/handoff/quota-session-gamma.json" ] || fail "the override did not stop the per-session write"
+echo "PASS HANDOFF_QUOTA_STATE still overrides with one explicit path"
+
 echo "ALL PASS"

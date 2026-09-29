@@ -188,6 +188,27 @@ The bridge passes the payload through to `HANDOFF_STATUSLINE_INNER` unchanged,
 so the statusline looks exactly as it did. Removing the two entries restores
 the previous setup; nothing else is touched.
 
+**The snapshot is per session.** The bridge writes
+`~/.claude/handoff/quota-<session_id>.json`, and the guard reads the file for
+the session id in its own hook payload — both through
+`handoff_common.quota_state_path()`, so they cannot drift. One shared file
+was wrong for the way these sessions are actually run: several at once, often
+a subscription session beside an API-key or another account's, where a
+high-usage snapshot stopped an unrelated low-usage session and an API-key
+render deleted what a subscription session had just written.
+
+- A payload carrying **no session id** is not recorded at all. Falling back to
+  a shared file is the defect, so there is nothing to fall back to.
+- `HANDOFF_QUOTA_STATE` still overrides both sides with one explicit path,
+  unchanged.
+- Old per-session files are pruned opportunistically: on a write the bridge
+  is making anyway, it drops `quota-*.json` files in that directory older
+  than a day. No daemon and no schedule. A live session's bridge rewrites its
+  file on every statusline render, and the guard ignores anything older than
+  15 minutes, so a day-old file cannot belong to a running session. Pruning
+  is skipped entirely when `HANDOFF_QUOTA_STATE` names a path — an operator's
+  directory is not the bridge's to tidy.
+
 **Ask before installing it.** It edits the user's `settings.json`. Print the
 JSON, explain what the bridge does, and let them decide. Without it, quota
 mode still works when the user asks for it by name.

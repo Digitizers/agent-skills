@@ -83,8 +83,50 @@ def env_positive_int(name: str):
     return value if value > 0 else None
 
 
+def sanitize_id(session_id) -> str:
+    """A session id reduced to characters that are safe in a filename.
+
+    Returns "" when there is no usable id at all — the callers treat that as
+    "this payload does not identify a session", which is a different thing
+    from an id made of odd characters.
+    """
+    if not isinstance(session_id, str) or not session_id:
+        return ""
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
+
+
 def marker_path(session_id: str, name: str) -> str:
     """One marker per session per purpose: a fired warning must never
     disarm a later, louder one."""
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
+    safe = sanitize_id(session_id)
     return os.path.join(tempfile.gettempdir(), f"handoff-{name}-{safe}")
+
+
+def quota_state_path(session_id) -> str:
+    """Where THIS session's quota snapshot lives, or "" for nowhere.
+
+    Codex r7 on #45: every session used to share one file, so concurrent
+    sessions — a subscription one beside an API-key or another account's —
+    overwrote and deleted each other's snapshots. A high-usage account could
+    stop an unrelated low-usage session, and since the round-1 fix an
+    API-key payload with no limits DELETED the state a subscription session
+    had just written. The file is per session now.
+
+    HANDOFF_QUOTA_STATE still overrides with one explicit path, exactly as
+    before: the tests and the install docs use it, and an operator who names
+    a path means that path.
+
+    With no override and no session id the answer is "" — nowhere. The
+    caller skips rather than falling back to a shared file, because the
+    shared file IS the defect; a payload that does not say which session it
+    belongs to cannot be recorded without reintroducing it.
+    """
+    override = os.environ.get("HANDOFF_QUOTA_STATE")
+    if override:
+        return override
+    safe = sanitize_id(session_id)
+    if not safe:
+        return ""
+    return os.path.join(
+        os.path.expanduser("~"), ".claude", "handoff", f"quota-{safe}.json"
+    )
