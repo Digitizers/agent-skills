@@ -224,16 +224,21 @@ def main() -> None:
                     # INFERRED from the dead 600k call and stayed silent, though
                     # 150k had crossed the real 200k window.
                     latest_context = 0
-                    # latest_model is deliberately NOT reset. It is not evidence
-                    # derived from a call, it is an identity, and compaction does
-                    # not change the model — the session continues on the same
-                    # one. It feeds CONTEXT_WINDOW_BY_MODEL / the declared
-                    # mapping, which is a STATEMENT about the model rather than
-                    # an inference from a dead call, so clearing it would throw
-                    # away a correct, operator-supplied window and fall back to
-                    # the assumed default: strictly worse. If a post-boundary
-                    # line names a different model, the normal latest-wins rule
-                    # below picks it up.
+                    # Codex r6 on #45 reversed round 5's ruling here, and it
+                    # was right. Keeping the model across the boundary looks
+                    # safe — compaction does not change the model — but a
+                    # session RESUMED on a differently mapped model, before
+                    # that model has emitted its first assistant message, was
+                    # then measured against the OLD model's window: a stale
+                    # 1M mapping silenced a new 200k session outright.
+                    # Suppression is the unsafe direction. Clearing it falls
+                    # back to the assumed default, which only makes the nudge
+                    # fire EARLY — and the "assumed default" wording already
+                    # tells the reader to judge against a larger window and
+                    # to set CONTEXT_WINDOW_BY_MODEL. The first post-boundary
+                    # assistant line restores the mapping by the ordinary
+                    # latest-wins rule.
+                    latest_model = ""
                     continue
                 message = rec.get("message") or {}
                 model = message.get("model")

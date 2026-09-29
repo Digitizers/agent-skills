@@ -670,10 +670,14 @@ echo "$OUT" | grep -q "additionalContext" || fail "the post-boundary crossing di
 echo "$OUT" | grep -q "of 200000 tokens" || fail "the post-boundary crossing was judged against the pre-boundary window: $OUT"
 echo "PASS window evidence is discarded at a compact boundary"
 
-# 55. ...and the MODEL survives the boundary on purpose: it is an identity,
-#     not evidence from a dead call, and it feeds the operator's own
-#     CONTEXT_WINDOW_BY_MODEL mapping. Clearing it would throw away a
-#     correct, declared window and fall back to the assumed default.
+# 55. ...and so does the MODEL, which reverses round 5's ruling here. Keeping
+#     latest_model across the boundary looks safe — compaction does not change
+#     the model — but a session RESUMED on a differently mapped model, before
+#     that model has emitted its first assistant message, was then measured
+#     against the OLD model's window: a stale 1M mapping silenced a new 200k
+#     session outright. Suppression is the unsafe direction; falling back to
+#     the assumed default only makes the nudge fire early, which the "assumed
+#     default" wording in the message already covers.
 python3 - "$WORK/boundary2.jsonl" "$WORK/in-boundary2.json" <<'PY'
 import json, sys
 transcript, payload = sys.argv[1], sys.argv[2]
@@ -682,12 +686,15 @@ with open(transcript, "w") as f:
         "input_tokens": 600000, "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 0}}}) + "\n")
     f.write(json.dumps({"subtype": "compact_boundary"}) + "\n")
+# Nothing after the boundary: the resumed model has not spoken yet.
 with open(payload, "w") as f:
     json.dump({"transcript_path": transcript, "session_id": "cg-test-boundary2",
                "hook_event_name": "UserPromptSubmit", "prompt": "x" * 300000}, f)
 PY
-OUT="$(CONTEXT_WINDOW_BY_MODEL="big-model=1000000" run_guard "$WORK/in-boundary2.json")"
-[ -z "$OUT" ] || fail "the declared window for the model was lost at the boundary: $OUT"
-echo "PASS the declared model mapping survives a compact boundary"
+OUT="$(CONTEXT_WINDOW_BY_MODEL="big-model=1000000,new-model=200000" run_guard "$WORK/in-boundary2.json")"
+[ -n "$OUT" ] || fail "REGRESSION (r6 P2): the pre-boundary model's 1M mapping silenced a post-boundary 200k session"
+echo "$OUT" | grep -q "of 200000 tokens" || fail "the post-boundary crossing was judged against the old model's window: $OUT"
+echo "$OUT" | grep -q "assumed default" || fail "the fallback does not tell the reader the window is assumed: $OUT"
+echo "PASS the pre-boundary model mapping is discarded at a compact boundary"
 
 echo "all context-guard tests passed"

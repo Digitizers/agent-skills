@@ -942,4 +942,106 @@ python3 "$GATE" "$WORK/fencedsecret" --mode compaction && fail "a secret inside 
 echo "$OUT" | grep -q "Anthropic API key found in" || fail "the fenced secret was not reported: $OUT"
 echo "PASS a secret inside a fenced block is still caught"
 
+# 57. Codex round 6, P1 — THE FILENAME IS PART OF THE HANDOFF. The patterns
+#     were applied to file CONTENTS only, so a bundle holding a regular file
+#     NAMED sk-ant-<value>.md printed GATE: PASS and the credential shipped
+#     as the filename.
+mkgood "$WORK/namesecret"
+printf 'nothing secret in here\n' > "$WORK/namesecret/sk-ant-api03-$(python3 -c 'print("A"*95)').md"
+OUT="$(python3 "$GATE" "$WORK/namesecret" --mode compaction || true)"
+python3 "$GATE" "$WORK/namesecret" --mode compaction && fail "REGRESSION (P1): a credential in a FILE NAME passed the gate"
+echo "$OUT" | grep -q "FILE NAME" || fail "the finding does not say the credential is in the file name: $OUT"
+echo "$OUT" | grep -q "rename the file" || fail "the finding does not name the way out: $OUT"
+echo "$OUT" | grep -q "sk-ant-api03-AAAA" && fail "the credential in the file name was printed verbatim: $OUT"
+echo "PASS a credential in a file NAME fails, and is redacted in the finding"
+
+# 58. ...and the generic label=value shape in a filename too.
+mkgood "$WORK/namegeneric"
+printf 'notes\n' > "$WORK/namegeneric/$(python3 -c 'print("BUNNY_API" + "_KEY=" + "7fd93ba21c0e" + "4b8aa1c2")').md"
+OUT="$(python3 "$GATE" "$WORK/namegeneric" --mode compaction || true)"
+python3 "$GATE" "$WORK/namegeneric" --mode compaction && fail "REGRESSION (P1): BUNNY_API_KEY=<value> as a FILE NAME passed the gate"
+echo "$OUT" | grep -q "FILE NAME" || fail "the generic filename finding does not say FILE NAME: $OUT"
+echo "PASS a generic credential shape in a file NAME fails"
+
+# 59. ...and ordinary file names still pass: the name scan must not start
+#     failing every bundle.
+mkgood "$WORK/nameok"
+echo "paste me" > "$WORK/nameok/PROMPT.txt"
+mkdir -p "$WORK/nameok/context"
+printf 'plain notes\n' > "$WORK/nameok/context/session-notes-2026-09-29.md"
+printf 'more\n' > "$WORK/nameok/api-design.md"
+python3 - "$WORK/nameok/workspace.zip" <<'PY'
+import zipfile, sys
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    zf.writestr("src/main.py", "print('hi')\n")
+PY
+OUT="$(python3 "$GATE" "$WORK/nameok" --mode quota)" || fail "ordinary file names were rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for ordinary file names: $OUT"
+echo "PASS ordinary file names still pass"
+
+# 60. Codex round 6, P2 — THE SAME FENCE HOLE IN A SECOND PLACE. The
+#     numbered-steps check read the RAW section text, so a `What to do next`
+#     whose only `1. …` line sat inside a fenced template passed with no real
+#     steps. The document is de-fenced ONCE now and every structural check
+#     reads that.
+mkgood "$WORK/fencedsteps"
+python3 - "$WORK/fencedsteps/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## What to do next\n1. Run the suite.\n2. Open the PR.\n",
+    "## What to do next\n"
+    "Follow the usual shape:\n\n"
+    "```markdown\n"
+    "1. <first concrete step>\n"
+    "2. <second concrete step>\n"
+    "```\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+grep -q "^1\. <first concrete step>" "$WORK/fencedsteps/HANDOFF.md" || fail "test setup: the fenced numbered line is not in the document"
+OUT="$(python3 "$GATE" "$WORK/fencedsteps" --mode compaction || true)"
+python3 "$GATE" "$WORK/fencedsteps" --mode compaction && fail "REGRESSION (P2): numbered steps that exist only inside a fence passed"
+echo "$OUT" | grep -q "What to do next is not a numbered list" || fail "the missing steps are not reported: $OUT"
+echo "PASS numbered steps inside a fence do not satisfy the check"
+
+# 61. ...and a real numbered list outside a fence still passes, fenced
+#     template and all.
+mkgood "$WORK/fencedstepsok"
+python3 - "$WORK/fencedstepsok/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## What to do next\n1. Run the suite.\n",
+    "## What to do next\n"
+    "```markdown\n"
+    "1. <first concrete step>\n"
+    "```\n"
+    "1. Run the suite.\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/fencedstepsok" --mode compaction)" || fail "a real numbered list next to a fenced template was rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for a real numbered list beside a fenced template: $OUT"
+echo "PASS a real numbered list outside the fence still passes"
+
+# 62. ...and a section whose whole body is a fenced block is NOT read as
+#     empty: de-fencing neutralises structure, it does not delete content.
+mkgood "$WORK/fencedbody"
+python3 - "$WORK/fencedbody/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Current state\nTests pass.\n",
+    "## Current state\n```\n$ pytest -q\n42 passed\n```\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/fencedbody" --mode compaction)" || fail "a section whose body is a code block was called empty: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for a code-block-only section: $OUT"
+echo "PASS a section whose whole body is a fenced block is not empty"
+
 echo "ALL PASS"

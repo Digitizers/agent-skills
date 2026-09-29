@@ -110,4 +110,46 @@ echo 'not json' | HANDOFF_QUOTA_STATE="$WORK/q8.json" bash "$BRIDGE" >/dev/null 
 [ -f "$WORK/q8.json" ] || fail "malformed input destroyed a good state file"
 echo "PASS malformed payload leaves existing state alone"
 
+# 9. Codex round 6, P2 — `$(cat)` STRIPS THE TRAILING NEWLINE, so an existing
+#    statusline written the ordinary way — `IFS= read -r payload` — saw EOF
+#    with no delimiter, failed, and rendered nothing. The wrapper's whole
+#    promise is that the user's statusline looks exactly as before.
+cat > "$WORK/reader.sh" <<'EOF'
+#!/usr/bin/env bash
+IFS= read -r line || { echo "READ FAILED" ; exit 1; }
+printf '%s' "$line" > "$READER_SEEN"
+echo "READ OK"
+EOF
+chmod +x "$WORK/reader.sh"
+OUT="$(printf '%s\n' "$PAYLOAD" | READER_SEEN="$WORK/read.json" HANDOFF_QUOTA_STATE="$WORK/q9.json" \
+  HANDOFF_STATUSLINE_INNER="$WORK/reader.sh" bash "$BRIDGE")" \
+  || fail "the bridge failed with a read -r inner statusline"
+[ "$OUT" = "READ OK" ] || fail "REGRESSION (P2): a read -r inner statusline got no line-terminated payload: $OUT"
+diff <(python3 -c "import json,sys;print(json.dumps(json.load(open('$WORK/read.json')),sort_keys=True))") \
+     <(python3 -c "import json;print(json.dumps(json.loads('''$PAYLOAD'''),sort_keys=True))") \
+     >/dev/null || fail "the read -r inner statusline received a modified payload"
+echo "PASS an inner statusline using read -r gets a newline-terminated payload"
+
+# 10. ...and the bytes are passed through EXACTLY, terminating newline
+#     included — not "the same JSON", the same bytes.
+cat > "$WORK/raw.sh" <<'EOF'
+#!/usr/bin/env bash
+cat > "$RAW_SEEN"
+EOF
+chmod +x "$WORK/raw.sh"
+printf '%s\n' "$PAYLOAD" > "$WORK/raw-in.json"
+RAW_SEEN="$WORK/raw-out.json" HANDOFF_QUOTA_STATE="$WORK/q10.json" \
+  HANDOFF_STATUSLINE_INNER="$WORK/raw.sh" bash "$BRIDGE" < "$WORK/raw-in.json" >/dev/null
+cmp "$WORK/raw-in.json" "$WORK/raw-out.json" || fail "the inner statusline did not receive byte-identical input"
+echo "PASS the payload reaches the inner statusline byte for byte"
+
+# 11. ...and a payload with NO trailing newline stays without one: preserving
+#     the bytes means preserving their absence too.
+printf '%s' "$PAYLOAD" > "$WORK/raw-in2.json"
+RAW_SEEN="$WORK/raw-out2.json" HANDOFF_QUOTA_STATE="$WORK/q11.json" \
+  HANDOFF_STATUSLINE_INNER="$WORK/raw.sh" bash "$BRIDGE" < "$WORK/raw-in2.json" >/dev/null
+cmp "$WORK/raw-in2.json" "$WORK/raw-out2.json" || fail "a payload with no trailing newline was altered"
+[ -f "$WORK/q11.json" ] || fail "a payload with no trailing newline lost the state write"
+echo "PASS a payload with no trailing newline is passed through unchanged"
+
 echo "ALL PASS"

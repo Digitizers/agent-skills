@@ -309,11 +309,25 @@ the same directory, scans handoffs that are not the one being delivered. When
 the gate is handed a directory with no `HANDOFF.md` it now says which of the
 two calls to make instead of only reporting the missing file.
 
-**Headings inside code fences.** The gate collects a section only from a
-heading **outside** a fenced code block (` ``` ` or `~~~`, longer runs and
-info strings included). The skill tells authors to paste templates, and a
-template shows the very headings the gate requires — so a `## Tried and
-rejected` inside a fenced example is sample text, not a section, and a
-handoff carrying only that fails for the missing section. Everything inside
-the fence is still scanned for secrets and paths: a fence hides a heading
-from the section check, never a credential from the secret check.
+**Code fences.** The document is de-fenced **once**, by `strip_fences()`,
+and every check that reasons about document STRUCTURE reads the de-fenced
+text: which sections exist, whether they are empty, the mode's required
+sections, and whether `What to do next` is a numbered list. The skill tells
+authors to paste templates, and a template shows the very headings and the
+very `1.` lines the gate requires — so a `## Tried and rejected` or a
+`1. <first step>` inside a fenced example is sample text, not structure, and
+a handoff carrying only those fails. A fenced line becomes a non-empty
+placeholder rather than nothing, so a section whose whole body is a code
+block still counts as having a body.
+
+The secret and path scans deliberately read the **raw** text: a fence hides
+structure from the structural checks, never a credential from the secret
+check.
+
+**File names.** The specific patterns and the generic `label = value` check
+run over each file's NAME as well as its contents, for every entry in the
+handoff including archives. A bundle holding a file called
+`sk-ant-<value>.md` ships that credential as plainly as one holding it in a
+body, and the gate used to pass it. The finding goes through the same
+redaction as every other line, so the name is reported with the credential
+masked.

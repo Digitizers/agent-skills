@@ -11,7 +11,12 @@
 # HANDOFF_STATUSLINE_INNER. Removing it restores the previous setting.
 set -uo pipefail
 
-payload="$(cat)"
+# `$(cat)` strips EVERY trailing newline, so an inner statusline written as
+# `IFS= read -r payload` saw EOF with no delimiter, failed, and rendered
+# nothing — the one thing this wrapper promises not to do. The `printf X`
+# sentinel preserves the payload exactly, terminating newline included.
+payload="$(cat; printf X)"
+payload="${payload%X}"
 state="${HANDOFF_QUOTA_STATE:-$HOME/.claude/handoff/quota.json}"
 
 STATE_PATH="$state" python3 - "$payload" <<'PY' || true

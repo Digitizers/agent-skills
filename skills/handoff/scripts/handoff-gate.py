@@ -266,36 +266,54 @@ def iter_files(directory: str):
 # of at least three backticks or tildes, then an optional info string.
 FENCE_RX = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
+# What a fenced line becomes in the de-fenced text. Non-empty on purpose — a
+# section whose whole body is a code block still HAS a body, so it must not
+# read as an empty section — but it carries no structure: no leading "#", no
+# "1." to satisfy the numbered-steps check.
+FENCE_PLACEHOLDER = "[code]"
 
-def sections(text: str) -> dict:
-    """Headings outside fenced code blocks, mapped to their content.
 
-    Codex r5 on #45: this used to treat any line starting with "#" as a
-    heading, fences included. The skill's own documentation tells authors to
-    paste a TEMPLATE in a code block, so a handoff could show
-    `## Tried and rejected` inside a fenced example, omit the real section
-    entirely, and still print GATE: PASS — the gate certifying a section that
-    exists only as sample text.
+def strip_fences(text: str) -> str:
+    """The document with every fenced code block neutralised, line for line.
+
+    Codex r6 on #45 fixed at the RULE, not the instance. Round 5 taught
+    sections() about fences, but the numbered-steps check still read the raw
+    text, so a `What to do next` whose only `1. …` line sat inside a fenced
+    template passed with no real steps — the same hole in a second place.
+    Every check that reasons about document STRUCTURE now reads this; the
+    secret and path scans keep reading the raw text, because a credential
+    inside a fence is still a credential.
+
+    This is a pragmatic subset of CommonMark: backtick and tilde fences, runs
+    longer than three, info strings, up to three spaces of indent, and the
+    rule that a backtick fence's info string may not itself contain a
+    backtick (which is what stops inline code from opening a fence). An
+    unclosed fence runs to the end of the document, as CommonMark says.
     """
-    out, current = {}, None
+    out = []
     fence = ""  # the open fence's run of characters, "" when outside one
     for line in text.splitlines():
         match = FENCE_RX.match(line)
         if match:
             run, info = match.group(1), match.group(2)
             if not fence:
-                # A backtick fence's info string may not contain a backtick
-                # (CommonMark), which is what keeps inline code like
-                # ``a ``b`` c`` from opening one.
                 if not (run[0] == "`" and "`" in info):
                     fence = run
+                    out.append(FENCE_PLACEHOLDER)
+                    continue
             elif run[0] == fence[0] and len(run) >= len(fence) and not info.strip():
                 fence = ""
-            # A fence line is never a heading; inside a section it is content.
-            if current is not None:
-                out[current].append(line)
-            continue
-        if not fence and line.startswith("#"):
+                out.append(FENCE_PLACEHOLDER)
+                continue
+        out.append(FENCE_PLACEHOLDER if fence else line)
+    return "\n".join(out)
+
+
+def sections(text: str) -> dict:
+    """Headings mapped to their content. Give it de-fenced text."""
+    out, current = {}, None
+    for line in text.splitlines():
+        if line.startswith("#"):
             current = line.lstrip("#").strip()
             # "Handoff — project (date)" and "Tools" are headings too; keep
             # them all, the required list decides which ones matter.
@@ -382,7 +400,12 @@ def main() -> int:
     except OSError as exc:
         print(f"GATE: FAIL — {redact(f'could not read {doc}: {exc}')}")
         return 1
-    found = sections(text)
+    # ONE de-fencing, feeding every structural check below (section
+    # presence, section emptiness, the mode's required sections, and the
+    # numbered-steps rule, which all read `found`). The secret and path
+    # scans deliberately keep using `text`.
+    structure = strip_fences(text)
+    found = sections(structure)
 
     for name in REQUIRED_SECTIONS:
         match = next((v for k, v in found.items() if k.lower() == name.lower()), None)
@@ -505,6 +528,29 @@ def main() -> int:
             if base in (".env", ".npmrc", ".pypirc", "id_rsa", "id_ed25519") or \
                     base.startswith(".env."):
                 problems.append(f"{rel} contains {entry} — credentials never travel in the zip")
+
+    # Codex r6 on #45: the patterns were applied to file CONTENTS only, so a
+    # bundle holding a regular file NAMED `sk-ant-<value>.md` printed
+    # GATE: PASS and shipped the credential as the filename. Names are
+    # checked for every entry, archives included — an archive is excluded
+    # from the text scan, never from this one. The finding itself goes
+    # through redact() before printing, so the name is not echoed.
+    for rel, _full in all_files:
+        for pattern, label in SECRET_PATTERNS:
+            if pattern.search(rel):
+                problems.append(
+                    f"{label} in the FILE NAME {rel} — a credential in a "
+                    "filename ships with the handoff; rename the file"
+                )
+        for match in GENERIC_CRED_RX.finditer(rel):
+            value = match.group(3)
+            if len(value) >= 12 and not PLACEHOLDER_RX.match(value):
+                problems.append(
+                    f"possible credential (heuristic match) in the FILE NAME "
+                    f"{rel} — if this is a real secret, rename the file; if "
+                    "it isn't, rename it so it does not contain "
+                    + GENERIC_CRED_LABEL_LIST
+                )
 
     # Every file in the handoff directory is scanned, not just the document:
     # PROMPT.txt is the file most likely to be pasted into another account.
