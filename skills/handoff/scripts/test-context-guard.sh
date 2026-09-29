@@ -607,4 +607,39 @@ echo "$OUT" | grep -q "past the 80% stop threshold" || fail "the stop message do
 echo "$OUT" | grep -q "past the 70% handoff threshold" && fail "the stop message still cites the warn threshold: $OUT"
 echo "PASS the stop message cites the threshold that fired"
 
+# 51. Codex round 4, P2 — the PreCompact branch sat AFTER the `pct <
+#     threshold` return, so the backstop went SILENT whenever the configured
+#     window overstated the real one. A 200k session auto-compacting at 170k
+#     with CONTEXT_WINDOW_TOKENS=1000000 set computes ~17% and returned —
+#     nothing emitted at exactly the moment the net exists for. The event is
+#     proof that compaction began; it cannot be gated behind a percentage
+#     derived from possibly-stale configuration.
+mk_transcript "$WORK/prelow.jsonl" 170000
+printf '{"transcript_path":"%s","session_id":"cg-test-prelow","hook_event_name":"PreCompact"}' "$WORK/prelow.jsonl" > "$WORK/in-prelow.json"
+OUT="$(CONTEXT_WINDOW_TOKENS=1000000 run_guard "$WORK/in-prelow.json")"
+[ -n "$OUT" ] || fail "REGRESSION (P2): PreCompact below the threshold emitted nothing"
+echo "$OUT" | grep -q "systemMessage" || fail "the below-threshold backstop did not use systemMessage: $OUT"
+echo "$OUT" | grep -q "additionalContext" && fail "PreCompact emitted additionalContext, which it does not consume"
+echo "$OUT" | grep -q "Compaction is starting" || fail "the below-threshold backstop does not say compaction is starting: $OUT"
+echo "$OUT" | grep -q "past the" && fail "the below-threshold backstop claims the threshold was crossed: $OUT"
+echo "$OUT" | grep -q "below the" || fail "the below-threshold backstop does not say it is below the threshold: $OUT"
+echo "PASS PreCompact fires below the threshold when the window is overstated"
+
+# 52. ...and it leaves no marker behind, so a second PreCompact in the same
+#     session still fires (compaction is a discrete event).
+OUT="$(CONTEXT_WINDOW_TOKENS=1000000 run_guard "$WORK/in-prelow.json")"
+echo "$OUT" | grep -q "systemMessage" || fail "the below-threshold backstop fired only once per session"
+echo "PASS the below-threshold backstop leaves no marker"
+
+# 53. ...and an ORDINARY event below the threshold stays silent: the reorder
+#     must change nothing but PreCompact.
+printf '{"transcript_path":"%s","session_id":"cg-test-prelow-ord","hook_event_name":"UserPromptSubmit"}' "$WORK/prelow.jsonl" > "$WORK/in-prelow-ord.json"
+OUT="$(CONTEXT_WINDOW_TOKENS=1000000 run_guard "$WORK/in-prelow-ord.json")"
+[ -z "$OUT" ] || fail "REGRESSION: an ordinary event below the threshold fired: $OUT"
+# ...and the same ordinary event ABOVE the threshold still fires as before.
+printf '{"transcript_path":"%s","session_id":"cg-test-prelow-ord2","hook_event_name":"UserPromptSubmit"}' "$WORK/prelow.jsonl" > "$WORK/in-prelow-ord2.json"
+OUT="$(run_guard "$WORK/in-prelow-ord2.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "an ordinary event above the threshold stopped firing: $OUT"
+echo "PASS ordinary events keep their behaviour on both sides of the threshold"
+
 echo "all context-guard tests passed"

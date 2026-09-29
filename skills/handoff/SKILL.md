@@ -152,8 +152,11 @@ Details and the `PROMPT.txt` template: [references/modes.md](references/modes.md
   not certify it — repackage the bundle as a `.zip` or leave it out. And in
   `quota` / `cross-workspace` mode `PROMPT.txt` must be a non-empty regular
   file, not just a name that exists. Its credential check is a **heuristic**: any
-  `label = value` where the label ends in `password`/`secret`/`token`/`api_key`
-  and the value isn't an obvious placeholder trips it, including a benign
+  `label = value` whose label CONTAINS one of the credential words — the
+  authoritative list is `GENERIC_CRED_KEYWORDS` in `handoff-gate.py`, and the
+  failure message prints it, so read one of those two rather than trusting a
+  list written down elsewhere — and whose value isn't an obvious placeholder
+  trips it, including a benign
   identifier like `trace_token: 8f14e45f-...` (a real UUID, not a secret) —
   that is deliberate, not a bug. A
   failure is a list of things to fix, not an opinion; if a flagged line isn't

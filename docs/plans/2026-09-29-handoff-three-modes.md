@@ -860,6 +860,10 @@ SECRET_PATTERNS = (
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key id"),
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "private key"),
     (re.compile(r"\b[a-z+]+://[^/\s:@]+:[^/\s:@]+@"), "connection string with a password"),
+    # SUPERSEDED as shipped — this planned four-word alternation grew over
+    # six review rounds into GENERIC_CRED_KEYWORDS in handoff-gate.py (a
+    # separate constant from SECRET_PATTERNS, with its own placeholder check
+    # and a generated failure message). Read that constant, not this line.
     (re.compile(r"(?i)\b(password|secret|token|api[_-]?key)\s*[=:]\s*['\"]?[A-Za-z0-9/+_-]{12,}"),
      "credential assignment"),
 )

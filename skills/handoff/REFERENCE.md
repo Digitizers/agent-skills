@@ -226,15 +226,26 @@ handoff skill first, rather than asking for a stop that can no longer happen.
 ### A note on the gate's credential check
 
 `handoff-gate.py`'s generic credential check is a **heuristic**, not a secret
-scanner: any `label = value` where the label ends in
-`password`/`secret`/`token`/`api_key` and the value isn't an obvious
-placeholder trips it — including a benign identifier whose label happens to
-end in one of those words, such as `trace_token: 8f14e45f-...` (a real UUID
+scanner: any `label = value` whose label CONTAINS one of the credential words
+and whose value isn't an obvious placeholder trips it — including a benign
+identifier whose label happens to contain one of those words, such as `trace_token: 8f14e45f-...` (a real UUID
 correlation id, not a secret). The gate's own failure message says so. A
 `GATE: FAIL` on this check is a list of things to look at, not proof of a
 leak — if the flagged line isn't actually a secret, rename the label or
 remove the line rather than treating the failure as a false negative in the
 gate.
+
+**Where the label list lives.** `GENERIC_CRED_KEYWORDS` in `handoff-gate.py`
+is the single source: the regex is built from it and the failure message's
+"rename the label so it does not contain ..." text is generated from it, so
+the two cannot drift. At the time of writing it holds `password`, `passwd`, `pwd`,
+`passphrase`, `secret`, `credential`, `bearer`, `token`, `cookie`,
+`authorization`, `auth`, `api_key`, `access_key`, `private_key` and
+`session_key` — but read the constant or a `GATE: FAIL` line, not this sentence, which is
+the kind of second copy that was wrong for four review rounds running. An
+HTTP scheme word before the value (`Authorization: Basic <value>`) is matched
+separately, so the credential after it is what gets length-checked and
+placeholder-checked.
 
 ### What else the gate checks, and what it deliberately does not
 

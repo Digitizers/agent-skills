@@ -80,7 +80,11 @@ SECRET_PATTERNS = (
 #     `*_CREDENTIALS`, `*_AUTH` and `*_PWD` were invisible — the keyword may
 #     now be followed by label characters as well as preceded by them.
 #   * `passwd`, `pwd`, `credential` and `bearer` were not in the alternation,
-#     so `DB_PASSWD=hunter2hunter2hunter` read as prose.
+#     so `DB_PASSWD=hunter2hunter2hunter` read as prose. (Round 6 added the
+#     authentication labels the round-5 note above already claimed — `auth`,
+#     `authorization` — plus `passphrase`, `cookie` and the `access`/
+#     `private`/`session` key shapes. The alternation itself is the list;
+#     see GENERIC_CRED_KEYWORDS below.)
 #   * The value character class excluded `@ ! # % & * ( ) , ;`, so a password
 #     with punctuation early (`p@ssw0rd!Xy29KqZ`) truncated to `p` and fell
 #     under the 4-character minimum. The value is now "everything up to
@@ -92,11 +96,38 @@ SECRET_PATTERNS = (
 # `BUNNY_API_KEY=REDACTED_DO_NOT_COMMIT`, `<paste-here>`, `xxxxxxxx` and
 # `your-key-here` still pass, and "secret: the build is slow" still does not
 # match (`the` is 3 characters).
+# Fix-round-6 pin: the alternation is now the SINGLE SOURCE for both the
+# regex and the failure message's "so it does not contain ..." list. For four
+# rounds a comment or a doc claimed coverage the alternation did not have —
+# most recently the `*_AUTH` claim two comments up, while `auth` was not in
+# the list at all, so `BASIC_AUTH=<opaque value>` got GATE: PASS. Anything
+# that names these labels must read them from here, or say where they live.
+GENERIC_CRED_KEYWORDS = (
+    "password", "passwd", "pwd", "passphrase",
+    "secret", "credential", "bearer", "token", "cookie",
+    # `authorization` before `auth` for readability only: both are surrounded
+    # by label characters below, so either one matches AUTHORIZATION.
+    "authorization", "auth",
+    "api[_-]?key", "access[_-]?key", "private[_-]?key", "session[_-]?key",
+)
+# The same list as a human reads it — the failure message prints this, so the
+# text a writer sees can never drift from the labels the scan uses.
+GENERIC_CRED_LABEL_LIST = "/".join(
+    k.replace("[_-]?", "_") for k in GENERIC_CRED_KEYWORDS
+)
+# An HTTP auth value carries a scheme word before the credential
+# (`Authorization: Basic ZHVtbXk6c2VjcmV0`). Without this the value group
+# stopped at the space and captured "Basic", five characters, which fell
+# under the length floor and let the real credential through. The scheme is
+# its own group so the PLACEHOLDER check still sees only the value:
+# `AUTHORIZATION=Bearer REDACTED` stays a placeholder.
 GENERIC_CRED_RX = re.compile(
     r"(?i)[A-Za-z0-9_-]*"
-    r"(?:password|passwd|pwd|secret|credential|bearer|token|api[_-]?key)"
+    r"(?:" + "|".join(GENERIC_CRED_KEYWORDS) + r")"
     r"[A-Za-z0-9_-]*\s*[=:]\s*"
-    r"(['\"]?)([^\s'\"`|]{4,})\1"
+    r"(['\"]?)"
+    r"((?:(?:basic|bearer|digest|token|apikey|api-key)\s+)?)"
+    r"([^\s'\"`|]{4,})\1"
 )
 
 # Fix-round-2 pin: a placeholder must be recognisable as a WHOLE value, never
@@ -209,8 +240,10 @@ def redact(message: str) -> str:
         out = pattern.sub("[redacted]", out)
 
     def _mask_value(match):
+        # group 3 is the credential itself; group 2 is any HTTP scheme word
+        # before it, which is not secret and stays readable.
         whole = match.group(0)
-        prefix = whole[: match.start(2) - match.start(0)]
+        prefix = whole[: match.start(3) - match.start(0)]
         return prefix + "[redacted]" + (match.group(1) or "")
 
     return GENERIC_CRED_RX.sub(_mask_value, out)
@@ -465,10 +498,10 @@ def main() -> int:
             if pattern.search(body):
                 problems.append(f"{label} found in {rel} — redact the value, keep the name")
         for match in GENERIC_CRED_RX.finditer(body):
-            value = match.group(2)
+            value = match.group(3)
             if len(value) >= 12 and not PLACEHOLDER_RX.match(value):
-                # Fix-round-4: this line is a HEURISTIC — any label ending in
-                # password/secret/token/api_key with an assignment-shaped
+                # Fix-round-4: this line is a HEURISTIC — any label
+                # containing one of GENERIC_CRED_KEYWORDS with an assignment-shaped
                 # value trips it, including benign non-secrets (a UUID
                 # correlation id, a 40-hex build hash). Its wording says so
                 # and gives both ways out, and its leading phrase is
@@ -480,7 +513,7 @@ def main() -> int:
                     "if this is a real secret, redact the value and keep "
                     "the name; if it isn't, remove it from the document or "
                     "rename the label so it does not contain "
-                    "password/passwd/pwd/secret/credential/bearer/token/api_key"
+                    + GENERIC_CRED_LABEL_LIST
                 )
 
     if problems:

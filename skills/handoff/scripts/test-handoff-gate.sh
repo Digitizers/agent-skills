@@ -733,4 +733,120 @@ OUT="$(python3 "$GATE" "$WORK/bundlemode" --mode quota)" || fail "a bundle direc
 echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for the bundle directory: $OUT"
 echo "PASS a bundle directory is still gated as a directory"
 
+# 47. Codex round 4, P1 — THE COMMENT WAS AHEAD OF THE CODE. A round-5 note
+#     beside GENERIC_CRED_RX claimed `*_AUTH` labels were covered, but `auth`
+#     was never in the alternation, so `BASIC_AUTH=<opaque value>` — a real
+#     credential — got GATE: PASS and the gate certified it.
+mkgood "$WORK/basicauth"
+python3 - "$WORK/basicauth/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n", "## Details\n" + "BASIC_AU" + "TH=" + "ZHVtbXk6" + "c2VjcmV0" + "\n", 1)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/basicauth" --mode compaction || true)"
+python3 "$GATE" "$WORK/basicauth" --mode compaction && fail "REGRESSION (P1): BASIC_AUTH=<opaque value> passed the gate"
+echo "$OUT" | grep -q "heuristic" || fail "the auth finding does not name itself a heuristic: $OUT"
+echo "PASS BASIC_AUTH= with an opaque value fails"
+
+# 48. ...and an HTTP Authorization header value, where the credential sits
+#     AFTER a scheme word. The value group used to stop at the space and
+#     capture "Basic" — five characters, under the length floor — so the
+#     real credential went through. The scheme is now matched separately.
+mkgood "$WORK/authheader"
+python3 - "$WORK/authheader/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\n" + "AUTHORIZA" + "TION=Basic " + "ZHVtbXk6" + "c2VjcmV0" + "\n", 1)
+open(p, "w").write(s)
+PY
+python3 "$GATE" "$WORK/authheader" --mode compaction && fail "REGRESSION (P1): AUTHORIZATION=Basic <value> passed the gate"
+echo "PASS AUTHORIZATION=Basic <value> fails despite the scheme word"
+
+# 49. ...and a passphrase, another label the alternation was missing.
+mkgood "$WORK/passphrase"
+python3 - "$WORK/passphrase/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\n" + "SSH_PASS" + "PHRASE=" + "correct-horse" + "-battery" + "\n", 1)
+open(p, "w").write(s)
+PY
+python3 "$GATE" "$WORK/passphrase" --mode compaction && fail "REGRESSION (P1): SSH_PASSPHRASE=<value> passed the gate"
+echo "PASS SSH_PASSPHRASE= fails"
+
+# 50. ...and the placeholder exemptions still work on every new label: the
+#     skill tells the writer to keep the NAME and redact the value, and
+#     widening the alternation must not turn that instruction into a failure.
+mkgood "$WORK/authplaceholder"
+python3 - "$WORK/authplaceholder/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+lines = "\n".join([
+    "AUTH=REDACTED",
+    "AUTHORIZATION=Bearer REDACTED",
+    "SSH_PASSPHRASE=REDACTED_DO_NOT_COMMIT",
+    "SESSION_COOKIE=<paste-here>",
+    "AWS_ACCESS_KEY=xxxxxxxxxxxx",
+    "DEPLOY_PRIVATE_KEY=your-key-here",
+])
+s = open(p).read().replace("## Details\n", f"## Details\n{lines}\n", 1)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/authplaceholder" --mode compaction)" || fail "placeholders on the new labels were rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for placeholders on the new labels: $OUT"
+echo "PASS placeholder values still pass on every newly covered label"
+
+# 51. ...and prose mentioning auth with no assignment is still prose.
+mkgood "$WORK/authprose"
+python3 - "$WORK/authprose/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\nThe auth flow is broken; basic auth was removed last week.\n"
+    "Set up authorization before running the sync, and clear the cookie jar.\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/authprose" --mode compaction)" || fail "prose mentioning auth was rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for prose mentioning auth: $OUT"
+echo "PASS prose mentioning auth with no assignment still passes"
+
+# 52. ...and the failure message's label list is GENERATED from the
+#     alternation, so the text a writer is told to rename away from can never
+#     drift from the labels the scan actually uses again. This is the
+#     structural half of the fix — four rounds running, a claim about
+#     coverage was ahead of the code.
+OUT="$(python3 - "$GATE" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("gate", sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+expected = "/".join(k.replace("[_-]?", "_") for k in m.GENERIC_CRED_KEYWORDS)
+missing = [k for k in m.GENERIC_CRED_KEYWORDS
+           if k.replace("[_-]?", "_") not in m.GENERIC_CRED_LABEL_LIST]
+print("OK" if expected == m.GENERIC_CRED_LABEL_LIST and not missing else "DRIFT")
+PY
+)"
+[ "$OUT" = "OK" ] || fail "the printed label list drifted from the alternation: $OUT"
+# ...and the message really prints it.
+mkgood "$WORK/labellist"
+python3 - "$WORK/labellist/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n", "## Details\n" + "MY_SESSION_CO" + "OKIE=" + "abcdef012345" + "6789abcd" + "\n", 1)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/labellist" --mode compaction || true)"
+echo "$OUT" | grep -q "authorization" || fail "the failure message does not print the generated label list: $OUT"
+echo "$OUT" | grep -q "passphrase" || fail "the failure message's label list is missing passphrase: $OUT"
+echo "PASS the failure message's label list is generated from the alternation"
+
 echo "ALL PASS"

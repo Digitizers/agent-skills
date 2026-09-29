@@ -276,8 +276,6 @@ def main() -> None:
     # of every marker name below, so a warn firing earlier in the session
     # cannot disarm the later, louder stop — each level fires once on its own.
     level = "stop" if pct >= stop_pct else "warn"
-    if pct < threshold:
-        return
     # PreCompact is the backstop for the case where the stop at
     # HANDOFF_STOP_PCT was ignored — and in exactly that case a stop marker
     # for this session already exists, so an ordinary once-per-session check
@@ -286,6 +284,16 @@ def main() -> None:
     # leaves none behind: compaction is a discrete event, not a threshold that
     # can be crossed repeatedly by the same growing transcript.
     precompact = event == "PreCompact"
+    # Codex r4 on #45: this used to sit AFTER the threshold return, so the
+    # backstop went silent whenever the configured window OVERSTATED the real
+    # one — a 200k session auto-compacting at 170k with
+    # CONTEXT_WINDOW_TOKENS=1000000 set computes ~17% and returned, at exactly
+    # the moment the net exists for. The EVENT is proof that compaction began;
+    # a percentage derived from possibly-stale configuration cannot outrank
+    # it. Every other event keeps the old behaviour exactly.
+    below_threshold = pct < threshold
+    if below_threshold and not precompact:
+        return
     window_marker = f"{marker}-{provenance}-{window_key}-{level}"
     assumed_marker = f"{marker}-assumed-{model_key}-{level}"
     if not precompact:
@@ -311,17 +319,29 @@ def main() -> None:
     # two different numbers for one crossing.
     fired = stop_pct if level == "stop" else threshold
     fired_name = "stop" if level == "stop" else "handoff"
-    msg = (
-        f"Context window is at ~{pct:.0f}% of {window} tokens (~{tokens} "
-        f"used, estimated), past the {fired:.0f}% {fired_name} threshold. "
-    )
-    if inferred:
+    if below_threshold:
+        # Only reachable on PreCompact. Saying "past the 70% threshold" here
+        # would be false, and the figure is the thing not to be trusted: the
+        # host decided to compact, so the real window is smaller than the one
+        # this guard was told about, or the estimate undercounts.
+        msg = (
+            f"Context window is at ~{pct:.0f}% of {window} tokens (~{tokens} "
+            f"used, estimated) — below the {threshold:.0f}% {fired_name} "
+            "threshold, so the window actually in use is smaller than the "
+            f"{window} configured or assumed here, or the estimate undercounts. "
+        )
+    else:
+        msg = (
+            f"Context window is at ~{pct:.0f}% of {window} tokens (~{tokens} "
+            f"used, estimated), past the {fired:.0f}% {fired_name} threshold. "
+        )
+    if not below_threshold and inferred:
         msg += (
             f"{window} is the smallest window this transcript proves (a lower "
             "bound — the real window may be larger; set CONTEXT_WINDOW_BY_MODEL "
             "to state it). "
         )
-    if assumed:
+    if not below_threshold and assumed:
         # An agent once obeyed "70% of 200000" on a 1M session (#40). Say what
         # is not known, and name the setting that settles it.
         # Never "this alarm is false" (Codex r1 on #41): the estimate can
