@@ -327,4 +327,45 @@ OUT="$(python3 "$GATE" "$WORK/shortvalue" --mode compaction)" || fail "short non
 echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for 'secret: the build is slow'"
 echo "PASS short non-credential-shaped value after 'secret:' still passes"
 
+# 22. Fix-round-4: the known false positive from round 3's prefix widening
+#     (a benign correlation id whose label ends in "token") still fails the
+#     gate on purpose — the coordinator ruled the mechanism stays best-effort
+#     rather than punching an exemption hole for UUID/hex/base64 shapes — but
+#     the failure line must now say so and name both ways out, so this is a
+#     documented, known behaviour rather than a silent trap for the writer.
+mkgood "$WORK/falsepositive"
+python3 - "$WORK/falsepositive/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\ntrace_token: 3fa85f64-5717-4562-b3fc-2c963f66afa6\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/falsepositive" --mode compaction || true)"
+python3 "$GATE" "$WORK/falsepositive" --mode compaction && fail "trace_token correlation id passed the gate (should still fail — known, documented behaviour)"
+echo "$OUT" | grep -q "heuristic" || fail "generic finding does not name itself a heuristic: $OUT"
+echo "$OUT" | grep -q "redact the value" || fail "generic finding does not mention redacting: $OUT"
+echo "$OUT" | grep -qE "remove it|rename the label" || fail "generic finding does not name the non-credential way out: $OUT"
+echo "PASS documented false positive (trace_token: <uuid>) still fails, with guidance"
+
+# 23. Fix-round-4: a real sk-ant- value must fail with the SPECIFIC-pattern
+#     wording ("Anthropic API key found in ..."), not the heuristic wording —
+#     a reader must be able to tell "this is definitely a key" from "this
+#     looks like an assignment" at a glance.
+mkgood "$WORK/specificwording"
+python3 - "$WORK/specificwording/HANDOFF.md" "sk-ant-api03-$(python3 -c 'print("A"*95)')" <<'PY'
+import sys
+p, value = sys.argv[1], sys.argv[2]
+s = open(p).read().replace("## Details\n", f"## Details\n{value}\n", 1)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/specificwording" --mode compaction || true)"
+python3 "$GATE" "$WORK/specificwording" --mode compaction && fail "real sk-ant- secret passed the gate"
+echo "$OUT" | grep -q "Anthropic API key found in" || fail "specific-pattern wording missing: $OUT"
+echo "$OUT" | grep -q "heuristic" && fail "specific pattern must not use heuristic wording: $OUT"
+echo "PASS real sk-ant- secret fails with specific-pattern wording, not heuristic wording"
+
 echo "ALL PASS"

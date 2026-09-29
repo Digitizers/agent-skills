@@ -243,7 +243,21 @@ def main() -> int:
         for match in GENERIC_CRED_RX.finditer(body):
             value = match.group(2)
             if len(value) >= 12 and not PLACEHOLDER_RX.match(value):
-                problems.append(f"credential assignment found in {rel} — redact the value, keep the name")
+                # Fix-round-4: this line is a HEURISTIC — any label ending in
+                # password/secret/token/api_key with an assignment-shaped
+                # value trips it, including benign non-secrets (a UUID
+                # correlation id, a 40-hex build hash). Its wording says so
+                # and gives both ways out, and its leading phrase is
+                # deliberately distinct from the specific-pattern message
+                # below, so a reader scanning GATE: FAIL lines can tell
+                # "this is definitely a key" from "this looks like one."
+                problems.append(
+                    f"possible credential (heuristic match) in {rel} — "
+                    "if this is a real secret, redact the value and keep "
+                    "the name; if it isn't, remove it from the document or "
+                    "rename the label so it doesn't end in "
+                    "password/secret/token/api_key"
+                )
 
     if problems:
         for problem in problems:
