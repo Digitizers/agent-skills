@@ -43,6 +43,24 @@ Close the document with an explicit instruction to the next agent: *remember
 this information and wait for further instructions — do not start working on
 anything.* The handoff transfers state, it does not assign work.
 
+## Modes
+
+The four-part contract above is the whole document in every mode. A mode
+**adds** a block; it never replaces the core. Pick the mode from what the
+reader will not know:
+
+| Mode | The reader | Adds |
+|---|---|---|
+| `compaction` | this same agent, minutes from now, memory erased, workspace intact | what is mid-action; the user's constraints and decisions verbatim; **Tried and rejected**; a verification command (branch, sha, `git status`) |
+| `same-workspace` | another agent on this machine | the above, plus what is uncommitted and the user's unwritten conventions |
+| `cross-workspace` | another agent on another machine | the above, plus a **Setup** section: repository, branch, exact sha, environment variable names, required MCP servers and skills, and one command that must pass first |
+| `quota` | a fresh session, possibly another account | the above, plus `PROMPT.txt` and when the window resets |
+
+When the user says "hand this to another agent" without saying where, ask
+which of the two workspaces it is — the answer changes half the document.
+
+Details and the `PROMPT.txt` template: [references/modes.md](references/modes.md).
+
 ## Rules
 
 - **Language:** write the document in the primary language of the current
@@ -89,6 +107,19 @@ anything.* The handoff transfers state, it does not assign work.
 - **Chat UIs with downloads/artifacts:** deliver the markdown so it is
   downloadable from within the chat body (artifact or file attachment), and
   also state where it was saved if a filesystem exists.
+- **Gate before delivery.** Run
+  `python3 <skill>/scripts/handoff-gate.py <handoff-dir> --mode <mode>` and do
+  not tell the user the handoff is ready until it prints `GATE: PASS`. It
+  fails on empty or missing sections, unnumbered next steps, a path that does
+  not exist, a block missing for the mode, and secrets — in every file of the
+  handoff, not only the document. Its credential check is a **heuristic**: any
+  `label = value` where the label ends in `password`/`secret`/`token`/`api_key`
+  and the value isn't an obvious placeholder trips it, including a benign
+  identifier like `trace_token: 8f14e45f-...` (a real UUID, not a secret) —
+  that is deliberate, not a bug. A
+  failure is a list of things to fix, not an opinion; if a flagged line isn't
+  actually a secret, rename the label or remove the line rather than arguing
+  with the gate.
 
 ## Skeleton
 
