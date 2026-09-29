@@ -454,4 +454,49 @@ python3 "$GATE" "$WORK/siblings/HANDOFF.md" --mode quota && fail "REGRESSION (I3
 echo "$OUT" | grep -q "PROMPT.txt" || fail "sibling PROMPT.txt not named in the finding: $OUT"
 echo "PASS I3 a file target still scans the mode sibling PROMPT.txt"
 
+# 30. Re-review of the I3 fix: narrowing a file target to the document plus
+#     MODE_FILES left sibling ARCHIVES unscanned — MODE_FILES lists PROMPT.txt
+#     and nothing else — so a cross-workspace bundle validated BY FILE PATH
+#     printed GATE: PASS over a workspace.zip holding a .env, while the exact
+#     same bundle validated as a directory failed. The zip's entry-name check
+#     is the one part of the gate a reader cannot redo by eye, so a file target
+#     now picks up sibling *.zip files too.
+mkgood "$WORK/bundle"
+python3 - "$WORK/bundle/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Current state\n", "## Setup\nClone the repo and install.\n\n## Current state\n", 1)
+open(p, "w").write(s)
+PY
+echo "paste me" > "$WORK/bundle/PROMPT.txt"
+python3 - "$WORK/bundle/workspace.zip" <<'PY'
+import zipfile, sys
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    zf.writestr(".env", "KEY=value\n")
+PY
+# The directory target must still catch it (the pre-existing behaviour).
+python3 "$GATE" "$WORK/bundle" --mode cross-workspace && fail "directory target missed the .env in workspace.zip"
+# ...and so must the FILE target.
+OUT="$(python3 "$GATE" "$WORK/bundle/HANDOFF.md" --mode cross-workspace || true)"
+python3 "$GATE" "$WORK/bundle/HANDOFF.md" --mode cross-workspace && fail "REGRESSION: a file target skipped the sibling workspace.zip, which holds a .env"
+echo "$OUT" | grep -q "workspace.zip" || fail "the finding does not name the sibling archive: $OUT"
+echo "$OUT" | grep -q ".env" || fail "the finding does not name the .env entry: $OUT"
+echo "PASS a file target checks sibling archives by entry name"
+
+# 31. ...and picking up sibling archives must NOT re-widen the scan: a
+#     neighbouring ordinary file in the same directory is still none of the
+#     gate's business when a file is the target (I3 stays fixed).
+mkgood "$WORK/bundle2"
+printf 'sk-ant-api03-%s\n' "$(python3 -c 'print("A"*95)')" > "$WORK/bundle2/unrelated-notes.md"
+python3 - "$WORK/bundle2/clean.zip" <<'PY'
+import zipfile, sys
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    zf.writestr("src/main.py", "print('hi')\n")
+PY
+OUT="$(python3 "$GATE" "$WORK/bundle2/HANDOFF.md" --mode compaction)" || fail "a clean sibling archive or a neighbour broke a file target: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line: $OUT"
+echo "$OUT" | grep -q "unrelated-notes.md" && fail "REGRESSION (I3): a neighbouring ordinary file was scanned again"
+echo "PASS sibling archives do not re-widen the scan to ordinary neighbours"
+
 echo "ALL PASS"

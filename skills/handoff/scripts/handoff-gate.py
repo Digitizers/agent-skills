@@ -234,16 +234,39 @@ def main() -> int:
     # I3: pointing the gate at a FILE used to walk that file's whole parent
     # directory — run against a document in a repository root or in `~`, it
     # scanned everything there and reported findings that were no part of the
-    # handoff. A file target now scans that file plus the mode's named sibling
-    # files (PROMPT.txt) and nothing else; pass the directory to scan the tree.
+    # handoff. A file target now scans that file, the mode's named sibling
+    # files (PROMPT.txt) and sibling ARCHIVES, and nothing else; pass the
+    # directory to scan the tree.
+    #
+    # The archives are in that list because the zip check is the one part of
+    # the gate a reader cannot redo by eye, and a cross-workspace bundle is
+    # HANDOFF.md + PROMPT.txt + workspace.zip in one directory: narrowing to
+    # MODE_FILES alone made `handoff-gate.py HANDOFF.md --mode cross-workspace`
+    # print GATE: PASS over a zip holding a `.env`, while the same bundle
+    # passed as a directory failed. A security control that is only correct
+    # when it is called correctly is not a control.
     if os.path.isdir(args.path):
         all_files = list(iter_files(directory))
     else:
+        seen = {os.path.abspath(doc)}
         all_files = [(os.path.basename(doc), doc)]
-        for filename in MODE_FILES.get(args.mode, ()):
+
+        def add_sibling(filename):
             sibling = os.path.join(directory, filename)
-            if os.path.isfile(sibling) and os.path.abspath(sibling) != os.path.abspath(doc):
+            full = os.path.abspath(sibling)
+            if os.path.isfile(sibling) and full not in seen:
+                seen.add(full)
                 all_files.append((filename, sibling))
+
+        for filename in MODE_FILES.get(args.mode, ()):
+            add_sibling(filename)
+        try:
+            neighbours = sorted(os.listdir(directory))
+        except OSError:
+            neighbours = []
+        for filename in neighbours:
+            if filename.endswith(".zip"):
+                add_sibling(filename)
 
     # The zip is checked by entry NAME, never extracted: a gate that unpacks
     # an archive is a gate that can be made to write outside its directory.

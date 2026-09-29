@@ -40,9 +40,16 @@ def env_float(name: str, default: float) -> float:
     if raw is None:
         return float(default)
     try:
-        return float(raw.strip())
+        value = float(raw.strip())
     except (AttributeError, TypeError, ValueError):
         return float(default)
+    # `inf` and `nan` parse fine and then silently DISARM the setting: a
+    # threshold of inf never fires, and every comparison against nan is False.
+    # That is a worse outcome than the typo it came from, so they fall back
+    # to the documented default like any other unusable value.
+    if value != value or value in (float("inf"), float("-inf")):
+        return float(default)
+    return value
 
 
 def env_positive_int(name: str):
