@@ -141,6 +141,58 @@ URL_RX = re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.-]*://\S+")
 # Paths the document mentions. Quoted in backticks or bare, absolute or ~-rooted.
 PATH_RX = re.compile(r"`([^`\n]+)`|(?<![\w`])((?:~|/)[\w./~-]{3,})")
 
+# A backtick-quoted RELATIVE path (`docs/spec/handoff.md`). The skill tells
+# authors to reference specs and plans BY PATH instead of restating them, so
+# this is the common citation shape — and until this round it was captured by
+# PATH_RX and then silently dropped, which let a handoff cite
+# `docs/missing-spec.md` and still print GATE: PASS.
+#
+# Deliberately conservative about what counts as a path, because a backtick
+# span holds all sorts of things: the candidate must contain a "/", must be
+# made only of path characters, and must either end in "/" or carry a file
+# extension. That keeps `docs/missing-spec.md` and `apps/app/` in scope while
+# leaving a branch name (`feat/handoff-three-modes`) and an extension-less
+# directory reference (`docs/spec`) alone — a missed check is a lesser harm
+# here than a gate that fails every handoff naming a branch.
+RELATIVE_PATH_RX = re.compile(r"^[\w.~][\w./~-]*$")
+RELATIVE_PATH_TAIL_RX = re.compile(r"\.[A-Za-z0-9]{1,8}$")
+
+# Archives are checked by ENTRY NAME only (see the zip loop below) and must
+# never be read into the text scan: a bundle is arbitrarily large, and regex
+# matches out of compressed bytes are noise, not findings.
+ARCHIVE_SUFFIXES = (
+    ".zip", ".jar", ".whl", ".egg", ".tar", ".tgz", ".tar.gz",
+    ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".gz", ".bz2", ".xz", ".7z",
+)
+
+
+def is_archive(name: str) -> bool:
+    lowered = name.lower()
+    return any(lowered.endswith(suffix) for suffix in ARCHIVE_SUFFIXES)
+
+
+def redact(message: str) -> str:
+    """Return message with anything credential-shaped replaced by [redacted].
+
+    Every GATE: FAIL line goes through this before it is printed. The gate
+    echoes content derived from the scanned files — check_paths repeats a
+    matched path candidate verbatim — and a path or a filename can itself
+    carry a credential (`/tmp/deploy-AKIA.../notes.md`, a checkout named
+    after a token). Printing that to stdout writes the secret into the
+    terminal scrollback, the CI log and any transcript of the session, which
+    is precisely what this gate exists to prevent.
+    """
+    out = message
+    for pattern, _label in SECRET_PATTERNS:
+        out = pattern.sub("[redacted]", out)
+
+    def _mask_value(match):
+        whole = match.group(0)
+        prefix = whole[: match.start(2) - match.start(0)]
+        return prefix + "[redacted]" + (match.group(1) or "")
+
+    return GENERIC_CRED_RX.sub(_mask_value, out)
+
 
 def iter_files(directory: str):
     """Every regular file under directory, recursively, in a stable order.
@@ -168,19 +220,41 @@ def sections(text: str) -> dict:
     return {k: "\n".join(v).strip() for k, v in out.items()}
 
 
-def check_paths(text: str) -> list:
+def check_paths(text: str, base_dir: str) -> list:
     problems = []
+    cwd = os.getcwd()
+    beside = os.path.abspath(base_dir or ".")
     masked = URL_RX.sub(lambda m: "\0" * len(m.group()), text)
     for quoted, bare in PATH_RX.findall(masked):
         candidate = (quoted or bare).strip()
-        if not candidate.startswith(("/", "~")):
+        if not candidate:
             continue
         # A command, not a path: `git -C /repo status`.
         if " " in candidate:
             continue
-        resolved = os.path.expanduser(candidate)
-        if not os.path.exists(resolved):
-            problems.append(f"path does not exist: {candidate}")
+        if candidate.startswith(("/", "~")):
+            if not os.path.exists(os.path.expanduser(candidate)):
+                problems.append(f"path does not exist: {candidate}")
+            continue
+        # Only a backtick-quoted span can be a relative path: the bare
+        # alternative of PATH_RX is anchored to "/" or "~" by construction.
+        if not quoted or "/" not in candidate:
+            continue
+        if not RELATIVE_PATH_RX.match(candidate):
+            continue
+        if not (candidate.endswith("/") or RELATIVE_PATH_TAIL_RX.search(candidate)):
+            continue
+        if os.path.exists(os.path.join(beside, candidate)):
+            continue
+        if os.path.exists(os.path.join(cwd, candidate)):
+            continue
+        # Name BOTH places that were searched: the reader has to be able to
+        # tell a typo from a path that is real but lives somewhere else.
+        problems.append(
+            f"relative path does not exist: {candidate} — looked beside the "
+            f"handoff document in {beside} and in the current working "
+            f"directory {cwd}"
+        )
     return problems
 
 
@@ -200,12 +274,12 @@ def main() -> int:
 
     problems = []
     if not os.path.exists(doc):
-        print(f"GATE: FAIL — no handoff document at {doc}")
+        print(f"GATE: FAIL — {redact(f'no handoff document at {doc}')}")
         return 1
     try:
         text = open(doc, "r", encoding="utf-8", errors="replace").read()
     except OSError as exc:
-        print(f"GATE: FAIL — could not read {doc}: {exc}")
+        print(f"GATE: FAIL — {redact(f'could not read {doc}: {exc}')}")
         return 1
     found = sections(text)
 
@@ -229,7 +303,7 @@ def main() -> int:
     if steps and not re.search(r"^\s*\d+[.)]\s+\S", steps, re.M):
         problems.append("What to do next is not a numbered list")
 
-    problems.extend(check_paths(text))
+    problems.extend(check_paths(text, directory))
 
     # I3: pointing the gate at a FILE used to walk that file's whole parent
     # directory — run against a document in a repository root or in `~`, it
@@ -290,6 +364,12 @@ def main() -> int:
     for rel, full in all_files:
         if not os.path.isfile(full):
             continue
+        # An archive was already checked by entry name above. Reading it here
+        # as UTF-8 text would pull the whole bundle into memory and match the
+        # patterns against compressed bytes — noise, not findings, and it
+        # contradicts the documented entry-name-only policy.
+        if is_archive(rel):
+            continue
         try:
             body = open(full, "r", encoding="utf-8", errors="replace").read()
         except OSError as exc:
@@ -321,7 +401,7 @@ def main() -> int:
 
     if problems:
         for problem in problems:
-            print(f"GATE: FAIL — {problem}")
+            print(f"GATE: FAIL — {redact(problem)}")
         return 1
     print("GATE: PASS")
     return 0

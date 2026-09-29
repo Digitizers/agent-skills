@@ -25,7 +25,18 @@ limits = data.get("rate_limits") if isinstance(data, dict) else None
 # Absent for API-key accounts and before the first response. Writing an empty
 # object here would read downstream as "0% used", which is a lie with the
 # dangerous sign: it would silence the guard instead of standing down.
+#
+# Leaving an OLD state file in place is the opposite lie, and just as bad:
+# quota-guard.py treats anything written in the last 15 minutes as current,
+# so a high-usage snapshot from the account we just switched away from would
+# stop the fresh session — breaking the switch-to-another-account flow this
+# whole feature exists to support. Absent limits mean "no quota information",
+# so remove the state rather than write or keep one.
 if not isinstance(limits, dict) or not limits:
+    try:
+        os.remove(os.environ["STATE_PATH"])
+    except (OSError, KeyError):
+        pass
     sys.exit(0)
 
 out = {k: v for k, v in limits.items() if isinstance(v, dict)}

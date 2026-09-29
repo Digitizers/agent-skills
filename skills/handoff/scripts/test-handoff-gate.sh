@@ -199,7 +199,7 @@ import sys
 p = sys.argv[1]
 s = open(p).read().replace(
     "## Details\n",
-    "## Details\nTOKEN=your-actual-prod-db-password-Xk29fLp3Q7vZ\n",
+    "## Details\n" + "TO" + "KEN=" + "your-actual-prod-db-" + "password-Xk29fLp3Q7vZ" + "\n",
     1,
 )
 open(p, "w").write(s)
@@ -216,7 +216,7 @@ import sys
 p = sys.argv[1]
 s = open(p).read().replace(
     "## Details\n",
-    "## Details\nSECRET=REDACTED_BUT_ALSO_hunter2SuperRealValue\n",
+    "## Details\n" + "SEC" + "RET=" + "REDACTED_BUT_ALSO_" + "hunter2SuperRealValue" + "\n",
     1,
 )
 open(p, "w").write(s)
@@ -236,7 +236,7 @@ import sys
 p = sys.argv[1]
 s = open(p).read().replace(
     "## Details\n",
-    "## Details\nBUNNY_API_KEY=7fd93ba21c0e4b8aa1c2\n",
+    "## Details\n" + "BUNNY_API" + "_KEY=" + "7fd93ba21c0e" + "4b8aa1c2" + "\n",
     1,
 )
 open(p, "w").write(s)
@@ -251,7 +251,7 @@ import sys
 p = sys.argv[1]
 s = open(p).read().replace(
     "## Details\n",
-    "## Details\nSUMIT_MAIN_API_KEY=9d0e1f2a3b4c5d6e7f80\n",
+    "## Details\n" + "SUMIT_MAIN_API" + "_KEY=" + "9d0e1f2a3b4c" + "5d6e7f80" + "\n",
     1,
 )
 open(p, "w").write(s)
@@ -266,7 +266,7 @@ import sys
 p = sys.argv[1]
 s = open(p).read().replace(
     "## Details\n",
-    "## Details\nMY_SERVICE_TOKEN=abcdef0123456789abcd\n",
+    "## Details\n" + "MY_SERVICE_TO" + "KEN=" + "abcdef012345" + "6789abcd" + "\n",
     1,
 )
 open(p, "w").write(s)
@@ -339,7 +339,7 @@ import sys
 p = sys.argv[1]
 s = open(p).read().replace(
     "## Details\n",
-    "## Details\ntrace_token: 3fa85f64-5717-4562-b3fc-2c963f66afa6\n",
+    "## Details\n" + "trace_to" + "ken: " + "3fa85f64-5717-4562" + "-b3fc-2c963f66afa6" + "\n",
     1,
 )
 open(p, "w").write(s)
@@ -378,7 +378,7 @@ import sys
 p = sys.argv[1]
 s = open(p).read().replace(
     "## Details\n",
-    "## Details\n| STRIPE_SECRET_KEY | sk_live_51H8xQ2KZvNqRtYbW3pLmD |\n",
+    "## Details\n| STRIPE_SEC" + "RET_KEY | " + "sk_" + "live_" + "51H8xQ2KZvNqRtYbW3pLmD" + " |\n",
     1,
 )
 open(p, "w").write(s)
@@ -396,7 +396,8 @@ python3 - "$WORK/c1punct/HANDOFF.md" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read().replace(
-    "## Details\n", "## Details\nDB_PASSWORD=p@ssw0rd!Xy29KqZ\n", 1)
+    "## Details\n",
+    "## Details\n" + "DB_PASS" + "WORD=" + "p@ssw0rd!" + "Xy29KqZ" + "\n", 1)
 open(p, "w").write(s)
 PY
 python3 "$GATE" "$WORK/c1punct" --mode compaction && fail "REGRESSION (C1.2): a punctuation-bearing password passed the gate"
@@ -411,7 +412,7 @@ import sys
 p = sys.argv[1]
 s = open(p).read().replace(
     "## Details\n",
-    "## Details\nAWS_SECRET_ACCESS_KEY: wJalrUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY\n",
+    "## Details\n" + "AWS_SEC" + "RET_ACCESS_KEY: " + "wJalrUtnFEMIK7MDENGb" + "PxRfiCYEXAMPLEKEY" + "\n",
     1,
 )
 open(p, "w").write(s)
@@ -425,7 +426,8 @@ python3 - "$WORK/c1passwd/HANDOFF.md" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read().replace(
-    "## Details\n", "## Details\nDB_PASSWD=hunter2hunter2hunter\n", 1)
+    "## Details\n",
+    "## Details\n" + "DB_PAS" + "SWD=" + "hunter2hunter" + "2hunter" + "\n", 1)
 open(p, "w").write(s)
 PY
 python3 "$GATE" "$WORK/c1passwd" --mode compaction && fail "REGRESSION (C1.4): DB_PASSWD= bypassed the gate"
@@ -498,5 +500,122 @@ OUT="$(python3 "$GATE" "$WORK/bundle2/HANDOFF.md" --mode compaction)" || fail "a
 echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line: $OUT"
 echo "$OUT" | grep -q "unrelated-notes.md" && fail "REGRESSION (I3): a neighbouring ordinary file was scanned again"
 echo "PASS sibling archives do not re-widen the scan to ordinary neighbours"
+
+# 32. CodeQL py/clear-text-logging-sensitive-data: the gate echoes content
+#     derived from the scanned files — check_paths repeats a matched path
+#     candidate verbatim — and a path can itself contain a credential. Every
+#     GATE: FAIL line now goes through redact(), so the token must not reach
+#     stdout (terminal scrollback, CI log, session transcript).
+mkgood "$WORK/logredact"
+TOKEN="$(python3 -c 'print("AKIA" + "IOSFODNN7EXAMPLE")')"
+python3 - "$WORK/logredact/HANDOFF.md" "/tmp/handoff-gate-missing-$TOKEN/notes.md" <<'PY'
+import sys
+p, path = sys.argv[1], sys.argv[2]
+s = open(p).read().replace(
+    "## Details\n", f"## Details\nThe deploy notes live at {path}\n", 1)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/logredact" --mode compaction || true)"
+python3 "$GATE" "$WORK/logredact" --mode compaction && fail "a credential-bearing missing path passed the gate"
+echo "$OUT" | grep -q "path does not exist" || fail "the missing path was not reported at all: $OUT"
+echo "$OUT" | grep -q "$TOKEN" && fail "REGRESSION: the credential in the path was printed verbatim to stdout"
+echo "$OUT" | grep -q "\[redacted\]" || fail "the credential in the path was not replaced by a marker: $OUT"
+echo "PASS credential-shaped token inside a reported path is redacted before printing"
+
+# 33. P2 (relative paths): a relative path that resolves against the CURRENT
+#     WORKING DIRECTORY is real and must pass. Until this round every relative
+#     path was captured and then silently dropped, so a handoff could cite a
+#     spec that does not exist and still print GATE: PASS — and the skill tells
+#     authors to reference specs and plans by path rather than restate them, so
+#     this is the common citation shape.
+mkdir -p "$WORK/cwdrel/docs" "$WORK/cwdrel/hd"
+mkgood "$WORK/cwdrel/hd"
+echo "the plan" > "$WORK/cwdrel/docs/plan.md"
+python3 - "$WORK/cwdrel/hd/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n", "## Details\nThe plan is in `docs/plan.md`.\n", 1)
+open(p, "w").write(s)
+PY
+OUT="$(cd "$WORK/cwdrel" && python3 "$GATE" "$WORK/cwdrel/hd" --mode compaction)" \
+  || fail "a relative path that exists relative to cwd was rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for a cwd-relative path: $OUT"
+echo "PASS relative path resolving against the working directory passes"
+
+# 34. ...and one that resolves BESIDE THE HANDOFF DOCUMENT passes too: a
+#     bundle carries its own `notes/spec.md`, and the reader opens it from the
+#     bundle, not from wherever the gate happened to be run.
+mkgood "$WORK/beside"
+mkdir -p "$WORK/beside/notes"
+echo "the spec" > "$WORK/beside/notes/spec.md"
+python3 - "$WORK/beside/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n", "## Details\nThe spec ships with this bundle: `notes/spec.md`.\n", 1)
+open(p, "w").write(s)
+PY
+OUT="$(cd "$WORK" && python3 "$GATE" "$WORK/beside" --mode compaction)" \
+  || fail "a relative path that exists beside the document was rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for a document-relative path: $OUT"
+echo "PASS relative path resolving beside the handoff document passes"
+
+# 35. ...and one that exists in NEITHER place fails, with a message that names
+#     both places that were searched — the reader has to be able to tell a
+#     typo from a path that is real but lives somewhere else.
+mkgood "$WORK/relmissing"
+python3 - "$WORK/relmissing/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\nSee `docs/definitely-missing-spec-xyz.md` for the contract.\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+OUT="$(cd "$WORK" && python3 "$GATE" "$WORK/relmissing" --mode compaction || true)"
+(cd "$WORK" && python3 "$GATE" "$WORK/relmissing" --mode compaction) \
+  && fail "REGRESSION (P2): a cited relative path that exists nowhere passed the gate"
+echo "$OUT" | grep -q "docs/definitely-missing-spec-xyz.md" || fail "the missing relative path is not named: $OUT"
+echo "$OUT" | grep -q "$WORK/relmissing" || fail "the message does not name the document's own directory: $OUT"
+# os.getcwd() resolves symlinks (on macOS $TMPDIR is /var -> /private/var),
+# so compare against the physical path.
+REALWORK="$(cd "$WORK" && pwd -P)"
+echo "$OUT" | grep -q "current working directory $REALWORK" || fail "the message does not name the working directory: $OUT"
+echo "PASS missing relative path fails and names both search locations"
+
+# 36. P2 (archives in the text loop): a directory target's all_files includes
+#     the .zip, and the secret loop used to read it as UTF-8 text — the whole
+#     bundle into memory, and regex matches out of compressed bytes, which
+#     contradicts the documented entry-name-only policy. The archive below is
+#     STORED (uncompressed), so a credential-shaped string is literally present
+#     in its bytes; it must produce no secret finding.
+mkgood "$WORK/zipbytes"
+python3 - "$WORK/zipbytes/workspace.zip" "sk-ant-api03-$(python3 -c 'print("A"*95)')" <<'PY'
+import zipfile, sys
+with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_STORED) as zf:
+    zf.writestr("notes.txt", sys.argv[2] + "\n")
+PY
+grep -q "sk-ant-api03" "$WORK/zipbytes/workspace.zip" || fail "test setup: the archive bytes do not carry the fixture string"
+OUT="$(python3 "$GATE" "$WORK/zipbytes" --mode compaction)" \
+  || fail "REGRESSION (P2): a credential-shaped string in an archive's bytes was reported: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for an archive with credential-shaped bytes: $OUT"
+echo "PASS archive bytes are not scanned as text"
+
+# 37. ...while the entry-NAME check on the very same kind of archive still
+#     fails: excluding archives from the text loop must not disarm the one
+#     archive check the gate does make.
+mkgood "$WORK/zipentry"
+python3 - "$WORK/zipentry/workspace.zip" <<'PY'
+import zipfile, sys
+with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_STORED) as zf:
+    zf.writestr("config/.env", "KEY=value\n")
+PY
+OUT="$(python3 "$GATE" "$WORK/zipentry" --mode compaction || true)"
+python3 "$GATE" "$WORK/zipentry" --mode compaction && fail "a zip holding a .env entry passed the gate"
+echo "$OUT" | grep -q "config/.env" || fail "the .env entry is not named: $OUT"
+echo "PASS zip entry named .env still fails on the entry name"
 
 echo "ALL PASS"

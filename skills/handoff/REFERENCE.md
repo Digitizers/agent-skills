@@ -235,3 +235,35 @@ correlation id, not a secret). The gate's own failure message says so. A
 leak — if the flagged line isn't actually a secret, rename the label or
 remove the line rather than treating the failure as a false negative in the
 gate.
+
+### What else the gate checks, and what it deliberately does not
+
+**Paths.** A path the document names must exist, or the handoff sends its
+reader somewhere that isn't there. An absolute or `~`-rooted path is checked
+as written. A backtick-quoted **relative** path — the shape the skill itself
+asks for, since authors are told to reference specs and plans by path instead
+of restating them — is resolved against *both* the handoff document's own
+directory and the current working directory, and only fails if it exists in
+neither; the failure names both places that were searched, so a typo is
+distinguishable from a path that is real but lives somewhere else. To keep
+false positives down, a relative candidate counts as a path only if it
+contains a `/` and either ends in `/` or carries a file extension: a branch
+name in backticks (`feat/handoff-three-modes`) is left alone.
+
+**Archives.** A `.zip` (or any other archive) is checked by **entry name
+only** and is never read as text and never extracted. Extracting is how a
+gate gets made to write outside its directory; reading the compressed bytes
+as UTF-8 would pull an arbitrarily large bundle into memory and match the
+credential patterns against compression noise. So an archive fails the gate
+when it carries an entry named `.env`, `.npmrc`, `.pypirc`, `id_rsa` or
+`id_ed25519` — and the contents of the files inside it are the author's
+responsibility, not the gate's.
+
+**Its own output.** Every `GATE: FAIL` line is passed through a redaction
+step before printing: any substring matching one of the specific credential
+patterns, or the value half of a generic `label = value` match, is replaced
+with `[redacted]`. The gate echoes material drawn from the files it scans —
+a path candidate is repeated verbatim — and a path or a filename can itself
+contain a credential. Printing it would write the secret into the terminal
+scrollback, the CI log and the session transcript, which is the exact leak
+this gate exists to stop.
