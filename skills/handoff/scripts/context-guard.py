@@ -44,8 +44,16 @@ line (latest for the same reason as the evidence above). And when the window is
 neither stated nor proven, the message says "assumed" so the reader can check
 it rather than obey it.
 
+Past HANDOFF_STOP_PCT the nudge changes tone: instead of "write a handoff and
+keep going" it tells an attended session to finish only the in-progress
+action, refresh the handoff document, then STOP and ask the user to run
+/compact or open a fresh session. Warn and stop are independent, once-per-
+session alarms — a warn firing first does not disarm the later stop, because
+the level is part of the marker name.
+
 Env:
-  HANDOFF_THRESHOLD_PCT     default 70
+  HANDOFF_THRESHOLD_PCT     default 70 — write a handoff and continue
+  HANDOFF_STOP_PCT          default 80 — stop and ask the user to compact
   CONTEXT_WINDOW_TOKENS     default 200000 (a floor — see above)
   CONTEXT_WINDOW_BY_MODEL   "model-id=tokens,model-id=tokens" — a per-model
                             floor; beats CONTEXT_WINDOW_TOKENS for that model
@@ -55,6 +63,9 @@ import json
 import os
 import sys
 import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from handoff_common import attended  # noqa: E402
 
 # Estimation policy: a conservative FLOOR, not an average — UTF-8 bytes / 2.
 # Character-class ratios (prose ~4 chars/token, Hebrew ~2, base64 ~2-2.7,
@@ -125,6 +136,7 @@ def main() -> None:
     event = inp.get("hook_event_name") or "UserPromptSubmit"
 
     threshold = float(os.environ.get("HANDOFF_THRESHOLD_PCT", "70"))
+    stop_pct = float(os.environ.get("HANDOFF_STOP_PCT", "80"))
     configured = os.environ.get("CONTEXT_WINDOW_TOKENS")
     window = int(configured or "200000")
     model_windows = parse_model_windows(
@@ -222,16 +234,21 @@ def main() -> None:
     # itself, which grows every call — key it as one bucket, or every hook
     # would alarm again (Codex r6).
     window_key = f"w{window}" if window <= WINDOW_TIERS[-1] else f"above-w{WINDOW_TIERS[-1]}"
-    window_marker = f"{marker}-{provenance}-{window_key}"
-    if not assumed and os.path.exists(window_marker):
-        return
-    assumed_marker = f"{marker}-assumed-{model_key}"
-    if assumed and os.path.exists(assumed_marker):
-        return
 
     raw_tokens = tokens
     pct = tokens * 100.0 / window
+    # A second, stricter level past the warn threshold: STOP and ask the user
+    # to compact instead of writing a handoff and continuing. `level` is part
+    # of every marker name below, so a warn firing earlier in the session
+    # cannot disarm the later, louder stop — each level fires once on its own.
+    level = "stop" if pct >= stop_pct else "warn"
     if pct < threshold:
+        return
+    window_marker = f"{marker}-{provenance}-{window_key}-{level}"
+    if not assumed and os.path.exists(window_marker):
+        return
+    assumed_marker = f"{marker}-assumed-{model_key}-{level}"
+    if assumed and os.path.exists(assumed_marker):
         return
     # The tail/payload estimate is a deliberate over-count, so a number above
     # 100% is an artefact of the floor, not a measurement. Report the fact
@@ -268,10 +285,18 @@ def main() -> None:
             "for a declared or proven window. If the window really is "
             f"{window}: "
         )
-    msg += (
-        "Invoke the handoff skill NOW to write a handoff document before "
-        "context is compacted, then continue the current task."
-    )
+    if level == "stop" and attended():
+        msg += (
+            "This is past the stop threshold. Finish ONLY the action already "
+            "in progress, refresh the handoff document with what changed "
+            "since it was written, then STOP and ask the user to run "
+            "/compact or open a fresh session. Do not begin new work."
+        )
+    else:
+        msg += (
+            "Invoke the handoff skill NOW to write a handoff document before "
+            "context is compacted, then continue the current task."
+        )
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": event,

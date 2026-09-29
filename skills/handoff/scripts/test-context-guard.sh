@@ -7,7 +7,7 @@ set -euo pipefail
 # has configured the hook for their own sessions (e.g. CONTEXT_WINDOW_BY_MODEL
 # for a 1M model) would otherwise run every case against their settings.
 # Cases that need a value set it inline.
-unset CONTEXT_WINDOW_BY_MODEL CONTEXT_WINDOW_TOKENS HANDOFF_THRESHOLD_PCT
+unset CONTEXT_WINDOW_BY_MODEL CONTEXT_WINDOW_TOKENS HANDOFF_THRESHOLD_PCT HANDOFF_STOP_PCT
 
 GUARD="$(cd "$(dirname "$0")" && pwd)/context-guard.sh"
 WORK="$(mktemp -d)"
@@ -446,5 +446,45 @@ mk_model_transcript "$WORK/r9.jsonl" 1200000 model-big
 OUT="$(run_guard "$(mk_input "$WORK/r9.jsonl" cg-test-above)")"
 [ -z "$OUT" ] || fail "alarm repeated on every growing call above the largest tier"
 echo "PASS one alarm above the largest known tier"
+
+# 36. Past HANDOFF_STOP_PCT -> the stop instruction, not the write-and-continue one.
+mk_transcript "$WORK/stop.jsonl" 170000
+printf '{"transcript_path":"%s","session_id":"cg-test-stop","hook_event_name":"UserPromptSubmit"}' "$WORK/stop.jsonl" > "$WORK/in-stop.json"
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-stop.json")"
+echo "$OUT" | grep -q "STOP" || fail "no stop instruction past the stop threshold"
+echo "$OUT" | grep -q "/compact" || fail "stop instruction does not name /compact"
+echo "PASS stop threshold fires"
+
+# 37. One call crossing BOTH thresholds still emits the stop instruction
+#     (Review Focus 5): a warn marker must not swallow it.
+mk_transcript "$WORK/both.jsonl" 170000
+printf '{"transcript_path":"%s","session_id":"cg-test-both","hook_event_name":"UserPromptSubmit"}' "$WORK/both.jsonl" > "$WORK/in-both.json"
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-both.json")"
+echo "$OUT" | grep -q "STOP" || fail "jumping both thresholds at once lost the stop"
+echo "PASS both thresholds in one call"
+
+# 38. The warn marker does not disarm the stop: same session, warn first.
+mk_transcript "$WORK/seq.jsonl" 150000
+printf '{"transcript_path":"%s","session_id":"cg-test-seq","hook_event_name":"UserPromptSubmit"}' "$WORK/seq.jsonl" > "$WORK/in-seq.json"
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-seq.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "warn did not fire"
+mk_transcript "$WORK/seq.jsonl" 170000
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-seq.json")"
+echo "$OUT" | grep -q "STOP" || fail "warn marker suppressed the later stop"
+echo "PASS warn then stop in one session"
+
+# 39. Each threshold still fires only once.
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-seq.json")"
+[ -z "$OUT" ] || fail "stop fired twice"
+echo "PASS stop fires once"
+
+# 40. Unattended run: warned, never told to stop or to compact.
+mk_transcript "$WORK/head.jsonl" 170000
+printf '{"transcript_path":"%s","session_id":"cg-test-headless","hook_event_name":"UserPromptSubmit"}' "$WORK/head.jsonl" > "$WORK/in-head.json"
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=0 run_guard "$WORK/in-head.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "headless run got no handoff nudge at all"
+echo "$OUT" | grep -q "STOP" && fail "headless run told to stop"
+echo "$OUT" | grep -q "/compact" && fail "headless run asked for compaction"
+echo "PASS headless run writes but does not stop"
 
 echo "all context-guard tests passed"
