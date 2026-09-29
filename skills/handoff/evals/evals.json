@@ -38,6 +38,45 @@
         "The folder is ignored via .git/info/exclude",
         "The tracked .gitignore is not modified (git status shows no change to it)"
       ]
+    },
+    {
+      "id": 4,
+      "name": "compaction-mode-tried-and-rejected",
+      "prompt": "We're at 75% context. Write the handoff before we get compacted — we've already ruled out two approaches today and I don't want to redo them.",
+      "expected_output": "Writes the handoff in compaction mode: the four core parts plus a 'Tried and rejected' section naming each rejected approach with the evidence that killed it, what is mid-action, and a verification command. Runs handoff-gate.py and reports GATE: PASS before calling it ready.",
+      "files": [],
+      "expectations": [
+        "The document contains a 'Tried and rejected' section with at least one attempt and the evidence against it",
+        "The document contains a verification command that re-establishes state (git status / branch / sha)",
+        "The reply shows the gate was run with --mode compaction and reported GATE: PASS",
+        "No setup or clone instructions are included — the reader is on the same machine"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "cross-workspace-setup",
+      "prompt": "Hand this off to an agent on my other laptop.",
+      "expected_output": "Recognises this is cross-workspace, writes a directory containing HANDOFF.md and PROMPT.txt, and includes a Setup section with repository, branch, exact sha, environment variable names (never values), required MCP servers and skills, and one command that must pass before work starts.",
+      "files": [],
+      "expectations": [
+        "A Setup section names the repository, the branch and an exact commit sha",
+        "Environment variables appear by name only, with no values",
+        "A PROMPT.txt is written alongside HANDOFF.md",
+        "The gate is run with --mode cross-workspace and reports GATE: PASS"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "quota-mode-paste-ready",
+      "prompt": "המכסה שלי כמעט נגמרת, תכין לי handoff שאני יכול להמשיך ממנו בחשבון אחר",
+      "expected_output": "Writes the handoff in quota mode, in Hebrew (the chat's language), as a directory with HANDOFF.md and a paste-ready PROMPT.txt; states when the window resets if known; runs the gate with --mode quota and reports GATE: PASS.",
+      "files": [],
+      "expectations": [
+        "The document is written in Hebrew, with code identifiers, commands and paths left as-is",
+        "A PROMPT.txt exists and is self-contained enough to paste into a fresh session",
+        "No credential values appear in any file",
+        "The gate is run with --mode quota and reports GATE: PASS"
+      ]
     }
   ]
 }

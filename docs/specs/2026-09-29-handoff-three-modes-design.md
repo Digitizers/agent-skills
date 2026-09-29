@@ -154,8 +154,13 @@ Environment variables in the settings `env` block, consistent with today's
 Headless `-p` runs and scheduled tasks are never stopped and never asked to
 compact — nobody is there to answer, and stopping only kills the task. They
 still get a handoff written silently. Detection is
-`CLAUDE_CODE_SESSION_ATTENDED != "1"` (measured above), with
-`HANDOFF_UNATTENDED=1` as a manual override for anything the variable misses.
+`CLAUDE_CODE_SESSION_ATTENDED == "0"` (measured above) — a session is
+unattended only when the value is exactly `"0"`; a missing or unrecognised
+value is treated as attended, since an unrecognised value most likely means a
+future Claude Code changed the variable, and treating that as attended keeps
+the handoff nudge working instead of silently dropping it for everyone —
+with `HANDOFF_UNATTENDED=1` as a manual override for anything the variable
+misses.
 
 ## Testing
 

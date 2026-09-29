@@ -131,3 +131,97 @@ more than one window mode, so only you know which one your sessions use.
   session, so in practice it fires once).
 - The marker file lives in the OS temp dir and is keyed by session id;
   deleting it re-arms the hook for the same session.
+
+### The second threshold
+
+`HANDOFF_STOP_PCT` (default 80) is the point where the agent stops instead of
+writing and continuing. Both thresholds are served by the same hook; each
+keeps its own marker, so the 70% nudge never disarms the 80% stop.
+
+```json
+{ "env": { "HANDOFF_THRESHOLD_PCT": "70", "HANDOFF_STOP_PCT": "80" } }
+```
+
+Unattended sessions (`claude -p`, scheduled runs) are warned but never
+stopped: there is nobody to run `/compact`, and stopping only kills the task.
+Detection (`handoff_common.py`'s `attended()`) is stricter than a simple
+"not 1" check: a session counts as unattended only when
+`CLAUDE_CODE_SESSION_ATTENDED` is exactly `"0"`, or `HANDOFF_UNATTENDED=1` is
+set. A missing or unrecognised value is treated as **attended** — an
+unrecognised value most likely means a future Claude Code changed the
+variable, and treating that as attended keeps the handoff nudge working
+instead of silently dropping it for everyone.
+
+### Quota detection — the statusline bridge
+
+Hook payloads carry **no** rate-limit data. Measured on Claude Code 2.1.x:
+`UserPromptSubmit` delivers `cwd, hook_event_name, permission_mode, prompt,
+prompt_id, scratchpad_dir, session_id, transcript_path`, and `Stop` adds
+`background_tasks, effort, last_assistant_message, session_crons,
+stop_hook_active`. Neither carries `rate_limits`. The statusline command does.
+
+So quota detection is two pieces: a bridge that records what the statusline
+receives, and a hook that reads it.
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash /path/to/agent-skills/skills/handoff/scripts/statusline-bridge.sh"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command",
+        "command": "bash /path/to/agent-skills/skills/handoff/scripts/quota-guard.sh" } ] }
+    ]
+  },
+  "env": {
+    "HANDOFF_STATUSLINE_INNER": "<your previous statusline command>",
+    "QUOTA_WARN_PCT": "70",
+    "QUOTA_ACT_PCT": "80",
+    "QUOTA_WEEKLY_ACT_PCT": "93"
+  }
+}
+```
+
+The bridge passes the payload through to `HANDOFF_STATUSLINE_INNER` unchanged,
+so the statusline looks exactly as it did. Removing the two entries restores
+the previous setup; nothing else is touched.
+
+**Ask before installing it.** It edits the user's `settings.json`. Print the
+JSON, explain what the bridge does, and let them decide. Without it, quota
+mode still works when the user asks for it by name.
+
+`rate_limits` is present only for subscription accounts, and only after the
+first response of a session. An API-key account never populates it, and the
+guard stays silent rather than reading its absence as 0%.
+
+### The PreCompact net
+
+`PreCompact` fires when compaction starts — too late to be the main trigger,
+which is why the thresholds above exist, but exactly right as a backstop for
+the case where the 80% stop was ignored:
+
+```json
+{
+  "hooks": {
+    "PreCompact": [
+      { "hooks": [ { "type": "command",
+        "command": "bash /path/to/agent-skills/skills/handoff/scripts/context-guard.sh" } ] }
+    ]
+  }
+}
+```
+
+### A note on the gate's credential check
+
+`handoff-gate.py`'s generic credential check is a **heuristic**, not a secret
+scanner: any `label = value` where the label ends in
+`password`/`secret`/`token`/`api_key` and the value isn't an obvious
+placeholder trips it — including a benign identifier whose label happens to
+end in one of those words, such as `trace_token: 8f14e45f-...` (a real UUID
+correlation id, not a secret). The gate's own failure message says so. A
+`GATE: FAIL` on this check is a list of things to look at, not proof of a
+leak — if the flagged line isn't actually a secret, rename the label or
+remove the line rather than treating the failure as a false negative in the
+gate.
