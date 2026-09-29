@@ -368,4 +368,90 @@ echo "$OUT" | grep -q "Anthropic API key found in" || fail "specific-pattern wor
 echo "$OUT" | grep -q "heuristic" && fail "specific pattern must not use heuristic wording: $OUT"
 echo "PASS real sk-ant- secret fails with specific-pattern wording, not heuristic wording"
 
+# 24. Fix-round-5 / C1 attack 1: a credential in a MARKDOWN TABLE CELL. The
+#     generic scan cannot see it — `|` is not an assignment character — so
+#     this is what the new specific Stripe prefix is for, and it must be
+#     reported with the specific wording, not as a heuristic.
+mkgood "$WORK/c1stripe"
+python3 - "$WORK/c1stripe/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\n| STRIPE_SECRET_KEY | sk_live_51H8xQ2KZvNqRtYbW3pLmD |\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/c1stripe" --mode compaction || true)"
+python3 "$GATE" "$WORK/c1stripe" --mode compaction && fail "REGRESSION (C1.1): a Stripe live key in a table cell passed the gate"
+echo "$OUT" | grep -q "Stripe live secret key found in" || fail "Stripe key not reported with specific wording: $OUT"
+echo "$OUT" | grep -q "heuristic" && fail "a specific pattern must not call itself a heuristic: $OUT"
+echo "PASS C1.1 Stripe key in a markdown table cell fails"
+
+# 25. C1 attack 2: a password whose punctuation used to truncate the captured
+#     value below the 4-character minimum, so the whole line vanished.
+mkgood "$WORK/c1punct"
+python3 - "$WORK/c1punct/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n", "## Details\nDB_PASSWORD=p@ssw0rd!Xy29KqZ\n", 1)
+open(p, "w").write(s)
+PY
+python3 "$GATE" "$WORK/c1punct" --mode compaction && fail "REGRESSION (C1.2): a punctuation-bearing password passed the gate"
+echo "PASS C1.2 punctuation-bearing password fails"
+
+# 26. C1 attack 3: the keyword used to have to be the label's TAIL, so
+#     `AWS_SECRET_ACCESS_KEY`, `*_CREDENTIALS`, `*_AUTH` and `*_PWD` were
+#     invisible to the scan.
+mkgood "$WORK/c1midlabel"
+python3 - "$WORK/c1midlabel/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\nAWS_SECRET_ACCESS_KEY: wJalrUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+python3 "$GATE" "$WORK/c1midlabel" --mode compaction && fail "REGRESSION (C1.3): a keyword in the middle of the label bypassed the gate"
+echo "PASS C1.3 keyword mid-label (AWS_SECRET_ACCESS_KEY) fails"
+
+# 27. C1 attack 4: `passwd` was not in the keyword alternation at all.
+mkgood "$WORK/c1passwd"
+python3 - "$WORK/c1passwd/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n", "## Details\nDB_PASSWD=hunter2hunter2hunter\n", 1)
+open(p, "w").write(s)
+PY
+python3 "$GATE" "$WORK/c1passwd" --mode compaction && fail "REGRESSION (C1.4): DB_PASSWD= bypassed the gate"
+echo "PASS C1.4 DB_PASSWD= fails"
+
+# 28. I3: pointing the gate at a FILE must scan that file and the mode's named
+#     siblings only — not walk the whole parent directory. A handoff document
+#     saved in a populated directory (a repo root, or ~) used to make the gate
+#     report every secret-shaped string in every neighbouring file.
+mkgood "$WORK/populated"
+printf 'sk-ant-api03-%s\n' "$(python3 -c 'print("A"*95)')" > "$WORK/populated/unrelated-notes.md"
+OUT="$(python3 "$GATE" "$WORK/populated/HANDOFF.md" --mode compaction)" || fail "REGRESSION (I3): a file target scanned its neighbours: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for a file target in a populated directory: $OUT"
+echo "$OUT" | grep -q "unrelated-notes.md" && fail "REGRESSION (I3): a neighbouring file was reported"
+# ...and the same directory as a DIRECTORY target still catches it.
+python3 "$GATE" "$WORK/populated" --mode compaction && fail "a directory target missed a secret in the directory"
+echo "PASS I3 a file target scans the file, a directory target scans the tree"
+
+# 29. I3, the other half: a file target still scans the mode's named sibling
+#     files — PROMPT.txt is the file most likely to be pasted elsewhere, and
+#     narrowing the scan must not stop covering it.
+mkgood "$WORK/siblings"
+printf 'Continue. Use sk-ant-api03-%s\n' "$(python3 -c 'print("A"*95)')" > "$WORK/siblings/PROMPT.txt"
+OUT="$(python3 "$GATE" "$WORK/siblings/HANDOFF.md" --mode quota || true)"
+python3 "$GATE" "$WORK/siblings/HANDOFF.md" --mode quota && fail "REGRESSION (I3): a secret in the mode sibling PROMPT.txt was not scanned"
+echo "$OUT" | grep -q "PROMPT.txt" || fail "sibling PROMPT.txt not named in the finding: $OUT"
+echo "PASS I3 a file target still scans the mode sibling PROMPT.txt"
+
 echo "ALL PASS"

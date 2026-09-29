@@ -16,7 +16,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from handoff_common import attended, marker_path  # noqa: E402
+from handoff_common import attended, env_float, marker_path  # noqa: E402
 
 
 def pct(limits: dict, key: str):
@@ -54,7 +54,10 @@ def main() -> None:
     # A state file from an earlier window would stop a session whose quota has
     # already reset. The bridge rewrites it on every statusline render, so
     # anything older than the stale window means the bridge is not running.
-    stale_after = float(os.environ.get("QUOTA_STALE_SECONDS", "900"))
+    # Parsed defensively: these are hand-edited settings.json values read on
+    # every prompt, so `QUOTA_WARN_PCT=high` must fall back to the documented
+    # default, not raise ValueError and break the session.
+    stale_after = env_float("QUOTA_STALE_SECONDS", 900.0)
     try:
         age = time.time() - float(state.get("updated_at", 0))
     except (TypeError, ValueError):
@@ -64,9 +67,9 @@ def main() -> None:
 
     five = pct(state, "five_hour")
     seven = pct(state, "seven_day")
-    warn_pct = float(os.environ.get("QUOTA_WARN_PCT", "70"))
-    act_pct = float(os.environ.get("QUOTA_ACT_PCT", "80"))
-    weekly_pct = float(os.environ.get("QUOTA_WEEKLY_ACT_PCT", "93"))
+    warn_pct = env_float("QUOTA_WARN_PCT", 70.0)
+    act_pct = env_float("QUOTA_ACT_PCT", 80.0)
+    weekly_pct = env_float("QUOTA_WEEKLY_ACT_PCT", 93.0)
 
     if (five is not None and five >= act_pct) or (
         seven is not None and seven >= weekly_pct
@@ -113,7 +116,12 @@ def main() -> None:
             f"state survives if the quota runs out mid-task.{when}"
         )
 
-    open(marker, "w").close()
+    try:
+        open(marker, "w").close()
+    except OSError:
+        # A marker that cannot be written costs a repeated nudge; a traceback
+        # on every prompt costs the session.
+        pass
     print(json.dumps({
         "hookSpecificOutput": {"hookEventName": event, "additionalContext": msg}
     }))

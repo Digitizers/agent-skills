@@ -44,6 +44,15 @@ SECRET_PATTERNS = (
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key id"),
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "private key"),
     (re.compile(r"\b[a-z+]+://[^/\s:@]+:[^/\s:@]+@"), "connection string with a password"),
+    # Fix-round-5: four more vendor prefixes that are as unambiguous as the
+    # five above — each one is a credential by its shape alone, so they are
+    # reported with the SPECIFIC wording ("... found in ..."), never as a
+    # heuristic. They matter most in a table cell or prose, where there is no
+    # `label = value` for the generic scan to key off.
+    (re.compile(r"\bsk_live_[A-Za-z0-9]{16,}\b"), "Stripe live secret key"),
+    (re.compile(r"\bsk-proj-[A-Za-z0-9_-]{16,}"), "OpenAI project API key"),
+    (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}"), "Slack token"),
+    (re.compile(r"\bAIza[A-Za-z0-9_-]{20,}"), "Google API key"),
 )
 
 # The generic "label = value" pattern is intentionally separate from
@@ -58,17 +67,36 @@ SECRET_PATTERNS = (
 # `BUNNY_API_KEY=...` was invisible to this pattern — `_` is a word character,
 # so there is no boundary between it and `API`, and every credential name in
 # this project's own toolbox is `<VENDOR>_<THING>_KEY` or `<VENDOR>_TOKEN`.
-# The keyword may now be preceded by any run of label characters
-# (letters/digits/underscore/hyphen); nothing else about the pattern changed.
-# This does not widen it into prose: the assignment character (`=` or `:`)
-# must still follow the keyword directly (only whitespace between), so
+# The keyword may be preceded by any run of label characters
+# (letters/digits/underscore/hyphen) — and, since round 5, followed by one
+# too. This does not widen it into prose: the assignment character (`=` or
+# `:`) must still follow the LABEL directly (only whitespace between), so
 # "the API key is stored in 1Password" and "secret: the build is slow" still
 # don't match — there is no `[=:]` right after the keyword in the first, and
 # the value after `:` in the second is only 3 characters, short of the
 # pattern's 4-character minimum.
+# Fix-round-5 pin: three separate holes, all of them realistic.
+#   * The keyword had to be the label's TAIL, so `AWS_SECRET_ACCESS_KEY:`,
+#     `*_CREDENTIALS`, `*_AUTH` and `*_PWD` were invisible — the keyword may
+#     now be followed by label characters as well as preceded by them.
+#   * `passwd`, `pwd`, `credential` and `bearer` were not in the alternation,
+#     so `DB_PASSWD=hunter2hunter2hunter` read as prose.
+#   * The value character class excluded `@ ! # % & * ( ) , ;`, so a password
+#     with punctuation early (`p@ssw0rd!Xy29KqZ`) truncated to `p` and fell
+#     under the 4-character minimum. The value is now "everything up to
+#     whitespace", minus the quote characters that delimit it and the pipe
+#     that delimits a markdown table cell.
+# What did NOT change: the assignment character must still follow the label
+# directly (only whitespace between), the value still has a length floor, and
+# it is still checked against PLACEHOLDER_RX before it counts — so
+# `BUNNY_API_KEY=REDACTED_DO_NOT_COMMIT`, `<paste-here>`, `xxxxxxxx` and
+# `your-key-here` still pass, and "secret: the build is slow" still does not
+# match (`the` is 3 characters).
 GENERIC_CRED_RX = re.compile(
-    r"(?i)[A-Za-z0-9_-]*(?:password|secret|token|api[_-]?key)\s*[=:]\s*"
-    r"(['\"]?)([A-Za-z0-9/+_<>{}$\[\].-]{4,})\1"
+    r"(?i)[A-Za-z0-9_-]*"
+    r"(?:password|passwd|pwd|secret|credential|bearer|token|api[_-]?key)"
+    r"[A-Za-z0-9_-]*\s*[=:]\s*"
+    r"(['\"]?)([^\s'\"`|]{4,})\1"
 )
 
 # Fix-round-2 pin: a placeholder must be recognisable as a WHOLE value, never
@@ -140,7 +168,7 @@ def sections(text: str) -> dict:
     return {k: "\n".join(v).strip() for k, v in out.items()}
 
 
-def check_paths(text: str, base: str) -> list:
+def check_paths(text: str) -> list:
     problems = []
     masked = URL_RX.sub(lambda m: "\0" * len(m.group()), text)
     for quoted, bare in PATH_RX.findall(masked):
@@ -201,12 +229,21 @@ def main() -> int:
     if steps and not re.search(r"^\s*\d+[.)]\s+\S", steps, re.M):
         problems.append("What to do next is not a numbered list")
 
-    problems.extend(check_paths(text, directory))
+    problems.extend(check_paths(text))
 
-    if os.path.isdir(directory):
+    # I3: pointing the gate at a FILE used to walk that file's whole parent
+    # directory — run against a document in a repository root or in `~`, it
+    # scanned everything there and reported findings that were no part of the
+    # handoff. A file target now scans that file plus the mode's named sibling
+    # files (PROMPT.txt) and nothing else; pass the directory to scan the tree.
+    if os.path.isdir(args.path):
         all_files = list(iter_files(directory))
     else:
         all_files = [(os.path.basename(doc), doc)]
+        for filename in MODE_FILES.get(args.mode, ()):
+            sibling = os.path.join(directory, filename)
+            if os.path.isfile(sibling) and os.path.abspath(sibling) != os.path.abspath(doc):
+                all_files.append((filename, sibling))
 
     # The zip is checked by entry NAME, never extracted: a gate that unpacks
     # an archive is a gate that can be made to write outside its directory.
@@ -255,8 +292,8 @@ def main() -> int:
                     f"possible credential (heuristic match) in {rel} — "
                     "if this is a real secret, redact the value and keep "
                     "the name; if it isn't, remove it from the document or "
-                    "rename the label so it doesn't end in "
-                    "password/secret/token/api_key"
+                    "rename the label so it does not contain "
+                    "password/passwd/pwd/secret/credential/bearer/token/api_key"
                 )
 
     if problems:

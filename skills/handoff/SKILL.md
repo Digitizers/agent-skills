@@ -130,7 +130,10 @@ Details and the `PROMPT.txt` template: [references/modes.md](references/modes.md
   not tell the user the handoff is ready until it prints `GATE: PASS`. It
   fails on empty or missing sections, unnumbered next steps, a path that does
   not exist, a block missing for the mode, and secrets — in every file of the
-  handoff, not only the document. Its credential check is a **heuristic**: any
+  handoff, not only the document. The one exception is the zip: it is checked
+  by ENTRY NAME only (a `.env`, `id_rsa` and friends), never opened, so what
+  is inside its files is the writer's responsibility and no `GATE: PASS` says
+  otherwise. Its credential check is a **heuristic**: any
   `label = value` where the label ends in `password`/`secret`/`token`/`api_key`
   and the value isn't an obvious placeholder trips it, including a benign
   identifier like `trace_token: 8f14e45f-...` (a real UUID, not a secret) —

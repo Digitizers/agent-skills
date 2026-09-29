@@ -139,3 +139,7 @@ Only when the user asks. It carries work that is not in git and not
 reproducible — scratch files, uncommitted edits in a temporary workspace,
 generated artifacts that cost real time. Never `.env`, credentials,
 `node_modules`, or anything the repository already holds.
+
+This list is the writer's responsibility, not the gate's: the gate reads the
+archive's ENTRY NAMES and fails on an obvious credential file, but it never
+opens the archive, so a secret inside a file in the zip passes it.

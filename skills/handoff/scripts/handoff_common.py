@@ -28,6 +28,41 @@ def attended() -> bool:
     return value.strip() != "0"
 
 
+def env_float(name: str, default: float) -> float:
+    """Read a numeric setting, falling back to the documented default.
+
+    These values come from a hand-edited `settings.json` and are read on
+    EVERY user prompt, so `HANDOFF_THRESHOLD_PCT=seventy` must degrade to the
+    default, not raise ValueError and kill the hook. Same policy the guards
+    already apply to CONTEXT_WINDOW_BY_MODEL and `updated_at`.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return float(default)
+    try:
+        return float(raw.strip())
+    except (AttributeError, TypeError, ValueError):
+        return float(default)
+
+
+def env_positive_int(name: str):
+    """A positive integer setting, or None when unset, unparseable or <= 0.
+
+    None means "the operator did not state this", which is exactly what the
+    callers need: a `CONTEXT_WINDOW_TOKENS=0` is not a 0-token window (that
+    divides by zero two hundred lines later), it is an unusable value that
+    must fall back to the documented default and NOT count as configured.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return None
+    try:
+        value = int(raw.strip())
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def marker_path(session_id: str, name: str) -> str:
     """One marker per session per purpose: a fired warning must never
     disarm a later, louder one."""

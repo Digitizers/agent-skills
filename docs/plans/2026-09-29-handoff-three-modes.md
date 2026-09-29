@@ -18,7 +18,7 @@
 - Marker files live in `tempfile.gettempdir()` and are keyed by session id, as today.
 - Secrets are **never** written to any artifact — values redacted, names kept.
 - Durable output location stays `~/.claude/handoffs/<project-slug>/`; never `/tmp`, `$TMPDIR` or the session scratchpad.
-- Unattended = `CLAUDE_CODE_SESSION_ATTENDED != "1"` or `HANDOFF_UNATTENDED=1`. Unattended sessions are never told to stop or to ask for compaction.
+- Unattended = `CLAUDE_CODE_SESSION_ATTENDED` is exactly `"0"`, or `HANDOFF_UNATTENDED=1`. A missing or unrecognised value counts as attended — an unnecessary nudge is cheap, a swallowed handoff is not. Unattended sessions are never told to stop or to ask for compaction.
 
 ## Review Focus
 

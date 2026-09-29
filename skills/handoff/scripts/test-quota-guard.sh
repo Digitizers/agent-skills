@@ -4,7 +4,7 @@ set -euo pipefail
 unset QUOTA_WARN_PCT QUOTA_ACT_PCT QUOTA_WEEKLY_ACT_PCT QUOTA_STALE_SECONDS HANDOFF_UNATTENDED
 GUARD="$(cd "$(dirname "$0")" && pwd)/quota-guard.sh"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"; rm -f "${TMPDIR:-/tmp}"/handoff-quota-*-qg-test-*' EXIT
+trap 'rm -rf "$WORK"; rm -f "${TMPDIR:-/tmp}"/handoff-quota-*-qg-test*' EXIT
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
 state() { # $1=file $2=five_hour pct $3=seven_day pct $4=age seconds
@@ -102,5 +102,37 @@ OUT="$(printf '[1,2,3]' | HANDOFF_QUOTA_STATE="$WORK/act.json" CLAUDE_CODE_SESSI
 [ "$STATUS" -eq 0 ] || fail "non-object JSON payload exited non-zero"
 [ -z "$OUT" ] || fail "non-object JSON payload produced output"
 echo "PASS non-object JSON payload is silent"
+
+# 13. C2: QUOTA_WARN_PCT=high is a hand-edited settings.json value; it used to
+#     raise ValueError and exit 1 on EVERY prompt. It must fall back to the
+#     documented 70, so 72% still warns and the hook still exits 0.
+state "$WORK/badwarn.json" 72 5 0
+STATUS=0
+OUT="$(printf '{"session_id":"qg-test-badwarn","hook_event_name":"UserPromptSubmit"}' \
+  | QUOTA_WARN_PCT=high HANDOFF_QUOTA_STATE="$WORK/badwarn.json" CLAUDE_CODE_SESSION_ATTENDED=1 bash "$GUARD")" || STATUS=$?
+[ "$STATUS" -eq 0 ] || fail "QUOTA_WARN_PCT=high exited $STATUS"
+echo "$OUT" | grep -q "additionalContext" || fail "QUOTA_WARN_PCT=high did not fall back to the default 70"
+echo "PASS non-numeric QUOTA_WARN_PCT falls back to the default"
+
+# 14. C2: the same for the act, weekly and staleness settings — all four
+#     scalars fall back together and the act still fires at 85%.
+state "$WORK/badact.json" 85 5 0
+STATUS=0
+OUT="$(printf '{"session_id":"qg-test-badact","hook_event_name":"UserPromptSubmit"}' \
+  | QUOTA_ACT_PCT=eighty QUOTA_WEEKLY_ACT_PCT=most QUOTA_STALE_SECONDS=soon \
+    HANDOFF_QUOTA_STATE="$WORK/badact.json" CLAUDE_CODE_SESSION_ATTENDED=1 bash "$GUARD")" || STATUS=$?
+[ "$STATUS" -eq 0 ] || fail "non-numeric quota thresholds exited $STATUS"
+echo "$OUT" | grep -q "STOP" || fail "non-numeric quota thresholds did not fall back to the defaults"
+echo "PASS non-numeric QUOTA_ACT_PCT / WEEKLY_ACT_PCT / STALE_SECONDS fall back"
+
+# 15. Minor: a session id containing "/" must not make the marker write raise
+#     FileNotFoundError. marker_path sanitises it; this pins that it still does.
+state "$WORK/slash.json" 85 5 0
+STATUS=0
+OUT="$(printf '{"session_id":"qg-test/slashed","hook_event_name":"UserPromptSubmit"}' \
+  | HANDOFF_QUOTA_STATE="$WORK/slash.json" CLAUDE_CODE_SESSION_ATTENDED=1 bash "$GUARD")" || STATUS=$?
+[ "$STATUS" -eq 0 ] || fail "a session id containing / exited $STATUS"
+echo "$OUT" | grep -q "STOP" || fail "a session id containing / suppressed the act"
+echo "PASS a session id containing / is sanitised into the marker name"
 
 echo "ALL PASS"

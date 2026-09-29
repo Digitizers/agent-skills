@@ -200,7 +200,17 @@ guard stays silent rather than reading its absence as 0%.
 
 `PreCompact` fires when compaction starts — too late to be the main trigger,
 which is why the thresholds above exist, but exactly right as a backstop for
-the case where the 80% stop was ignored:
+the case where the 80% stop was ignored.
+
+Two things make that backstop real rather than decorative, and both are in
+`context-guard.py`. In the very case it is for, the session already holds a
+`stop` marker (the stop fired and was ignored), so the ordinary once-per-
+session check would return silently — under `PreCompact` the guard therefore
+bypasses the markers and leaves none behind. And `PreCompact` does not consume
+`hookSpecificOutput.additionalContext`, so it emits `systemMessage` instead.
+The text is written for a session that is already compacting: it reports that
+compaction started with no handoff and tells the resumed session to invoke the
+handoff skill first, rather than asking for a stop that can no longer happen.
 
 ```json
 {
