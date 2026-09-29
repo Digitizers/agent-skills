@@ -694,4 +694,43 @@ OUT="$(python3 "$GATE" "$WORK/goodprompt" --mode quota)" || fail "a normal PROMP
 echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for a normal PROMPT.txt: $OUT"
 echo "PASS a normal non-empty PROMPT.txt still passes"
 
+# 44. Codex round 3, P1 — TARGET RESOLUTION vs THE STORAGE LAYOUT. The skill
+#     saves single-file handoffs as
+#     ~/.claude/handoffs/<project-slug>/handoff-<slug>-<date>-<HHMM>.md, so the
+#     per-project directory holds MANY handoffs and no HANDOFF.md. Telling the
+#     caller to gate "the directory" therefore failed a perfectly good handoff,
+#     and would have scanned unrelated older handoffs in the same directory.
+#     The FILE target is the correct call for a single-file mode.
+mkdir -p "$WORK/project-slug"
+mkgood "$WORK/mkgood-src"
+cp "$WORK/mkgood-src/HANDOFF.md" "$WORK/project-slug/handoff-alpha-2026-09-29-1412.md"
+# An unrelated OLDER handoff sharing the directory, carrying a secret of its
+# own: the file target must not look at it.
+printf '# Handoff — beta (2026-08-01)\n\nsk-ant-api03-%s\n' "$(python3 -c 'print("A"*95)')" \
+  > "$WORK/project-slug/handoff-beta-2026-08-01-0900.md"
+OUT="$(python3 "$GATE" "$WORK/project-slug/handoff-alpha-2026-09-29-1412.md" --mode compaction)" \
+  || fail "REGRESSION (P1): a single-file handoff in the shared project directory was rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for the file target: $OUT"
+echo "$OUT" | grep -q "handoff-beta" && fail "REGRESSION (P1): the unrelated older handoff was scanned"
+echo "PASS a single-file handoff is gated by its own path, not its directory"
+
+# 45. ...and pointing the gate at that shared directory fails with guidance
+#     that teaches the right call, instead of a bare "no handoff document".
+OUT="$(python3 "$GATE" "$WORK/project-slug" --mode compaction || true)"
+python3 "$GATE" "$WORK/project-slug" --mode compaction && fail "a directory with no HANDOFF.md passed"
+echo "$OUT" | grep -q "pass the document's path for a single-file handoff" \
+  || fail "the failure does not teach the single-file call: $OUT"
+echo "$OUT" | grep -q "bundle directory containing HANDOFF.md" \
+  || fail "the failure does not teach the bundle call: $OUT"
+echo "PASS a directory with no HANDOFF.md fails with usage guidance"
+
+# 46. ...while a BUNDLE directory — the per-handoff directory holding
+#     HANDOFF.md and PROMPT.txt — is still gated as a directory and still
+#     passes. The two calls are not interchangeable, and both must work.
+mkgood "$WORK/bundlemode"
+echo "Continue from step 3." > "$WORK/bundlemode/PROMPT.txt"
+OUT="$(python3 "$GATE" "$WORK/bundlemode" --mode quota)" || fail "a bundle directory was rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for the bundle directory: $OUT"
+echo "PASS a bundle directory is still gated as a directory"
+
 echo "ALL PASS"

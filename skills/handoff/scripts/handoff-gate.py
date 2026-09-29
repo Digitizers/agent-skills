@@ -296,7 +296,23 @@ def main() -> int:
 
     problems = []
     if not os.path.exists(doc):
-        print(f"GATE: FAIL — {redact(f'no handoff document at {doc}')}")
+        # A directory target with no HANDOFF.md is almost always the caller
+        # pointing at the SHARED project directory
+        # (~/.claude/handoffs/<project-slug>/), which holds many
+        # handoff-<slug>-<date>-<HHMM>.md files and no HANDOFF.md. Say what to
+        # do instead: a single-file mode is gated by the DOCUMENT's path, and
+        # only a per-handoff bundle directory is gated as a directory.
+        if os.path.isdir(args.path):
+            hint = (
+                f"no handoff document at {doc} — pass the document's path for "
+                "a single-file handoff (compaction, same-workspace), or a "
+                "bundle directory containing HANDOFF.md (cross-workspace, "
+                "quota). A shared project directory holding several "
+                "handoff-<slug>-<date>-<HHMM>.md files is neither"
+            )
+        else:
+            hint = f"no handoff document at {doc}"
+        print(f"GATE: FAIL — {redact(hint)}")
         return 1
     try:
         text = open(doc, "r", encoding="utf-8", errors="replace").read()

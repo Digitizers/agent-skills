@@ -75,4 +75,42 @@ print([h.env_positive_int('HF_W')] + [
 [ "$OUT" = "[None, None, None, None, 1000000]" ] || fail "env_positive_int: $OUT"
 echo "PASS env_positive_int rejects unparseable, zero and negative"
 
+# 8. env_float must reject NON-POSITIVE values too — the same class of hole as
+#    inf/nan, at the other end. Every caller is a percentage threshold or an
+#    age in seconds: `QUOTA_STALE_SECONDS=0` makes every state instantly stale
+#    and silently switches the quota alerts OFF, and `HANDOFF_THRESHOLD_PCT=0`
+#    or `=-1` makes the guard fire on every single prompt.
+for bad in 0 0.0 -0 -5 -0.5; do
+  OUT="$(HF_T="$bad" python3 -c "
+import sys; sys.path.insert(0, '$DIR')
+import handoff_common as h; print(h.env_float('HF_T', 900.0))")"
+  [ "$OUT" = "900.0" ] || fail "env_float accepted the non-positive value $bad: $OUT"
+done
+# ...and a valid value is still honoured EXACTLY, not nudged to the default.
+for good in 0.5 1 42.5 93 100000; do
+  OUT="$(HF_T="$good" python3 -c "
+import sys; sys.path.insert(0, '$DIR')
+import handoff_common as h; print(h.env_float('HF_T', 900.0))")"
+  [ "$OUT" = "$(python3 -c "print(float('$good'))")" ] || fail "env_float altered the good value $good: $OUT"
+done
+echo "PASS env_float rejects zero and negative, honours valid values exactly"
+
+# 9. The same rule end-to-end through the guards' own variable names, since
+#    that is how an operator actually hits it.
+OUT="$(QUOTA_STALE_SECONDS=0 python3 -c "
+import sys; sys.path.insert(0, '$DIR')
+import handoff_common as h; print(h.env_float('QUOTA_STALE_SECONDS', 900.0))")"
+[ "$OUT" = "900.0" ] || fail "QUOTA_STALE_SECONDS=0 did not fall back: $OUT"
+OUT="$(QUOTA_STALE_SECONDS=-5 python3 -c "
+import sys; sys.path.insert(0, '$DIR')
+import handoff_common as h; print(h.env_float('QUOTA_STALE_SECONDS', 900.0))")"
+[ "$OUT" = "900.0" ] || fail "QUOTA_STALE_SECONDS=-5 did not fall back: $OUT"
+for bad in 0 -1; do
+  OUT="$(HANDOFF_THRESHOLD_PCT="$bad" python3 -c "
+import sys; sys.path.insert(0, '$DIR')
+import handoff_common as h; print(h.env_float('HANDOFF_THRESHOLD_PCT', 70.0))")"
+  [ "$OUT" = "70.0" ] || fail "HANDOFF_THRESHOLD_PCT=$bad did not fall back: $OUT"
+done
+echo "PASS non-positive QUOTA_STALE_SECONDS / HANDOFF_THRESHOLD_PCT fall back"
+
 echo "ALL PASS"

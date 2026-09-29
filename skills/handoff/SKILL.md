@@ -126,10 +126,24 @@ Details and the `PROMPT.txt` template: [references/modes.md](references/modes.md
   downloadable from within the chat body (artifact or file attachment), and
   also state where it was saved if a filesystem exists.
 - **Gate before delivery.** Run
-  `python3 <skill>/scripts/handoff-gate.py <handoff-dir> --mode <mode>` and do
-  not tell the user the handoff is ready until it prints `GATE: PASS`. It
-  fails on empty or missing sections, unnumbered next steps, a path that does
-  not exist, a block missing for the mode, and secrets — in every file of the
+  `python3 <skill>/scripts/handoff-gate.py <target> --mode <mode>` and do
+  not tell the user the handoff is ready until it prints `GATE: PASS`.
+  **What `<target>` is depends on the mode, and it is not always a
+  directory:**
+  - `compaction` and `same-workspace` are single files, so pass the
+    **document's own path** —
+    `handoff-gate.py ~/.claude/handoffs/<project-slug>/handoff-<slug>-<date>-<HHMM>.md --mode compaction`.
+    Passing the project directory is wrong twice over: it holds many
+    handoffs and no `HANDOFF.md`, so the gate finds nothing, and if an older
+    bundle is sitting there the gate would scan handoffs that are not this
+    one.
+  - `cross-workspace` and `quota` are bundles, so pass the **bundle
+    directory** — the per-handoff directory holding `HANDOFF.md`,
+    `PROMPT.txt` and any archive, *not* the shared
+    `~/.claude/handoffs/<project-slug>/`.
+
+  It fails on empty or missing sections, unnumbered next steps, a path that
+  does not exist, a block missing for the mode, and secrets — in every file of the
   handoff, not only the document. The one exception is the zip: it is checked
   by ENTRY NAME only (a `.env`, `id_rsa` and friends), never opened, so what
   is inside its files is the writer's responsibility and no `GATE: PASS` says

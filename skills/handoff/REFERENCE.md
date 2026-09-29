@@ -286,3 +286,14 @@ file, or empty) so the writer knows whether to create it, replace it or fill
 it in. A paste-ready prompt is the one artifact those two modes exist to
 produce; a `GATE: PASS` over a zero-byte file would be the gate certifying
 its absence.
+
+**What to point the gate at.** The single-file modes (`compaction`,
+`same-workspace`) are gated by the **document's own path**; the bundle modes
+(`cross-workspace`, `quota`) are gated by the **bundle directory**. This is
+not interchangeable, because the skill's storage layout puts single-file
+handoffs at `~/.claude/handoffs/<project-slug>/handoff-<slug>-<date>-<HHMM>.md`
+— one reused project directory holding many handoffs and no `HANDOFF.md`. A
+directory target there finds nothing and, if an older bundle happens to be in
+the same directory, scans handoffs that are not the one being delivered. When
+the gate is handed a directory with no `HANDOFF.md` it now says which of the
+two calls to make instead of only reporting the missing file.

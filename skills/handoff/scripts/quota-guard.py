@@ -80,13 +80,20 @@ def main() -> None:
     else:
         return
 
-    marker = marker_path(session_id, f"quota-{level}")
-    if os.path.exists(marker):
-        return
-
+    # The window is chosen BEFORE the marker, because the marker is keyed by
+    # it. A `quota-act` marker that did not say which window fired meant the
+    # 5-hour alert silenced the weekly one for the rest of the session — and
+    # the weekly limit, with its reset time, is the one that decides between
+    # waiting an hour and stopping for the week.
     window = "weekly limit" if level == "act" and (
         seven is not None and seven >= weekly_pct
     ) else "5-hour window"
+    window_key = "weekly" if window == "weekly limit" else "5h"
+
+    marker = marker_path(session_id, f"quota-{level}-{window_key}")
+    if os.path.exists(marker):
+        return
+
     used = seven if window == "weekly limit" else five
     resets = (state.get("seven_day") if window == "weekly limit"
               else state.get("five_hour")) or {}

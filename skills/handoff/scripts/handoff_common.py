@@ -35,6 +35,10 @@ def env_float(name: str, default: float) -> float:
     EVERY user prompt, so `HANDOFF_THRESHOLD_PCT=seventy` must degrade to the
     default, not raise ValueError and kill the hook. Same policy the guards
     already apply to CONTEXT_WINDOW_BY_MODEL and `updated_at`.
+
+    Unusable means unparseable, non-finite, OR non-positive: see the two
+    comments in the body. `env_positive_int` below already applies the same
+    rule to the integer settings.
     """
     raw = os.environ.get(name)
     if raw is None:
@@ -48,6 +52,15 @@ def env_float(name: str, default: float) -> float:
     # That is a worse outcome than the typo it came from, so they fall back
     # to the documented default like any other unusable value.
     if value != value or value in (float("inf"), float("-inf")):
+        return float(default)
+    # Same class of hole at the other end. Every caller is a PERCENTAGE
+    # threshold or an AGE IN SECONDS, and none of them has a meaningful
+    # non-positive value: `QUOTA_STALE_SECONDS=0` makes every state instantly
+    # stale and silently switches the quota alerts off, and a threshold of 0
+    # or less fires on every single prompt. Both are the setting disarmed or
+    # jammed on, which is exactly what this function exists to prevent, so
+    # they fall back to the documented default too.
+    if value <= 0:
         return float(default)
     return value
 

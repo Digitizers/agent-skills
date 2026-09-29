@@ -135,4 +135,27 @@ OUT="$(printf '{"session_id":"qg-test/slashed","hook_event_name":"UserPromptSubm
 echo "$OUT" | grep -q "STOP" || fail "a session id containing / suppressed the act"
 echo "PASS a session id containing / is sanitised into the marker name"
 
+# 16. Codex round 3, P2 — the once-per-session marker was keyed by LEVEL only
+#     (`quota-act`), so a session that crossed the 5-hour act threshold went
+#     on to swallow the WEEKLY alert: the guard returned at the marker check
+#     and the user never heard about the weekly window or its reset time,
+#     which is the one that decides between waiting an hour and stopping for
+#     the week. The marker is now keyed by the window that fired, so the two
+#     alerts are independent. Same session id throughout, on purpose.
+state "$WORK/seq5h.json" 85 5 0
+OUT="$(run qg-test-seq "$WORK/seq5h.json")"
+echo "$OUT" | grep -q "5-hour window" || fail "the 5-hour act did not fire first: $OUT"
+# ...it is still once-per-session for that window:
+[ -z "$(run qg-test-seq "$WORK/seq5h.json")" ] || fail "the 5-hour act fired twice in one session"
+# ...and now the weekly limit crosses its own, higher bar in the SAME session.
+state "$WORK/seqweek.json" 85 95 0
+OUT="$(run qg-test-seq "$WORK/seqweek.json")"
+[ -n "$OUT" ] || fail "REGRESSION (P2): the 5-hour marker swallowed the weekly alert"
+echo "$OUT" | grep -q "weekly limit" || fail "the weekly alert does not name the weekly limit: $OUT"
+echo "$OUT" | grep -q "~95%" || fail "the weekly alert does not report the weekly percentage: $OUT"
+echo "$OUT" | grep -q "It resets at" || fail "the weekly alert does not give the reset time: $OUT"
+# ...and the weekly one is itself once-per-session.
+[ -z "$(run qg-test-seq "$WORK/seqweek.json")" ] || fail "the weekly act fired twice in one session"
+echo "PASS the 5-hour and weekly act alerts fire independently in one session"
+
 echo "ALL PASS"
