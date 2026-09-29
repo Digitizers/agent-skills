@@ -250,14 +250,24 @@ false positives down, a relative candidate counts as a path only if it
 contains a `/` and either ends in `/` or carries a file extension: a branch
 name in backticks (`feat/handoff-three-modes`) is left alone.
 
-**Archives.** A `.zip` (or any other archive) is checked by **entry name
-only** and is never read as text and never extracted. Extracting is how a
-gate gets made to write outside its directory; reading the compressed bytes
-as UTF-8 would pull an arbitrarily large bundle into memory and match the
-credential patterns against compression noise. So an archive fails the gate
-when it carries an entry named `.env`, `.npmrc`, `.pypirc`, `id_rsa` or
-`id_ed25519` — and the contents of the files inside it are the author's
-responsibility, not the gate's.
+**Archives.** A zip (`.zip`, and the zip containers `.jar`/`.whl`/`.egg`,
+matched case-insensitively) is checked by **entry name only** and is never
+read as text and never extracted. Extracting is how a gate gets made to write
+outside its directory; reading the compressed bytes as UTF-8 would pull an
+arbitrarily large bundle into memory and match the credential patterns against
+compression noise. So a zip fails the gate when it carries an entry named
+`.env`, `.npmrc`, `.pypirc`, `id_rsa` or `id_ed25519` — and the contents of
+the files inside it are the author's responsibility, not the gate's.
+
+Any **other** archive — `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`,
+`.gz`, `.bz2`, `.xz`, `.7z`, `.rar` — **fails the gate outright**, with a
+finding that says its contents could not be verified and names the two ways
+out: repackage it as a `.zip`, or drop it from the handoff. This used to be an
+unchecked pass, and briefly a hole: once archives were excluded from the text
+scan, a `.tar.gz` (or an uppercase `WORKSPACE.ZIP`) was examined by neither
+path and could carry a `.env` straight through. One predicate now governs both
+sides — whatever is excluded from the text scan gets archive treatment, and
+archive treatment is either an entry-name read or a refusal.
 
 **Its own output.** Every `GATE: FAIL` line is passed through a redaction
 step before printing: any substring matching one of the specific credential
@@ -267,3 +277,12 @@ a path candidate is repeated verbatim — and a path or a filename can itself
 contain a credential. Printing it would write the secret into the terminal
 scrollback, the CI log and the session transcript, which is the exact leak
 this gate exists to stop.
+
+**The mode's named file.** `quota` and `cross-workspace` mode require a
+`PROMPT.txt`, and the requirement is a **non-empty regular file**, not merely
+a name that exists: an empty `PROMPT.txt`, or a directory called `PROMPT.txt`,
+fails, and the message says which of the three it is (missing, not a regular
+file, or empty) so the writer knows whether to create it, replace it or fill
+it in. A paste-ready prompt is the one artifact those two modes exist to
+produce; a `GATE: PASS` over a zero-byte file would be the gate certifying
+its absence.

@@ -618,4 +618,80 @@ python3 "$GATE" "$WORK/zipentry" --mode compaction && fail "a zip holding a .env
 echo "$OUT" | grep -q "config/.env" || fail "the .env entry is not named: $OUT"
 echo "PASS zip entry named .env still fails on the entry name"
 
+# 38. Codex round 2, P1 — THE HOLE THE ARCHIVE EXCLUSION OPENED. is_archive()
+#     excluded every archive from the text scan while the entry-name check
+#     still keyed on a case-sensitive ".zip", so a `.tar.gz` bundle was
+#     checked by NEITHER path and carried a .env straight through. A
+#     non-zip archive is now a failure in its own right: the gate cannot
+#     read its entry names, so it cannot say the bundle is clean.
+mkgood "$WORK/targz"
+python3 - "$WORK/targz/workspace.TAR.GZ" <<'PY'
+import io, sys, tarfile
+with tarfile.open(sys.argv[1], "w:gz") as tf:
+    data = b"KEY=value\n"
+    info = tarfile.TarInfo(".env")
+    info.size = len(data)
+    tf.addfile(info, io.BytesIO(data))
+PY
+OUT="$(python3 "$GATE" "$WORK/targz" --mode compaction || true)"
+python3 "$GATE" "$WORK/targz" --mode compaction && fail "REGRESSION (P1): a .tar.gz bundle was checked by neither the entry-name pass nor the text scan"
+echo "$OUT" | grep -q "workspace.TAR.GZ" || fail "the unverifiable archive is not named: $OUT"
+echo "$OUT" | grep -q "could not be verified" || fail "the finding does not say the contents are unverified: $OUT"
+echo "$OUT" | grep -q "repackage it as a .zip" || fail "the finding does not name the way out: $OUT"
+echo "PASS a non-zip archive fails as unverifiable, naming the way out"
+
+# 39. ...and the entry-name check is case-insensitive: WORKSPACE.ZIP is a zip.
+mkgood "$WORK/upperzip"
+python3 - "$WORK/upperzip/WORKSPACE.ZIP" <<'PY'
+import zipfile, sys
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    zf.writestr(".env", "KEY=value\n")
+PY
+OUT="$(python3 "$GATE" "$WORK/upperzip" --mode compaction || true)"
+python3 "$GATE" "$WORK/upperzip" --mode compaction && fail "REGRESSION (P1): WORKSPACE.ZIP holding a .env passed the gate"
+echo "$OUT" | grep -q "WORKSPACE.ZIP contains .env" || fail "the uppercase zip was not checked by entry name: $OUT"
+echo "$OUT" | grep -q "could not be verified" && fail "a real zip must be read by entry name, not reported as unverifiable: $OUT"
+echo "PASS uppercase WORKSPACE.ZIP is checked by entry name"
+
+# 40. ...and a clean lowercase zip still passes: tightening the archive rules
+#     must not fail an ordinary, correct bundle.
+mkgood "$WORK/cleanzip"
+python3 - "$WORK/cleanzip/workspace.zip" <<'PY'
+import zipfile, sys
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    zf.writestr("src/main.py", "print('hi')\n")
+    zf.writestr("notes/scratch.md", "unfinished thought\n")
+PY
+OUT="$(python3 "$GATE" "$WORK/cleanzip" --mode compaction)" || fail "a clean workspace.zip was rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for a clean zip: $OUT"
+echo "PASS a clean workspace.zip still passes"
+
+# 41. Codex round 2, P2 — the MODE_FILES check was existence-only, so a
+#     zero-byte PROMPT.txt printed GATE: PASS and the handoff shipped without
+#     the one artifact quota and cross-workspace modes exist to produce.
+mkgood "$WORK/emptyprompt"
+: > "$WORK/emptyprompt/PROMPT.txt"
+OUT="$(python3 "$GATE" "$WORK/emptyprompt" --mode quota || true)"
+python3 "$GATE" "$WORK/emptyprompt" --mode quota && fail "REGRESSION (P2): an empty PROMPT.txt passed the gate"
+echo "$OUT" | grep -q "empty file for quota mode: PROMPT.txt" || fail "the empty PROMPT.txt is not reported as empty: $OUT"
+echo "PASS an empty PROMPT.txt fails, reported as empty"
+
+# 42. ...and so does a DIRECTORY named PROMPT.txt, reported as the different
+#     mistake it is — the writer needs to know whether to fill it in or
+#     replace it.
+mkgood "$WORK/dirprompt"
+mkdir -p "$WORK/dirprompt/PROMPT.txt"
+OUT="$(python3 "$GATE" "$WORK/dirprompt" --mode quota || true)"
+python3 "$GATE" "$WORK/dirprompt" --mode quota && fail "REGRESSION (P2): a directory named PROMPT.txt passed the gate"
+echo "$OUT" | grep -q "PROMPT.txt for quota mode is not a regular file" || fail "a directory PROMPT.txt is not reported as such: $OUT"
+echo "$OUT" | grep -q "empty file for quota mode" && fail "a directory must not be reported as an empty file: $OUT"
+echo "PASS a directory named PROMPT.txt fails, reported as not a regular file"
+
+# 43. ...and a normal, non-empty PROMPT.txt still passes.
+mkgood "$WORK/goodprompt"
+echo "Continue the migration from step 3; the branch is already pushed." > "$WORK/goodprompt/PROMPT.txt"
+OUT="$(python3 "$GATE" "$WORK/goodprompt" --mode quota)" || fail "a normal PROMPT.txt was rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for a normal PROMPT.txt: $OUT"
+echo "PASS a normal non-empty PROMPT.txt still passes"
+
 echo "ALL PASS"

@@ -133,7 +133,11 @@ Details and the `PROMPT.txt` template: [references/modes.md](references/modes.md
   handoff, not only the document. The one exception is the zip: it is checked
   by ENTRY NAME only (a `.env`, `id_rsa` and friends), never opened, so what
   is inside its files is the writer's responsibility and no `GATE: PASS` says
-  otherwise. Its credential check is a **heuristic**: any
+  otherwise. An archive that is **not** a zip (`.tar.gz`, `.tgz`, `.7z`, …)
+  fails the gate outright: its entry names cannot be read, so the gate will
+  not certify it — repackage the bundle as a `.zip` or leave it out. And in
+  `quota` / `cross-workspace` mode `PROMPT.txt` must be a non-empty regular
+  file, not just a name that exists. Its credential check is a **heuristic**: any
   `label = value` where the label ends in `password`/`secret`/`token`/`api_key`
   and the value isn't an obvious placeholder trips it, including a benign
   identifier like `trace_token: 8f14e45f-...` (a real UUID, not a secret) —

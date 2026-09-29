@@ -74,7 +74,8 @@ Another machine or another checkout. This mode requires:
 Delivered as a directory with `PROMPT.txt`, gated with `--mode
 cross-workspace`. `MODE_SECTIONS["cross-workspace"]` checks for both "Tried
 and rejected" and "Setup" — this is the only mode that gates on Setup.
-`MODE_FILES` also requires `PROMPT.txt` to exist for this mode, the same as
+`MODE_FILES` also requires `PROMPT.txt` — a NON-EMPTY REGULAR FILE, not
+merely a name that exists — for this mode, the same as
 for `quota` — a directory delivery always comes with a paste-ready prompt,
 because the reader is starting cold.
 
@@ -143,3 +144,10 @@ generated artifacts that cost real time. Never `.env`, credentials,
 This list is the writer's responsibility, not the gate's: the gate reads the
 archive's ENTRY NAMES and fails on an obvious credential file, but it never
 opens the archive, so a secret inside a file in the zip passes it.
+
+Make it a **`.zip`**. Entry names are the only thing the gate can read, and it
+can only read them out of a zip container, so any other archive format —
+`.tar.gz`, `.tgz`, `.7z`, `.rar` and the rest — is a `GATE: FAIL` saying its
+contents could not be verified: repackage it as a zip, or leave it out. The
+extension is matched case-insensitively, so `WORKSPACE.ZIP` is a zip like any
+other.

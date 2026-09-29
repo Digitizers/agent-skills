@@ -157,13 +157,35 @@ PATH_RX = re.compile(r"`([^`\n]+)`|(?<![\w`])((?:~|/)[\w./~-]{3,})")
 RELATIVE_PATH_RX = re.compile(r"^[\w.~][\w./~-]*$")
 RELATIVE_PATH_TAIL_RX = re.compile(r"\.[A-Za-z0-9]{1,8}$")
 
-# Archives are checked by ENTRY NAME only (see the zip loop below) and must
-# never be read into the text scan: a bundle is arbitrarily large, and regex
-# matches out of compressed bytes are noise, not findings.
-ARCHIVE_SUFFIXES = (
-    ".zip", ".jar", ".whl", ".egg", ".tar", ".tgz", ".tar.gz",
-    ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".gz", ".bz2", ".xz", ".7z",
+# Archives are checked by ENTRY NAME only (see the archive loop below) and
+# must never be read into the text scan: a bundle is arbitrarily large, and
+# regex matches out of compressed bytes are noise, not findings.
+#
+# ONE predicate governs both sides. is_archive() decides what is excluded
+# from the text scan, and everything it excludes gets archive treatment: a
+# zip container is read by entry name, and anything else is reported as
+# unverifiable. The first cut of this had the exclusion keyed on is_archive()
+# while the entry-name check was keyed on a case-sensitive `.zip`, so
+# `workspace.tar.gz`, `bundle.7z` and `WORKSPACE.ZIP` fell between the two
+# and were checked by NEITHER — a bundle in any of those forms carried a
+# `.env` straight through. Keep the two lists in step.
+ZIP_SUFFIXES = (".zip", ".jar", ".whl", ".egg")
+OTHER_ARCHIVE_SUFFIXES = (
+    ".tar", ".tgz", ".tar.gz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz",
+    ".gz", ".bz2", ".xz", ".7z", ".rar",
 )
+ARCHIVE_SUFFIXES = ZIP_SUFFIXES + OTHER_ARCHIVE_SUFFIXES
+
+
+def is_zip_container(name: str) -> bool:
+    """True for an archive the stdlib can list by entry name.
+
+    `.jar`, `.whl` and `.egg` are zip containers too, so zipfile lists them
+    like any other; one that turns out not to be readable is reported as an
+    unreadable archive, which is a finding either way.
+    """
+    lowered = name.lower()
+    return any(lowered.endswith(suffix) for suffix in ZIP_SUFFIXES)
 
 
 def is_archive(name: str) -> bool:
@@ -294,9 +316,38 @@ def main() -> int:
         if not any(k.lower() == name.lower() and v for k, v in found.items()):
             problems.append(f"missing section for {args.mode} mode: {name} ({why})")
 
+    # An existence check alone let an EMPTY PROMPT.txt — or a DIRECTORY named
+    # PROMPT.txt — print GATE: PASS, leaving the handoff without the one
+    # artifact these two modes exist to produce. Each failure says which of
+    # the three it is, so the writer knows whether to create it, replace it,
+    # or fill it in.
     for filename in MODE_FILES.get(args.mode, ()):
-        if not os.path.exists(os.path.join(directory, filename)):
+        target = os.path.join(directory, filename)
+        if not os.path.exists(target):
             problems.append(f"missing file for {args.mode} mode: {filename}")
+        elif not os.path.isfile(target):
+            problems.append(
+                f"{filename} for {args.mode} mode is not a regular file — "
+                f"{args.mode} mode needs a paste-ready prompt in {filename}; "
+                "replace it with a file holding that prompt"
+            )
+        else:
+            try:
+                prompt_body = open(
+                    target, "r", encoding="utf-8", errors="replace").read()
+            except OSError as exc:
+                problems.append(
+                    f"unreadable file for {args.mode} mode: {filename} "
+                    f"({exc}) — cannot confirm it holds the prompt"
+                )
+            else:
+                if not prompt_body.strip():
+                    problems.append(
+                        f"empty file for {args.mode} mode: {filename} — "
+                        f"{args.mode} mode exists to produce a paste-ready "
+                        "prompt; write the prompt the next session should be "
+                        "started with"
+                    )
 
     steps = next((v for k, v in found.items()
                   if k.lower() == "what to do next"), "")
@@ -339,13 +390,30 @@ def main() -> int:
         except OSError:
             neighbours = []
         for filename in neighbours:
-            if filename.endswith(".zip"):
+            # Same predicate as the text-scan exclusion: a sibling
+            # `workspace.tar.gz` must reach the archive loop below and be
+            # reported as unverifiable, not quietly left out of the bundle.
+            if is_archive(filename):
                 add_sibling(filename)
 
     # The zip is checked by entry NAME, never extracted: a gate that unpacks
     # an archive is a gate that can be made to write outside its directory.
+    # Every archive the predicate recognises comes through here, because the
+    # text scan has already excluded all of them — anything that reaches
+    # neither check is unexamined, which is the one outcome a gate may not
+    # produce silently.
     for rel, full in all_files:
-        if not rel.endswith(".zip"):
+        if not is_archive(rel):
+            continue
+        if not is_zip_container(rel):
+            # tar, tar.gz, 7z, rar: the stdlib can list a tar, but not the
+            # rest, and a gate that quietly passes what it cannot read is
+            # worse than one that refuses. Name the two ways out.
+            problems.append(
+                f"{rel} is an archive the gate cannot check by entry name — "
+                "its contents could not be verified, so it must not ship in a "
+                "handoff: repackage it as a .zip, or remove it from the handoff"
+            )
             continue
         try:
             with zipfile.ZipFile(full) as zf:
