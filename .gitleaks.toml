@@ -11,7 +11,11 @@
 # If a finding must be suppressed, add a per-finding fingerprint to
 # .gitleaksignore with a comment explaining why, and have it reviewed.
 #
-# The full-history scan is currently clean (no baseline entries).
+# Baseline: .gitleaksignore at the repo root holds per-finding fingerprints,
+# each with a comment naming what it is and why it is exempt. Every current
+# entry is a synthetic fixture for the handoff gate's own regression suite,
+# living only in already-pushed history; the tip builds those strings at
+# runtime instead of committing the literal.
 
 [extend]
 useDefault = true

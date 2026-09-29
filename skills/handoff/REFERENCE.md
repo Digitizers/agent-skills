@@ -131,3 +131,248 @@ more than one window mode, so only you know which one your sessions use.
   session, so in practice it fires once).
 - The marker file lives in the OS temp dir and is keyed by session id;
   deleting it re-arms the hook for the same session.
+
+### The second threshold
+
+`HANDOFF_STOP_PCT` (default 80) is the point where the agent stops instead of
+writing and continuing. Both thresholds are served by the same hook; each
+keeps its own marker, so the 70% nudge never disarms the 80% stop.
+
+```json
+{ "env": { "HANDOFF_THRESHOLD_PCT": "70", "HANDOFF_STOP_PCT": "80" } }
+```
+
+Unattended sessions (`claude -p`, scheduled runs) are warned but never
+stopped: there is nobody to run `/compact`, and stopping only kills the task.
+Detection (`handoff_common.py`'s `attended()`) is stricter than a simple
+"not 1" check: a session counts as unattended only when
+`CLAUDE_CODE_SESSION_ATTENDED` is exactly `"0"`, or `HANDOFF_UNATTENDED=1` is
+set. A missing or unrecognised value is treated as **attended** — an
+unrecognised value most likely means a future Claude Code changed the
+variable, and treating that as attended keeps the handoff nudge working
+instead of silently dropping it for everyone.
+
+### Quota detection — the statusline bridge
+
+Hook payloads carry **no** rate-limit data. Measured on Claude Code 2.1.x:
+`UserPromptSubmit` delivers `cwd, hook_event_name, permission_mode, prompt,
+prompt_id, scratchpad_dir, session_id, transcript_path`, and `Stop` adds
+`background_tasks, effort, last_assistant_message, session_crons,
+stop_hook_active`. Neither carries `rate_limits`. The statusline command does.
+
+So quota detection is two pieces: a bridge that records what the statusline
+receives, and a hook that reads it.
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash /path/to/agent-skills/skills/handoff/scripts/statusline-bridge.sh"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command",
+        "command": "bash /path/to/agent-skills/skills/handoff/scripts/quota-guard.sh" } ] }
+    ]
+  },
+  "env": {
+    "HANDOFF_STATUSLINE_INNER": "<your previous statusline command>",
+    "QUOTA_WARN_PCT": "70",
+    "QUOTA_ACT_PCT": "80",
+    "QUOTA_WEEKLY_ACT_PCT": "93"
+  }
+}
+```
+
+The bridge passes the payload through to `HANDOFF_STATUSLINE_INNER` unchanged,
+so the statusline looks exactly as it did. Removing the two entries restores
+the previous setup; nothing else is touched.
+
+**The snapshot is per session.** The bridge writes
+`~/.claude/handoff/quota-<session_id>.json`, and the guard reads the file for
+the session id in its own hook payload — both through
+`handoff_common.quota_state_path()`, so they cannot drift. One shared file
+was wrong for the way these sessions are actually run: several at once, often
+a subscription session beside an API-key or another account's, where a
+high-usage snapshot stopped an unrelated low-usage session and an API-key
+render deleted what a subscription session had just written.
+
+- A payload carrying **no session id** is not recorded at all. Falling back to
+  a shared file is the defect, so there is nothing to fall back to.
+- `HANDOFF_QUOTA_STATE` still overrides both sides with one explicit path,
+  unchanged.
+- Old per-session files are pruned opportunistically: on a write the bridge
+  is making anyway, it drops `quota-*.json` files in that directory older
+  than a day. No daemon and no schedule. A live session's bridge rewrites its
+  file on every statusline render, and the guard ignores anything older than
+  15 minutes, so a day-old file cannot belong to a running session. Pruning
+  is skipped entirely when `HANDOFF_QUOTA_STATE` names a path — an operator's
+  directory is not the bridge's to tidy.
+
+**Ask before installing it.** It edits the user's `settings.json`. Print the
+JSON, explain what the bridge does, and let them decide. Without it, quota
+mode still works when the user asks for it by name.
+
+`rate_limits` is present only for subscription accounts, and only after the
+first response of a session. An API-key account never populates it, and the
+guard stays silent rather than reading its absence as 0%.
+
+### The PreCompact net
+
+`PreCompact` fires when compaction starts — too late to be the main trigger,
+which is why the thresholds above exist, but exactly right as a backstop for
+the case where the 80% stop was ignored.
+
+Two things make that backstop real rather than decorative, and both are in
+`context-guard.py`. In the very case it is for, the session already holds a
+`stop` marker (the stop fired and was ignored), so the ordinary once-per-
+session check would return silently — under `PreCompact` the guard therefore
+bypasses the markers and leaves none behind. And `PreCompact` does not consume
+`hookSpecificOutput.additionalContext`, so it emits `systemMessage` instead.
+The text is written for a session that is already compacting: it reports that
+compaction started with no handoff and tells the resumed session to invoke the
+handoff skill first, rather than asking for a stop that can no longer happen.
+
+```json
+{
+  "hooks": {
+    "PreCompact": [
+      { "hooks": [ { "type": "command",
+        "command": "bash /path/to/agent-skills/skills/handoff/scripts/context-guard.sh" } ] }
+    ]
+  }
+}
+```
+
+### A note on the gate's credential check
+
+`handoff-gate.py`'s generic credential check is a **heuristic**, not a secret
+scanner: any `label = value` whose label CONTAINS one of the credential words
+and whose value isn't an obvious placeholder trips it — including a benign
+identifier whose label happens to contain one of those words, such as `trace_token: 8f14e45f-...` (a real UUID
+correlation id, not a secret). The gate's own failure message says so. A
+`GATE: FAIL` on this check is a list of things to look at, not proof of a
+leak — if the flagged line isn't actually a secret, rename the label or
+remove the line rather than treating the failure as a false negative in the
+gate.
+
+**Where the label list lives.** `GENERIC_CRED_KEYWORDS` in `handoff-gate.py`
+is the single source: the regex is built from it and the failure message's
+"rename the label so it does not contain ..." text is generated from it, so
+the two cannot drift. At the time of writing it holds `password`, `passwd`, `pwd`,
+`passphrase`, `secret`, `credential`, `bearer`, `token`, `cookie`,
+`authorization`, `auth`, `api_key`, `access_key`, `private_key` and
+`session_key` — but read the constant or a `GATE: FAIL` line, not this sentence, which is
+the kind of second copy that was wrong for four review rounds running. An
+HTTP scheme word before the value (`Authorization: Basic <value>`) is matched
+separately, so the credential after it is what gets length-checked and
+placeholder-checked.
+
+### What else the gate checks, and what it deliberately does not
+
+**Paths.** A path the document names must exist, or the handoff sends its
+reader somewhere that isn't there. An absolute or `~`-rooted path is checked
+as written. A backtick-quoted **relative** path — the shape the skill itself
+asks for, since authors are told to reference specs and plans by path instead
+of restating them — is resolved against *both* the handoff document's own
+directory and the current working directory, and only fails if it exists in
+neither; the failure names both places that were searched, so a typo is
+distinguishable from a path that is real but lives somewhere else. To keep
+false positives down, a relative candidate counts as a path only if it
+contains a `/` and either ends in `/` or carries a file extension: a branch
+name in backticks (`feat/handoff-three-modes`) is left alone.
+
+**Archives.** A zip (`.zip`, and the zip containers `.jar`/`.whl`/`.egg`,
+matched case-insensitively) is checked by **entry name only** and is never
+read as text and never extracted. Extracting is how a gate gets made to write
+outside its directory; reading the compressed bytes as UTF-8 would pull an
+arbitrarily large bundle into memory and match the credential patterns against
+compression noise. So a zip fails the gate when it carries an entry named
+`.env`, `.npmrc`, `.pypirc`, `id_rsa` or `id_ed25519` — and the contents of
+the files inside it are the author's responsibility, not the gate's.
+
+Any **other** archive — `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`,
+`.gz`, `.bz2`, `.xz`, `.7z`, `.rar` — **fails the gate outright**, with a
+finding that says its contents could not be verified and names the two ways
+out: repackage it as a `.zip`, or drop it from the handoff. This used to be an
+unchecked pass, and briefly a hole: once archives were excluded from the text
+scan, a `.tar.gz` (or an uppercase `WORKSPACE.ZIP`) was examined by neither
+path and could carry a `.env` straight through. One predicate now governs both
+sides — whatever is excluded from the text scan gets archive treatment, and
+archive treatment is either an entry-name read or a refusal.
+
+**Its own output.** Every `GATE: FAIL` line is passed through a redaction
+step before printing: any substring matching one of the specific credential
+patterns, or the value half of a generic `label = value` match, is replaced
+with `[redacted]`. The gate echoes material drawn from the files it scans —
+a path candidate is repeated verbatim — and a path or a filename can itself
+contain a credential. Printing it would write the secret into the terminal
+scrollback, the CI log and the session transcript, which is the exact leak
+this gate exists to stop.
+
+**The mode's named file.** `quota` and `cross-workspace` mode require a
+`PROMPT.txt`, and the requirement is a **non-empty regular file**, not merely
+a name that exists: an empty `PROMPT.txt`, or a directory called `PROMPT.txt`,
+fails, and the message says which of the three it is (missing, not a regular
+file, or empty) so the writer knows whether to create it, replace it or fill
+it in. A paste-ready prompt is the one artifact those two modes exist to
+produce; a `GATE: PASS` over a zero-byte file would be the gate certifying
+its absence.
+
+**What to point the gate at.** The single-file modes (`compaction`,
+`same-workspace`) are gated by the **document's own path**; the bundle modes
+(`cross-workspace`, `quota`) are gated by the **bundle directory**. This is
+not interchangeable, because the skill's storage layout puts single-file
+handoffs at `~/.claude/handoffs/<project-slug>/handoff-<slug>-<date>-<HHMM>.md`
+— one reused project directory holding many handoffs and no `HANDOFF.md`. A
+directory target there finds nothing and, if an older bundle happens to be in
+the same directory, scans handoffs that are not the one being delivered. When
+the gate is handed a directory with no `HANDOFF.md` it now says which of the
+two calls to make instead of only reporting the missing file.
+
+**Code fences.** The document is de-fenced **once**, by `strip_fences()`,
+and every check that reasons about document STRUCTURE reads the de-fenced
+text: which sections exist, whether they are empty, the mode's required
+sections, and whether `What to do next` is a numbered list. The skill tells
+authors to paste templates, and a template shows the very headings and the
+very `1.` lines the gate requires — so a `## Tried and rejected` or a
+`1. <first step>` inside a fenced example is sample text, not structure, and
+a handoff carrying only those fails. A fenced line becomes a non-empty
+placeholder rather than nothing, so a section whose whole body is a code
+block still counts as having a body.
+
+The secret and path scans deliberately read the **raw** text: a fence hides
+structure from the structural checks, never a credential from the secret
+check.
+
+### Every place a name is scanned
+
+A name ships with the handoff exactly as a body does: a file called
+`sk-ant-<value>.md` leaks the key as plainly as one with the key inside it.
+One helper, `check_name()`, applies the specific patterns and the generic
+`label = value` check to a name, and it is called from every place a name
+travels. The list is exhaustive — if a future change introduces a fifth, it
+belongs here:
+
+1. **Every file's path inside the handoff**, relative to the handoff
+   directory. This covers nested directory names (`context/notes.md`) and
+   runs for every entry including archives, which are excluded from the
+   *text* scan but never from this one.
+2. **The handoff's own name** — the bundle directory's basename for a
+   directory target, the document's filename for a file target. A bundle
+   directory named after a token keeps that name when it is copied or zipped
+   up and sent. Only the basename: the directories above it belong to the
+   sender's machine, and scanning them would fail every run made from a
+   credential-shaped home directory.
+3. **Every entry name inside every zip**, reported as `<archive>:<entry>`.
+   The archive's index carries those names whether or not anyone opens it.
+   Entry names only — nothing is extracted, which is also why the separate
+   `.env` / `id_rsa` / `.npmrc` / `.pypirc` / `id_ed25519` entry rule stays
+   exactly as it was.
+
+(For completeness, the fourth thing scanned is not a name: every non-archive
+file's CONTENTS.)
+
+Findings are worded "… in the FILE NAME …" and name the thing to rename
+(file, handoff directory, archive entry). They go through the same
+`redact()` as every other line, so the credential is masked in the output.

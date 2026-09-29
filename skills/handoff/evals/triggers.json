@@ -5,5 +5,9 @@
   { "query": "make me a handoff for the next session, it will focus on the billing refactor", "should_trigger": true },
   { "query": "summarize this article into three bullet points", "should_trigger": false },
   { "query": "draft a changelog entry for these fixes: login bug, slow dashboard, broken export link", "should_trigger": false },
-  { "query": "what did we change in the last commit?", "should_trigger": false }
+  { "query": "what did we change in the last commit?", "should_trigger": false },
+  { "query": "המכסה שלי כמעט נגמרת, תכין handoff להמשך בחשבון אחר", "should_trigger": true },
+  { "query": "hand this off to an agent on my other laptop", "should_trigger": true },
+  { "query": "we're about to get compacted, save the state first", "should_trigger": true },
+  { "query": "how much of my 5-hour window is left?", "should_trigger": false }
 ]

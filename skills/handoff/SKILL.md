@@ -43,6 +43,42 @@ Close the document with an explicit instruction to the next agent: *remember
 this information and wait for further instructions — do not start working on
 anything.* The handoff transfers state, it does not assign work.
 
+## Modes
+
+The four-part contract above is the whole document in every mode. A mode
+**adds** a block on top of that core. Pick the mode from what the reader will
+not know:
+
+**The modes are exclusive, not cumulative.** You pick one mode and run the
+gate with that one `--mode` flag; the gate checks only the block for the mode
+you named. `--mode quota` never checks for a Setup section, no matter how
+much the situation resembles cross-workspace — Setup is checked only under
+`--mode cross-workspace`. Each row below lists everything that mode itself
+requires, in full, not an increment on the row above (`cross-workspace`
+happens to produce the fullest document of the four, since a reader on
+another machine with no session to fall back on needs the most, but that
+fullness is not inherited — it is what `cross-workspace` requires on its
+own).
+
+| Mode | The reader | This mode requires |
+|---|---|---|
+| `compaction` | this same agent, minutes from now, memory erased, workspace intact | what is mid-action; the user's constraints and decisions verbatim; **Tried and rejected**; a verification command (branch, sha, `git status`) |
+| `same-workspace` | another agent on this machine | mid-action state, constraints verbatim, **Tried and rejected**, a verification command, what is uncommitted, and the user's unwritten conventions |
+| `cross-workspace` | another agent on another machine | mid-action state, constraints verbatim, **Tried and rejected**, a verification command, what is uncommitted, unwritten conventions, and a **Setup** section: repository, branch, exact sha, environment variable names, required MCP servers and skills, and one command that must pass first |
+| `quota` | a fresh session, possibly another account | mid-action state, constraints verbatim, **Tried and rejected**, a verification command, what is uncommitted, unwritten conventions, `PROMPT.txt`, and when the window resets |
+
+**Both apply at once (e.g. quota-driven and bound for another machine):**
+write one document that carries the union of both modes' content — the
+cross-workspace Setup section *and* the quota `PROMPT.txt` — then run the
+gate twice, once per mode: `--mode cross-workspace` and `--mode quota`. Both
+runs must print `GATE: PASS`; neither run alone confirms the other mode's
+requirements were met.
+
+When the user says "hand this to another agent" without saying where, ask
+which of the two workspaces it is — the answer changes half the document.
+
+Details and the `PROMPT.txt` template: [references/modes.md](references/modes.md).
+
 ## Rules
 
 - **Language:** write the document in the primary language of the current
@@ -89,6 +125,43 @@ anything.* The handoff transfers state, it does not assign work.
 - **Chat UIs with downloads/artifacts:** deliver the markdown so it is
   downloadable from within the chat body (artifact or file attachment), and
   also state where it was saved if a filesystem exists.
+- **Gate before delivery.** Run
+  `python3 <skill>/scripts/handoff-gate.py <target> --mode <mode>` and do
+  not tell the user the handoff is ready until it prints `GATE: PASS`.
+  **What `<target>` is depends on the mode, and it is not always a
+  directory:**
+  - `compaction` and `same-workspace` are single files, so pass the
+    **document's own path** —
+    `handoff-gate.py ~/.claude/handoffs/<project-slug>/handoff-<slug>-<date>-<HHMM>.md --mode compaction`.
+    Passing the project directory is wrong twice over: it holds many
+    handoffs and no `HANDOFF.md`, so the gate finds nothing, and if an older
+    bundle is sitting there the gate would scan handoffs that are not this
+    one.
+  - `cross-workspace` and `quota` are bundles, so pass the **bundle
+    directory** — the per-handoff directory holding `HANDOFF.md`,
+    `PROMPT.txt` and any archive, *not* the shared
+    `~/.claude/handoffs/<project-slug>/`.
+
+  It fails on empty or missing sections, unnumbered next steps, a path that
+  does not exist, a block missing for the mode, and secrets — in every file of the
+  handoff, not only the document. The one exception is the zip: it is checked
+  by ENTRY NAME only (a `.env`, `id_rsa` and friends), never opened, so what
+  is inside its files is the writer's responsibility and no `GATE: PASS` says
+  otherwise. An archive that is **not** a zip (`.tar.gz`, `.tgz`, `.7z`, …)
+  fails the gate outright: its entry names cannot be read, so the gate will
+  not certify it — repackage the bundle as a `.zip` or leave it out. And in
+  `quota` / `cross-workspace` mode `PROMPT.txt` must be a non-empty regular
+  file, not just a name that exists. Its credential check is a **heuristic**: any
+  `label = value` whose label CONTAINS one of the credential words — the
+  authoritative list is `GENERIC_CRED_KEYWORDS` in `handoff-gate.py`, and the
+  failure message prints it, so read one of those two rather than trusting a
+  list written down elsewhere — and whose value isn't an obvious placeholder
+  trips it, including a benign
+  identifier like `trace_token: 8f14e45f-...` (a real UUID, not a secret) —
+  that is deliberate, not a bug. A
+  failure is a list of things to fix, not an opinion; if a flagged line isn't
+  actually a secret, rename the label or remove the line rather than arguing
+  with the gate.
 
 ## Skeleton
 

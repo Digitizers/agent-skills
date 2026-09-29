@@ -1,0 +1,43 @@
+# gitleaks per-finding baseline for agent-skills.
+#
+# .gitleaks.toml forbids path-wide allowlists on purpose: a path exemption
+# would blind the FULL-HISTORY scan to a credential that once lived in that
+# file. Its stated escape hatch is exactly this file — a fingerprint per
+# finding, each with an explanation, reviewed like any other change.
+#
+# All five entries below are SYNTHETIC FIXTURES for the handoff gate's own
+# regression suite (skills/handoff/scripts/test-handoff-gate.sh). The gate is
+# a credential detector; its tests must feed it credential-shaped strings, and
+# each of these was invented for that test — none is, or ever was, a real
+# credential for any account.
+#
+# They are listed here only because gitleaks scans history and these commits
+# are already pushed. At the tip of this branch the suite builds every fake
+# secret at RUNTIME (string concatenation), so no credential-shaped literal
+# is committed any more and no new fingerprint is needed for future commits.
+
+# Fake Stripe live key used by test 24 — "a credential in a markdown table
+# cell", the case the generic label=value scan cannot see. Synthetic; the tip
+# assembles it at runtime and no longer carries the literal.
+9df260fc2d131f5b91165444e31ba2be6f037f5e:skills/handoff/scripts/test-handoff-gate.sh:stripe-access-token:381
+
+# Fake BUNNY_API_KEY value used by test 16 — the prefixed-label regression
+# (`_` is a word character, so `\bapi_key` never matched `BUNNY_API_KEY`).
+# Synthetic; the tip assembles it at runtime and no longer carries the literal.
+33e212a1db5a050e2d6684ecc30b1d7950e4d936:skills/handoff/scripts/test-handoff-gate.sh:generic-api-key:239
+
+# Fake SUMIT_MAIN_API_KEY value used by test 17 — the same regression in a
+# second vendor shape. Synthetic; the tip assembles it at runtime and no
+# longer carries the literal.
+33e212a1db5a050e2d6684ecc30b1d7950e4d936:skills/handoff/scripts/test-handoff-gate.sh:generic-api-key:254
+
+# Fake MY_SERVICE_TOKEN value used by test 18 — the same regression for a
+# *_TOKEN label rather than *_KEY. Synthetic; the tip assembles it at runtime
+# and no longer carries the literal.
+33e212a1db5a050e2d6684ecc30b1d7950e4d936:skills/handoff/scripts/test-handoff-gate.sh:generic-api-key:269
+
+# Fake trace_token UUID used by test 22 — the gate's DOCUMENTED false
+# positive (a benign correlation id whose label ends in "token"), pinned so
+# the failure keeps naming itself a heuristic. A UUID, not a credential; the
+# tip assembles it at runtime and no longer carries the literal.
+49e422fc8eb4fe2f7c3c0b416ea6159edf5352a5:skills/handoff/scripts/test-handoff-gate.sh:generic-api-key:342

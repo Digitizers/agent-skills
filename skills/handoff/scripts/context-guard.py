@@ -44,8 +44,26 @@ line (latest for the same reason as the evidence above). And when the window is
 neither stated nor proven, the message says "assumed" so the reader can check
 it rather than obey it.
 
+Past HANDOFF_STOP_PCT the nudge changes tone: instead of "write a handoff and
+keep going" it tells an attended session to finish only the in-progress
+action, refresh the handoff document, then STOP and ask the user to run
+/compact or open a fresh session. Warn and stop are independent, once-per-
+session alarms — a warn firing first does not disarm the later stop, because
+the level is part of the marker name.
+
+Under the PreCompact event the guard drops the once-per-session markers and
+emits `systemMessage` instead of `hookSpecificOutput.additionalContext`:
+PreCompact fires precisely when the stop was ignored (so the stop marker
+already exists and a marker check would silence the backstop), and PreCompact
+does not consume additionalContext.
+
+Every scalar below is parsed defensively — an unparseable or non-positive
+value falls back to the documented default rather than raising on a hook that
+runs on every prompt.
+
 Env:
-  HANDOFF_THRESHOLD_PCT     default 70
+  HANDOFF_THRESHOLD_PCT     default 70 — write a handoff and continue
+  HANDOFF_STOP_PCT          default 80 — stop and ask the user to compact
   CONTEXT_WINDOW_TOKENS     default 200000 (a floor — see above)
   CONTEXT_WINDOW_BY_MODEL   "model-id=tokens,model-id=tokens" — a per-model
                             floor; beats CONTEXT_WINDOW_TOKENS for that model
@@ -54,7 +72,14 @@ import hashlib
 import json
 import os
 import sys
-import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from handoff_common import (  # noqa: E402
+    attended,
+    env_float,
+    env_positive_int,
+    marker_path,
+)
 
 # Estimation policy: a conservative FLOOR, not an average — UTF-8 bytes / 2.
 # Character-class ratios (prose ~4 chars/token, Hebrew ~2, base64 ~2-2.7,
@@ -119,19 +144,33 @@ def parse_model_windows(raw: str) -> dict:
 
 
 def main() -> None:
-    inp = json.load(sys.stdin)
+    try:
+        inp = json.load(sys.stdin)
+    except ValueError:
+        return
+    if not isinstance(inp, dict):
+        return
     transcript = inp.get("transcript_path") or ""
     session_id = inp.get("session_id") or "unknown"
     event = inp.get("hook_event_name") or "UserPromptSubmit"
 
-    threshold = float(os.environ.get("HANDOFF_THRESHOLD_PCT", "70"))
-    configured = os.environ.get("CONTEXT_WINDOW_TOKENS")
-    window = int(configured or "200000")
+    # Every scalar below comes from a hand-edited settings.json and is read
+    # on EVERY prompt: `HANDOFF_THRESHOLD_PCT=seventy` used to raise
+    # ValueError and `CONTEXT_WINDOW_TOKENS=0` used to divide by zero further
+    # down. Unparseable or non-positive values fall back to the documented
+    # default, exactly as CONTEXT_WINDOW_BY_MODEL already does per entry.
+    threshold = env_float("HANDOFF_THRESHOLD_PCT", 70.0)
+    stop_pct = env_float("HANDOFF_STOP_PCT", 80.0)
+    configured = env_positive_int("CONTEXT_WINDOW_TOKENS")
+    window = configured or 200000
     model_windows = parse_model_windows(
         os.environ.get("CONTEXT_WINDOW_BY_MODEL", "")
     )
 
-    marker = os.path.join(tempfile.gettempdir(), f"handoff-guard-{session_id}")
+    # Sanitised the same way handoff_common.marker_path does: a session id
+    # carrying a "/" would otherwise build a path through a directory that
+    # does not exist and raise FileNotFoundError on the marker write.
+    marker = marker_path(session_id, "guard")
     # An alarm raised against an ASSUMED window tells the agent the figure may
     # be a guess, so it must not disarm the guard for the rest of the session
     # (Codex r1 on #41): it gets its own marker, and the session marker is
@@ -160,32 +199,61 @@ def main() -> None:
     latest_context = 0
     # Same rule for the model: the latest assistant line's, never any line's.
     latest_model = ""
-    with open(transcript, "r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                tail_tokens += estimate_tokens(line)
-                continue
-            if rec.get("subtype") == "compact_boundary":
-                # Everything above this line is gone from the window. Keeping
-                # it is the restart lie: the pre-compact usage block priced a
-                # context that no longer exists.
-                tokens = 0
-                tail_tokens = 0
-                continue
-            message = rec.get("message") or {}
-            model = message.get("model")
-            # "<synthetic>" marks a locally generated message, not a model.
-            if isinstance(model, str) and model and not model.startswith("<"):
-                latest_model = model
-            usage = message.get("usage")
-            if usage:
-                latest_context = context_sent(usage)
-                tokens = latest_context + usage.get("output_tokens", 0)
-                tail_tokens = 0
-            else:
-                tail_tokens += estimate_tokens(line)
+    # os.path.exists() is true for a directory, and open() then raises
+    # IsADirectoryError; an unreadable file raises PermissionError. Both are
+    # OSError, and both must leave the session alone — this hook runs on
+    # every prompt and may not be the thing that breaks the session.
+    try:
+        with open(transcript, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    tail_tokens += estimate_tokens(line)
+                    continue
+                if rec.get("subtype") == "compact_boundary":
+                    # Everything above this line is gone from the window. Keeping
+                    # it is the restart lie: the pre-compact usage block priced a
+                    # context that no longer exists.
+                    tokens = 0
+                    tail_tokens = 0
+                    # Codex r5 on #45: the window EVIDENCE has to go with it.
+                    # latest_context is "a call this big fit", and that call is
+                    # now above the boundary — a 600k call, a boundary, then a
+                    # 150k post-boundary payload was measured against a window
+                    # INFERRED from the dead 600k call and stayed silent, though
+                    # 150k had crossed the real 200k window.
+                    latest_context = 0
+                    # Codex r6 on #45 reversed round 5's ruling here, and it
+                    # was right. Keeping the model across the boundary looks
+                    # safe — compaction does not change the model — but a
+                    # session RESUMED on a differently mapped model, before
+                    # that model has emitted its first assistant message, was
+                    # then measured against the OLD model's window: a stale
+                    # 1M mapping silenced a new 200k session outright.
+                    # Suppression is the unsafe direction. Clearing it falls
+                    # back to the assumed default, which only makes the nudge
+                    # fire EARLY — and the "assumed default" wording already
+                    # tells the reader to judge against a larger window and
+                    # to set CONTEXT_WINDOW_BY_MODEL. The first post-boundary
+                    # assistant line restores the mapping by the ordinary
+                    # latest-wins rule.
+                    latest_model = ""
+                    continue
+                message = rec.get("message") or {}
+                model = message.get("model")
+                # "<synthetic>" marks a locally generated message, not a model.
+                if isinstance(model, str) and model and not model.startswith("<"):
+                    latest_model = model
+                usage = message.get("usage")
+                if usage:
+                    latest_context = context_sent(usage)
+                    tokens = latest_context + usage.get("output_tokens", 0)
+                    tail_tokens = 0
+                else:
+                    tail_tokens += estimate_tokens(line)
+    except OSError:
+        return
 
     payload_tokens = estimate_tokens(inp.get("prompt") or "")
     tool_response = inp.get("tool_response")
@@ -222,35 +290,80 @@ def main() -> None:
     # itself, which grows every call — key it as one bucket, or every hook
     # would alarm again (Codex r6).
     window_key = f"w{window}" if window <= WINDOW_TIERS[-1] else f"above-w{WINDOW_TIERS[-1]}"
-    window_marker = f"{marker}-{provenance}-{window_key}"
-    if not assumed and os.path.exists(window_marker):
-        return
-    assumed_marker = f"{marker}-assumed-{model_key}"
-    if assumed and os.path.exists(assumed_marker):
-        return
 
     raw_tokens = tokens
     pct = tokens * 100.0 / window
-    if pct < threshold:
+    # A second, stricter level past the warn threshold: STOP and ask the user
+    # to compact instead of writing a handoff and continuing. `level` is part
+    # of every marker name below, so a warn firing earlier in the session
+    # cannot disarm the later, louder stop — each level fires once on its own.
+    level = "stop" if pct >= stop_pct else "warn"
+    # PreCompact is the backstop for the case where the stop at
+    # HANDOFF_STOP_PCT was ignored — and in exactly that case a stop marker
+    # for this session already exists, so an ordinary once-per-session check
+    # would return silently and the net would never fire in the one situation
+    # it is documented for. PreCompact therefore bypasses the markers, and
+    # leaves none behind: compaction is a discrete event, not a threshold that
+    # can be crossed repeatedly by the same growing transcript.
+    precompact = event == "PreCompact"
+    # Codex r4 on #45: this used to sit AFTER the threshold return, so the
+    # backstop went silent whenever the configured window OVERSTATED the real
+    # one — a 200k session auto-compacting at 170k with
+    # CONTEXT_WINDOW_TOKENS=1000000 set computes ~17% and returned, at exactly
+    # the moment the net exists for. The EVENT is proof that compaction began;
+    # a percentage derived from possibly-stale configuration cannot outrank
+    # it. Every other event keeps the old behaviour exactly.
+    below_threshold = pct < threshold
+    if below_threshold and not precompact:
         return
+    window_marker = f"{marker}-{provenance}-{window_key}-{level}"
+    assumed_marker = f"{marker}-assumed-{model_key}-{level}"
+    if not precompact:
+        if not assumed and os.path.exists(window_marker):
+            return
+        if assumed and os.path.exists(assumed_marker):
+            return
     # The tail/payload estimate is a deliberate over-count, so a number above
     # 100% is an artefact of the floor, not a measurement. Report the fact
     # (past the threshold) without the impossible figure.
     pct = min(pct, 100.0)
     tokens = min(tokens, window)
 
-    open(assumed_marker if assumed else window_marker, "w").close()
-    msg = (
-        f"Context window is at ~{pct:.0f}% of {window} tokens (~{tokens} "
-        f"used, estimated), past the {threshold:.0f}% handoff threshold. "
-    )
-    if inferred:
+    if not precompact:
+        try:
+            open(assumed_marker if assumed else window_marker, "w").close()
+        except OSError:
+            # A marker that cannot be written costs a repeated nudge, which is
+            # survivable; a traceback on every prompt is not.
+            pass
+    # Name the threshold that actually fired: saying "past the 70% handoff
+    # threshold" and then "this is past the stop threshold" told the reader
+    # two different numbers for one crossing.
+    fired = stop_pct if level == "stop" else threshold
+    fired_name = "stop" if level == "stop" else "handoff"
+    if below_threshold:
+        # Only reachable on PreCompact. Saying "past the 70% threshold" here
+        # would be false, and the figure is the thing not to be trusted: the
+        # host decided to compact, so the real window is smaller than the one
+        # this guard was told about, or the estimate undercounts.
+        msg = (
+            f"Context window is at ~{pct:.0f}% of {window} tokens (~{tokens} "
+            f"used, estimated) — below the {threshold:.0f}% {fired_name} "
+            "threshold, so the window actually in use is smaller than the "
+            f"{window} configured or assumed here, or the estimate undercounts. "
+        )
+    else:
+        msg = (
+            f"Context window is at ~{pct:.0f}% of {window} tokens (~{tokens} "
+            f"used, estimated), past the {fired:.0f}% {fired_name} threshold. "
+        )
+    if not below_threshold and inferred:
         msg += (
             f"{window} is the smallest window this transcript proves (a lower "
             "bound — the real window may be larger; set CONTEXT_WINDOW_BY_MODEL "
             "to state it). "
         )
-    if assumed:
+    if not below_threshold and assumed:
         # An agent once obeyed "70% of 200000" on a 1M session (#40). Say what
         # is not known, and name the setting that settles it.
         # Never "this alarm is false" (Codex r1 on #41): the estimate can
@@ -268,10 +381,31 @@ def main() -> None:
             "for a declared or proven window. If the window really is "
             f"{window}: "
         )
-    msg += (
-        "Invoke the handoff skill NOW to write a handoff document before "
-        "context is compacted, then continue the current task."
-    )
+    if precompact:
+        # PreCompact does not consume hookSpecificOutput.additionalContext, so
+        # the only thing that reaches anyone here is systemMessage — and by
+        # the time it fires, compaction is already under way, which makes
+        # "stop and write a handoff first" advice that cannot be taken.
+        msg += (
+            "Compaction is starting now and no handoff was written at the "
+            f"{stop_pct:.0f}% stop. Once the compacted session resumes, "
+            "invoke the handoff skill immediately and rebuild the document "
+            "from what survived, before continuing the task."
+        )
+        print(json.dumps({"systemMessage": msg}))
+        return
+    if level == "stop" and attended():
+        msg += (
+            "Finish ONLY the action already "
+            "in progress, refresh the handoff document with what changed "
+            "since it was written, then STOP and ask the user to run "
+            "/compact or open a fresh session. Do not begin new work."
+        )
+    else:
+        msg += (
+            "Invoke the handoff skill NOW to write a handoff document before "
+            "context is compacted, then continue the current task."
+        )
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": event,

@@ -7,11 +7,11 @@ set -euo pipefail
 # has configured the hook for their own sessions (e.g. CONTEXT_WINDOW_BY_MODEL
 # for a 1M model) would otherwise run every case against their settings.
 # Cases that need a value set it inline.
-unset CONTEXT_WINDOW_BY_MODEL CONTEXT_WINDOW_TOKENS HANDOFF_THRESHOLD_PCT
+unset CONTEXT_WINDOW_BY_MODEL CONTEXT_WINDOW_TOKENS HANDOFF_THRESHOLD_PCT HANDOFF_STOP_PCT
 
 GUARD="$(cd "$(dirname "$0")" && pwd)/context-guard.sh"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"; rm -f "${TMPDIR:-/tmp}"/handoff-guard-cg-test-*' EXIT
+trap 'rm -rf "$WORK"; rm -f "${TMPDIR:-/tmp}"/handoff-guard-cg-test*' EXIT
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
@@ -446,5 +446,255 @@ mk_model_transcript "$WORK/r9.jsonl" 1200000 model-big
 OUT="$(run_guard "$(mk_input "$WORK/r9.jsonl" cg-test-above)")"
 [ -z "$OUT" ] || fail "alarm repeated on every growing call above the largest tier"
 echo "PASS one alarm above the largest known tier"
+
+# 36. Past HANDOFF_STOP_PCT -> the stop instruction, not the write-and-continue one.
+mk_transcript "$WORK/stop.jsonl" 170000
+printf '{"transcript_path":"%s","session_id":"cg-test-stop","hook_event_name":"UserPromptSubmit"}' "$WORK/stop.jsonl" > "$WORK/in-stop.json"
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-stop.json")"
+echo "$OUT" | grep -q "STOP" || fail "no stop instruction past the stop threshold"
+echo "$OUT" | grep -q "/compact" || fail "stop instruction does not name /compact"
+echo "PASS stop threshold fires"
+
+# 37. One call crossing BOTH thresholds still emits the stop instruction
+#     (Review Focus 5): a warn marker must not swallow it.
+mk_transcript "$WORK/both.jsonl" 170000
+printf '{"transcript_path":"%s","session_id":"cg-test-both","hook_event_name":"UserPromptSubmit"}' "$WORK/both.jsonl" > "$WORK/in-both.json"
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-both.json")"
+echo "$OUT" | grep -q "STOP" || fail "jumping both thresholds at once lost the stop"
+echo "PASS both thresholds in one call"
+
+# 38. The warn marker does not disarm the stop: same session, warn first.
+mk_transcript "$WORK/seq.jsonl" 150000
+printf '{"transcript_path":"%s","session_id":"cg-test-seq","hook_event_name":"UserPromptSubmit"}' "$WORK/seq.jsonl" > "$WORK/in-seq.json"
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-seq.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "warn did not fire"
+mk_transcript "$WORK/seq.jsonl" 170000
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-seq.json")"
+echo "$OUT" | grep -q "STOP" || fail "warn marker suppressed the later stop"
+echo "PASS warn then stop in one session"
+
+# 39. Each threshold still fires only once.
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-seq.json")"
+[ -z "$OUT" ] || fail "stop fired twice"
+echo "PASS stop fires once"
+
+# 40. Unattended run: warned, never told to stop or to compact.
+mk_transcript "$WORK/head.jsonl" 170000
+printf '{"transcript_path":"%s","session_id":"cg-test-headless","hook_event_name":"UserPromptSubmit"}' "$WORK/head.jsonl" > "$WORK/in-head.json"
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=0 run_guard "$WORK/in-head.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "headless run got no handoff nudge at all"
+echo "$OUT" | grep -q "STOP" && fail "headless run told to stop"
+echo "$OUT" | grep -q "/compact" && fail "headless run asked for compaction"
+echo "PASS headless run writes but does not stop"
+
+# 41. A non-object JSON payload (valid JSON, wrong shape) must not crash the
+#     hook (Fix round 1, Finding 1 + coordinator ruling): a list, a number, or
+#     a string on stdin makes .get() raise on a bare dict-shaped read. Every
+#     failure path here must exit 0 and print nothing.
+printf '[1,2,3]' > "$WORK/in-nonobj.json"
+STATUS=0
+OUT="$(bash "$GUARD" < "$WORK/in-nonobj.json")" || STATUS=$?
+[ "$STATUS" -eq 0 ] || fail "non-object JSON payload exited non-zero"
+[ -z "$OUT" ] || fail "non-object JSON payload produced output"
+echo "PASS non-object JSON payload is silent"
+
+# 42. C2: a non-numeric HANDOFF_THRESHOLD_PCT is a settings.json value the
+#     docs invite people to hand-edit. It used to raise ValueError and exit 1
+#     on EVERY prompt; it must fall back to the documented 70 instead.
+mk_transcript "$WORK/badthresh.jsonl" 150000
+printf '{"transcript_path":"%s","session_id":"cg-test-badthresh","hook_event_name":"UserPromptSubmit"}' "$WORK/badthresh.jsonl" > "$WORK/in-badthresh.json"
+STATUS=0
+OUT="$(HANDOFF_THRESHOLD_PCT=seventy bash "$GUARD" < "$WORK/in-badthresh.json")" || STATUS=$?
+[ "$STATUS" -eq 0 ] || fail "HANDOFF_THRESHOLD_PCT=seventy exited $STATUS"
+echo "$OUT" | grep -q "additionalContext" || fail "did not fall back to the default 70% threshold"
+echo "PASS non-numeric HANDOFF_THRESHOLD_PCT falls back to the default"
+
+# 43. C2: the same for HANDOFF_STOP_PCT — falls back to 80, so 170k of a 200k
+#     window is still a stop, and the hook still exits 0.
+mk_transcript "$WORK/badstop.jsonl" 170000
+printf '{"transcript_path":"%s","session_id":"cg-test-badstop","hook_event_name":"UserPromptSubmit"}' "$WORK/badstop.jsonl" > "$WORK/in-badstop.json"
+STATUS=0
+OUT="$(HANDOFF_STOP_PCT=eighty CLAUDE_CODE_SESSION_ATTENDED=1 bash "$GUARD" < "$WORK/in-badstop.json")" || STATUS=$?
+[ "$STATUS" -eq 0 ] || fail "HANDOFF_STOP_PCT=eighty exited $STATUS"
+echo "$OUT" | grep -q "STOP" || fail "did not fall back to the default 80% stop threshold"
+echo "PASS non-numeric HANDOFF_STOP_PCT falls back to the default"
+
+# 44. C2: CONTEXT_WINDOW_TOKENS=0 used to reach `tokens * 100.0 / window` and
+#     raise ZeroDivisionError. Zero is not a window: fall back to 200000.
+mk_transcript "$WORK/zerowin.jsonl" 150000
+printf '{"transcript_path":"%s","session_id":"cg-test-zerowin","hook_event_name":"UserPromptSubmit"}' "$WORK/zerowin.jsonl" > "$WORK/in-zerowin.json"
+STATUS=0
+OUT="$(CONTEXT_WINDOW_TOKENS=0 bash "$GUARD" < "$WORK/in-zerowin.json")" || STATUS=$?
+[ "$STATUS" -eq 0 ] || fail "CONTEXT_WINDOW_TOKENS=0 exited $STATUS (ZeroDivisionError?)"
+echo "$OUT" | grep -q "of 200000 tokens" || fail "CONTEXT_WINDOW_TOKENS=0 did not fall back to 200000: $OUT"
+echo "PASS CONTEXT_WINDOW_TOKENS=0 falls back to the default window"
+
+# 45. C2: and a non-numeric window does the same. (Its own session id: test 44
+#     left a marker behind for cg-test-zerowin.)
+printf '{"transcript_path":"%s","session_id":"cg-test-nanwin","hook_event_name":"UserPromptSubmit"}' "$WORK/zerowin.jsonl" > "$WORK/in-nanwin.json"
+STATUS=0
+OUT="$(CONTEXT_WINDOW_TOKENS=one-million bash "$GUARD" < "$WORK/in-nanwin.json")" || STATUS=$?
+[ "$STATUS" -eq 0 ] || fail "CONTEXT_WINDOW_TOKENS=one-million exited $STATUS"
+echo "$OUT" | grep -q "of 200000 tokens" || fail "non-numeric window did not fall back: $OUT"
+echo "PASS non-numeric CONTEXT_WINDOW_TOKENS falls back to the default window"
+
+# 46. C3: os.path.exists() is true for a DIRECTORY, and open() then raises
+#     IsADirectoryError. A transcript_path pointing at a directory must leave
+#     the session alone: exit 0, print nothing.
+mkdir -p "$WORK/transcript-dir"
+printf '{"transcript_path":"%s","session_id":"cg-test-dir","hook_event_name":"UserPromptSubmit"}' "$WORK/transcript-dir" > "$WORK/in-dir.json"
+STATUS=0
+OUT="$(bash "$GUARD" < "$WORK/in-dir.json")" || STATUS=$?
+[ "$STATUS" -eq 0 ] || fail "a directory as transcript_path exited $STATUS"
+[ -z "$OUT" ] || fail "a directory as transcript_path produced output: $OUT"
+echo "PASS a directory as transcript_path is silent"
+
+# 47. C3: the same for a transcript the guard cannot read. chmod 000 does not
+#     block root, so skip there.
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP unreadable transcript (running as root)"
+else
+  mk_transcript "$WORK/locked.jsonl" 150000
+  chmod 000 "$WORK/locked.jsonl"
+  printf '{"transcript_path":"%s","session_id":"cg-test-locked","hook_event_name":"UserPromptSubmit"}' "$WORK/locked.jsonl" > "$WORK/in-locked.json"
+  STATUS=0
+  OUT="$(bash "$GUARD" < "$WORK/in-locked.json")" || STATUS=$?
+  chmod 644 "$WORK/locked.jsonl"
+  [ "$STATUS" -eq 0 ] || fail "an unreadable transcript exited $STATUS"
+  [ -z "$OUT" ] || fail "an unreadable transcript produced output: $OUT"
+  echo "PASS an unreadable transcript is silent"
+fi
+
+# 48. Minor: the marker used to be built from the RAW session id, so a "/" in
+#     it made the write raise FileNotFoundError. It is sanitised now, the same
+#     way handoff_common.marker_path does it.
+mk_transcript "$WORK/slash.jsonl" 150000
+printf '{"transcript_path":"%s","session_id":"cg-test/slashed","hook_event_name":"UserPromptSubmit"}' "$WORK/slash.jsonl" > "$WORK/in-slash.json"
+STATUS=0
+OUT="$(bash "$GUARD" < "$WORK/in-slash.json")" || STATUS=$?
+[ "$STATUS" -eq 0 ] || fail "a session id containing / exited $STATUS"
+echo "$OUT" | grep -q "additionalContext" || fail "a session id containing / suppressed the nudge"
+OUT="$(bash "$GUARD" < "$WORK/in-slash.json")"
+[ -z "$OUT" ] || fail "the sanitised marker did not suppress the second nudge"
+echo "PASS a session id containing / is sanitised into the marker name"
+
+# 49. I2: the PreCompact net is documented as the backstop for the case where
+#     the 80% stop was IGNORED — and in exactly that case the stop marker for
+#     this session already exists, so a marker check would silence it. It must
+#     fire anyway, and it must use systemMessage: PreCompact does not consume
+#     hookSpecificOutput.additionalContext.
+mk_transcript "$WORK/precompact.jsonl" 170000
+printf '{"transcript_path":"%s","session_id":"cg-test-precompact","hook_event_name":"UserPromptSubmit"}' "$WORK/precompact.jsonl" > "$WORK/in-pre-warn.json"
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-pre-warn.json")"
+echo "$OUT" | grep -q "STOP" || fail "the stop did not fire, so the marker under test was never written"
+printf '{"transcript_path":"%s","session_id":"cg-test-precompact","hook_event_name":"PreCompact"}' "$WORK/precompact.jsonl" > "$WORK/in-pre.json"
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-pre.json")"
+echo "$OUT" | grep -q "systemMessage" || fail "PreCompact did not emit systemMessage: $OUT"
+echo "$OUT" | grep -q "additionalContext" && fail "PreCompact emitted additionalContext, which it does not consume"
+echo "$OUT" | grep -q "Compaction is starting" || fail "PreCompact message does not say compaction is starting: $OUT"
+# ...and it leaves no marker behind, so the next compaction is reported too.
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-pre.json")"
+echo "$OUT" | grep -q "systemMessage" || fail "the PreCompact net fired only once per session"
+echo "PASS the PreCompact net fires through the stop marker, as systemMessage"
+
+# 50. Minor: the stop-level message used to open "past the 70% handoff
+#     threshold" and then contradict itself with "this is past the stop
+#     threshold". It must cite the threshold that actually fired.
+mk_transcript "$WORK/cites.jsonl" 170000
+printf '{"transcript_path":"%s","session_id":"cg-test-cites","hook_event_name":"UserPromptSubmit"}' "$WORK/cites.jsonl" > "$WORK/in-cites.json"
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-cites.json")"
+echo "$OUT" | grep -q "past the 80% stop threshold" || fail "the stop message does not cite the stop threshold: $OUT"
+echo "$OUT" | grep -q "past the 70% handoff threshold" && fail "the stop message still cites the warn threshold: $OUT"
+echo "PASS the stop message cites the threshold that fired"
+
+# 51. Codex round 4, P2 — the PreCompact branch sat AFTER the `pct <
+#     threshold` return, so the backstop went SILENT whenever the configured
+#     window overstated the real one. A 200k session auto-compacting at 170k
+#     with CONTEXT_WINDOW_TOKENS=1000000 set computes ~17% and returned —
+#     nothing emitted at exactly the moment the net exists for. The event is
+#     proof that compaction began; it cannot be gated behind a percentage
+#     derived from possibly-stale configuration.
+mk_transcript "$WORK/prelow.jsonl" 170000
+printf '{"transcript_path":"%s","session_id":"cg-test-prelow","hook_event_name":"PreCompact"}' "$WORK/prelow.jsonl" > "$WORK/in-prelow.json"
+OUT="$(CONTEXT_WINDOW_TOKENS=1000000 run_guard "$WORK/in-prelow.json")"
+[ -n "$OUT" ] || fail "REGRESSION (P2): PreCompact below the threshold emitted nothing"
+echo "$OUT" | grep -q "systemMessage" || fail "the below-threshold backstop did not use systemMessage: $OUT"
+echo "$OUT" | grep -q "additionalContext" && fail "PreCompact emitted additionalContext, which it does not consume"
+echo "$OUT" | grep -q "Compaction is starting" || fail "the below-threshold backstop does not say compaction is starting: $OUT"
+echo "$OUT" | grep -q "past the" && fail "the below-threshold backstop claims the threshold was crossed: $OUT"
+echo "$OUT" | grep -q "below the" || fail "the below-threshold backstop does not say it is below the threshold: $OUT"
+echo "PASS PreCompact fires below the threshold when the window is overstated"
+
+# 52. ...and it leaves no marker behind, so a second PreCompact in the same
+#     session still fires (compaction is a discrete event).
+OUT="$(CONTEXT_WINDOW_TOKENS=1000000 run_guard "$WORK/in-prelow.json")"
+echo "$OUT" | grep -q "systemMessage" || fail "the below-threshold backstop fired only once per session"
+echo "PASS the below-threshold backstop leaves no marker"
+
+# 53. ...and an ORDINARY event below the threshold stays silent: the reorder
+#     must change nothing but PreCompact.
+printf '{"transcript_path":"%s","session_id":"cg-test-prelow-ord","hook_event_name":"UserPromptSubmit"}' "$WORK/prelow.jsonl" > "$WORK/in-prelow-ord.json"
+OUT="$(CONTEXT_WINDOW_TOKENS=1000000 run_guard "$WORK/in-prelow-ord.json")"
+[ -z "$OUT" ] || fail "REGRESSION: an ordinary event below the threshold fired: $OUT"
+# ...and the same ordinary event ABOVE the threshold still fires as before.
+printf '{"transcript_path":"%s","session_id":"cg-test-prelow-ord2","hook_event_name":"UserPromptSubmit"}' "$WORK/prelow.jsonl" > "$WORK/in-prelow-ord2.json"
+OUT="$(run_guard "$WORK/in-prelow-ord2.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "an ordinary event above the threshold stopped firing: $OUT"
+echo "PASS ordinary events keep their behaviour on both sides of the threshold"
+
+# 54. Codex round 5, P2 — THE WINDOW EVIDENCE MUST DIE AT THE BOUNDARY. The
+#     compact_boundary branch reset tokens and tail_tokens but left
+#     latest_context holding the pre-compaction call's size, so a 600k call,
+#     a boundary, and then a 150k post-boundary payload was measured against
+#     a window INFERRED from the dead 600k call (fit_window widens 200k to
+#     the 1M tier) and stayed silent — although 150k has crossed the real
+#     200k window.
+python3 - "$WORK/boundary.jsonl" "$WORK/in-boundary.json" <<'PY'
+import json, sys
+transcript, payload = sys.argv[1], sys.argv[2]
+with open(transcript, "w") as f:
+    # A pre-compaction call big enough to widen the inferred window to 1M.
+    f.write(json.dumps({"message": {"model": "claude-test-model", "usage": {
+        "input_tokens": 600000, "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0}}}) + "\n")
+    f.write(json.dumps({"subtype": "compact_boundary"}) + "\n")
+# ...and nothing after it: no post-boundary usage block. The 150k arrives as
+# the hook payload (estimate_tokens is bytes // 2).
+with open(payload, "w") as f:
+    json.dump({"transcript_path": transcript, "session_id": "cg-test-boundary",
+               "hook_event_name": "UserPromptSubmit", "prompt": "x" * 300000}, f)
+PY
+OUT="$(run_guard "$WORK/in-boundary.json")"
+[ -n "$OUT" ] || fail "REGRESSION (P2): a dead pre-boundary call's size kept the guard silent at 150k"
+echo "$OUT" | grep -q "additionalContext" || fail "the post-boundary crossing did not fire: $OUT"
+echo "$OUT" | grep -q "of 200000 tokens" || fail "the post-boundary crossing was judged against the pre-boundary window: $OUT"
+echo "PASS window evidence is discarded at a compact boundary"
+
+# 55. ...and so does the MODEL, which reverses round 5's ruling here. Keeping
+#     latest_model across the boundary looks safe — compaction does not change
+#     the model — but a session RESUMED on a differently mapped model, before
+#     that model has emitted its first assistant message, was then measured
+#     against the OLD model's window: a stale 1M mapping silenced a new 200k
+#     session outright. Suppression is the unsafe direction; falling back to
+#     the assumed default only makes the nudge fire early, which the "assumed
+#     default" wording in the message already covers.
+python3 - "$WORK/boundary2.jsonl" "$WORK/in-boundary2.json" <<'PY'
+import json, sys
+transcript, payload = sys.argv[1], sys.argv[2]
+with open(transcript, "w") as f:
+    f.write(json.dumps({"message": {"model": "big-model", "usage": {
+        "input_tokens": 600000, "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0}}}) + "\n")
+    f.write(json.dumps({"subtype": "compact_boundary"}) + "\n")
+# Nothing after the boundary: the resumed model has not spoken yet.
+with open(payload, "w") as f:
+    json.dump({"transcript_path": transcript, "session_id": "cg-test-boundary2",
+               "hook_event_name": "UserPromptSubmit", "prompt": "x" * 300000}, f)
+PY
+OUT="$(CONTEXT_WINDOW_BY_MODEL="big-model=1000000,new-model=200000" run_guard "$WORK/in-boundary2.json")"
+[ -n "$OUT" ] || fail "REGRESSION (r6 P2): the pre-boundary model's 1M mapping silenced a post-boundary 200k session"
+echo "$OUT" | grep -q "of 200000 tokens" || fail "the post-boundary crossing was judged against the old model's window: $OUT"
+echo "$OUT" | grep -q "assumed default" || fail "the fallback does not tell the reader the window is assumed: $OUT"
+echo "PASS the pre-boundary model mapping is discarded at a compact boundary"
 
 echo "all context-guard tests passed"
