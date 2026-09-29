@@ -1044,4 +1044,86 @@ OUT="$(python3 "$GATE" "$WORK/fencedbody" --mode compaction)" || fail "a section
 echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for a code-block-only section: $OUT"
 echo "PASS a section whose whole body is a fenced block is not empty"
 
+# 63. The same "scan names, not just contents" rule, ONE LEVEL DOWN: a zip's
+#     ENTRY names ship in the archive's index whether or not anyone opens the
+#     archive, and they were matched only against the credential-FILE list
+#     (.env, id_rsa, ...), never against the value patterns. Entry names only
+#     — nothing is extracted.
+mkgood "$WORK/zipentryname"
+python3 - "$WORK/zipentryname/workspace.zip" "sk-ant-api03-$(python3 -c 'print("A"*95)')" <<'PY'
+import zipfile, sys
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    zf.writestr("notes/%s.md" % sys.argv[2], "nothing secret in the body\n")
+PY
+OUT="$(python3 "$GATE" "$WORK/zipentryname" --mode compaction || true)"
+python3 "$GATE" "$WORK/zipentryname" --mode compaction && fail "REGRESSION: a credential in a ZIP ENTRY NAME passed the gate"
+echo "$OUT" | grep -q "FILE NAME" || fail "the zip entry finding is not reported in the FILE NAME style: $OUT"
+echo "$OUT" | grep -q "workspace.zip" || fail "the finding does not name the archive it came from: $OUT"
+echo "$OUT" | grep -q "sk-ant-api03-AAAA" && fail "the credential in the entry name was printed verbatim: $OUT"
+echo "$OUT" | grep -q "\[redacted\]" || fail "the credential in the entry name was not masked: $OUT"
+echo "PASS a credential in a zip ENTRY NAME fails, redacted, naming the archive"
+
+# 64. ...and the generic label=value shape in an entry name too.
+mkgood "$WORK/zipentrygeneric"
+python3 - "$WORK/zipentrygeneric/workspace.zip" "$(python3 -c 'print("BUNNY_API" + "_KEY=" + "7fd93ba21c0e" + "4b8aa1c2")')" <<'PY'
+import zipfile, sys
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    zf.writestr("%s.txt" % sys.argv[2], "notes\n")
+PY
+OUT="$(python3 "$GATE" "$WORK/zipentrygeneric" --mode compaction || true)"
+python3 "$GATE" "$WORK/zipentrygeneric" --mode compaction && fail "REGRESSION: BUNNY_API_KEY=<value> as a ZIP ENTRY NAME passed the gate"
+echo "$OUT" | grep -q "FILE NAME" || fail "the generic entry-name finding is not in the FILE NAME style: $OUT"
+echo "PASS a generic credential shape in a zip ENTRY NAME fails"
+
+# 65. ...and a zip with ordinary entry names still passes: the entry-name
+#     value scan must not start failing every bundle.
+mkgood "$WORK/zipentryok"
+python3 - "$WORK/zipentryok/workspace.zip" <<'PY'
+import zipfile, sys
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    zf.writestr("src/main.py", "print('hi')\n")
+    zf.writestr("docs/api-design.md", "notes\n")
+    zf.writestr("scratch/session-notes-2026-09-29.txt", "notes\n")
+PY
+OUT="$(python3 "$GATE" "$WORK/zipentryok" --mode compaction)" || fail "ordinary zip entry names were rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for ordinary zip entry names: $OUT"
+echo "PASS ordinary zip entry names still pass"
+
+# 66. ...and the pre-existing credential-FILE rule on entry names is
+#     untouched: a .env entry still fails on the entry name, as before.
+mkgood "$WORK/zipenvstill"
+python3 - "$WORK/zipenvstill/workspace.zip" <<'PY'
+import zipfile, sys
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    zf.writestr("config/.env", "KEY=value\n")
+PY
+OUT="$(python3 "$GATE" "$WORK/zipenvstill" --mode compaction || true)"
+python3 "$GATE" "$WORK/zipenvstill" --mode compaction && fail "a zip holding a .env entry passed the gate"
+echo "$OUT" | grep -q "credentials never travel in the zip" || fail "the .env entry rule changed wording or stopped firing: $OUT"
+echo "PASS the .env entry-name rule still fires unchanged"
+
+# 67. THE FOURTH PLACE A NAME TRAVELS: the handoff's OWN name. A bundle
+#     directory called after a token keeps that name when it is copied or
+#     zipped up and sent, and nothing scanned it — iter_files yields paths
+#     RELATIVE to that directory, so its own name was never in the list.
+mkdir -p "$WORK/outer"
+DIRNAME="$(python3 -c 'print("handoff-" + "BUNNY_API" + "_KEY=" + "7fd93ba21c0e" + "4b8aa1c2")')"
+mkgood "$WORK/outer/$DIRNAME"
+OUT="$(python3 "$GATE" "$WORK/outer/$DIRNAME" --mode compaction || true)"
+python3 "$GATE" "$WORK/outer/$DIRNAME" --mode compaction && fail "REGRESSION: a credential in the handoff DIRECTORY's own name passed the gate"
+echo "$OUT" | grep -q "FILE NAME" || fail "the directory-name finding is not in the FILE NAME style: $OUT"
+echo "$OUT" | grep -q "rename the handoff directory" || fail "the finding does not name the way out for a directory: $OUT"
+echo "PASS a credential in the handoff directory's own name fails"
+
+# 68. ...but only the target's BASENAME: the directories above it belong to
+#     the sender's machine, are none of the handoff's business, and reporting
+#     them would fail every run made from a credential-shaped home directory.
+mkdir -p "$WORK/$(python3 -c 'print("home-" + "BUNNY_API" + "_KEY=" + "7fd93ba21c0e" + "4b8aa1c2")')"
+PARENT="$WORK/$(python3 -c 'print("home-" + "BUNNY_API" + "_KEY=" + "7fd93ba21c0e" + "4b8aa1c2")')"
+mkgood "$PARENT/clean-bundle"
+OUT="$(python3 "$GATE" "$PARENT/clean-bundle" --mode compaction)" \
+  || fail "a credential-shaped ANCESTOR directory failed an otherwise clean handoff: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for a clean bundle under a credential-shaped parent: $OUT"
+echo "PASS only the target's own name is scanned, not the directories above it"
+
 echo "ALL PASS"

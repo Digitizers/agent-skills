@@ -249,6 +249,35 @@ def redact(message: str) -> str:
     return GENERIC_CRED_RX.sub(_mask_value, out)
 
 
+def check_name(name: str, what: str) -> list:
+    """The credential patterns applied to a NAME rather than to a body.
+
+    A name ships with the handoff exactly as a body does: a file called
+    `sk-ant-<value>.md`, an archive entry called the same, a bundle
+    directory named after a token. This is the one rule, in one place — see
+    "Every place a name is scanned" in REFERENCE.md for the call sites.
+    Findings are printed through redact() like every other line, so the
+    credential is masked in the output.
+    """
+    problems = []
+    for pattern, label in SECRET_PATTERNS:
+        if pattern.search(name):
+            problems.append(
+                f"{label} in the FILE NAME {name} — a credential in a name "
+                f"ships with the handoff; rename the {what}"
+            )
+    for match in GENERIC_CRED_RX.finditer(name):
+        value = match.group(3)
+        if len(value) >= 12 and not PLACEHOLDER_RX.match(value):
+            problems.append(
+                f"possible credential (heuristic match) in the FILE NAME "
+                f"{name} — if this is a real secret, rename the {what}; if it "
+                "isn't, rename it so it does not contain "
+                + GENERIC_CRED_LABEL_LIST
+            )
+    return problems
+
+
 def iter_files(directory: str):
     """Every regular file under directory, recursively, in a stable order.
 
@@ -528,6 +557,11 @@ def main() -> int:
             if base in (".env", ".npmrc", ".pypirc", "id_rsa", "id_ed25519") or \
                     base.startswith(".env."):
                 problems.append(f"{rel} contains {entry} — credentials never travel in the zip")
+            # ...and the entry name itself can BE the credential. Same rule as
+            # the on-disk names above, one level down: the archive's index
+            # ships the name whether or not anyone opens the archive. Still
+            # entry names only — nothing is extracted.
+            problems.extend(check_name(f"{rel}:{entry}", "archive entry"))
 
     # Codex r6 on #45: the patterns were applied to file CONTENTS only, so a
     # bundle holding a regular file NAMED `sk-ant-<value>.md` printed
@@ -536,21 +570,20 @@ def main() -> int:
     # from the text scan, never from this one. The finding itself goes
     # through redact() before printing, so the name is not echoed.
     for rel, _full in all_files:
-        for pattern, label in SECRET_PATTERNS:
-            if pattern.search(rel):
-                problems.append(
-                    f"{label} in the FILE NAME {rel} — a credential in a "
-                    "filename ships with the handoff; rename the file"
-                )
-        for match in GENERIC_CRED_RX.finditer(rel):
-            value = match.group(3)
-            if len(value) >= 12 and not PLACEHOLDER_RX.match(value):
-                problems.append(
-                    f"possible credential (heuristic match) in the FILE NAME "
-                    f"{rel} — if this is a real secret, rename the file; if "
-                    "it isn't, rename it so it does not contain "
-                    + GENERIC_CRED_LABEL_LIST
-                )
+        problems.extend(check_name(rel, "file"))
+
+    # The handoff's OWN name is the fourth place a name travels: a bundle
+    # directory called after a token keeps that name when it is copied or
+    # zipped up and sent. Only the target's basename — the directories above
+    # it belong to the sender's machine, are none of the handoff's business,
+    # and reporting them would turn every run in a credential-shaped home
+    # directory into a failure.
+    target_name = os.path.basename(os.path.abspath(args.path))
+    if target_name:
+        problems.extend(check_name(
+            target_name,
+            "handoff directory" if os.path.isdir(args.path) else "file",
+        ))
 
     # Every file in the handoff directory is scanned, not just the document:
     # PROMPT.txt is the file most likely to be pasted into another account.

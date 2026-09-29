@@ -324,10 +324,34 @@ The secret and path scans deliberately read the **raw** text: a fence hides
 structure from the structural checks, never a credential from the secret
 check.
 
-**File names.** The specific patterns and the generic `label = value` check
-run over each file's NAME as well as its contents, for every entry in the
-handoff including archives. A bundle holding a file called
-`sk-ant-<value>.md` ships that credential as plainly as one holding it in a
-body, and the gate used to pass it. The finding goes through the same
-redaction as every other line, so the name is reported with the credential
-masked.
+### Every place a name is scanned
+
+A name ships with the handoff exactly as a body does: a file called
+`sk-ant-<value>.md` leaks the key as plainly as one with the key inside it.
+One helper, `check_name()`, applies the specific patterns and the generic
+`label = value` check to a name, and it is called from every place a name
+travels. The list is exhaustive — if a future change introduces a fifth, it
+belongs here:
+
+1. **Every file's path inside the handoff**, relative to the handoff
+   directory. This covers nested directory names (`context/notes.md`) and
+   runs for every entry including archives, which are excluded from the
+   *text* scan but never from this one.
+2. **The handoff's own name** — the bundle directory's basename for a
+   directory target, the document's filename for a file target. A bundle
+   directory named after a token keeps that name when it is copied or zipped
+   up and sent. Only the basename: the directories above it belong to the
+   sender's machine, and scanning them would fail every run made from a
+   credential-shaped home directory.
+3. **Every entry name inside every zip**, reported as `<archive>:<entry>`.
+   The archive's index carries those names whether or not anyone opens it.
+   Entry names only — nothing is extracted, which is also why the separate
+   `.env` / `id_rsa` / `.npmrc` / `.pypirc` / `id_ed25519` entry rule stays
+   exactly as it was.
+
+(For completeness, the fourth thing scanned is not a name: every non-archive
+file's CONTENTS.)
+
+Findings are worded "… in the FILE NAME …" and name the thing to rename
+(file, handoff directory, archive entry). They go through the same
+`redact()` as every other line, so the credential is masked in the output.
