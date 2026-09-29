@@ -224,4 +224,107 @@ PY
 python3 "$GATE" "$WORK/wordprefixbypass" --mode compaction && fail "REGRESSION: a real secret with a redaction-word prefix bypassed the gate"
 echo "PASS real secret with a redaction-word prefix still fails"
 
+# 16. Fix-round-3, THE PREFIXED-LABEL REGRESSION this round exists to close:
+#     GENERIC_CRED_RX required a `\b` immediately before the keyword, so
+#     `BUNNY_API_KEY=...` was invisible to the scan — `_` is a word character,
+#     so there is no boundary between it and `API`. Every credential name in
+#     this project's own toolbox is `<VENDOR>_<THING>_KEY` or
+#     `<VENDOR>_TOKEN`, so this was the single most likely real leak shape.
+mkgood "$WORK/prefixedlabel"
+python3 - "$WORK/prefixedlabel/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\nBUNNY_API_KEY=7fd93ba21c0e4b8aa1c2\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+python3 "$GATE" "$WORK/prefixedlabel" --mode compaction && fail "REGRESSION: BUNNY_API_KEY=<real value> bypassed the gate"
+echo "PASS prefixed label (BUNNY_API_KEY=) with a real value still fails"
+
+# 17. Fix-round-3: a second prefixed-label shape, different vendor/shape.
+mkgood "$WORK/prefixedlabel2"
+python3 - "$WORK/prefixedlabel2/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\nSUMIT_MAIN_API_KEY=9d0e1f2a3b4c5d6e7f80\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+python3 "$GATE" "$WORK/prefixedlabel2" --mode compaction && fail "REGRESSION: SUMIT_MAIN_API_KEY=<real value> bypassed the gate"
+echo "PASS prefixed label (SUMIT_MAIN_API_KEY=) with a real value still fails"
+
+# 18. Fix-round-3: a prefixed TOKEN label, not just *_KEY shapes.
+mkgood "$WORK/prefixedlabel3"
+python3 - "$WORK/prefixedlabel3/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\nMY_SERVICE_TOKEN=abcdef0123456789abcd\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+python3 "$GATE" "$WORK/prefixedlabel3" --mode compaction && fail "REGRESSION: MY_SERVICE_TOKEN=<real value> bypassed the gate"
+echo "PASS prefixed label (MY_SERVICE_TOKEN=) with a real value still fails"
+
+# 19. Fix-round-3: the placeholder allowlist must survive the prefix change —
+#     BUNNY_API_KEY=REDACTED_DO_NOT_COMMIT is now visible to the generic scan
+#     (unlike before round 3) and must still pass via the placeholder check.
+mkgood "$WORK/prefixedplaceholder"
+python3 - "$WORK/prefixedplaceholder/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\nBUNNY_API_KEY=REDACTED_DO_NOT_COMMIT\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/prefixedplaceholder" --mode compaction)" || fail "BUNNY_API_KEY=REDACTED_DO_NOT_COMMIT rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for BUNNY_API_KEY=REDACTED_DO_NOT_COMMIT"
+echo "PASS prefixed label with a placeholder value still passes"
+
+# 20. Fix-round-3: prose that names a credential's label with no value must
+#     not be flagged — there is no assignment for the scan to key off of.
+mkgood "$WORK/prosewithlabel"
+python3 - "$WORK/prosewithlabel/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\nConfigure BUNNY_API_KEY before running the site sync.\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/prosewithlabel" --mode compaction)" || fail "prose naming a credential label rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for prose naming a credential label"
+echo "PASS prose naming a credential label with no value still passes"
+
+# 21. Fix-round-3: a short, non-credential-shaped value after "secret:" must
+#     not be flagged — the widened prefix must not turn this into prose-wide
+#     matching.
+mkgood "$WORK/shortvalue"
+python3 - "$WORK/shortvalue/HANDOFF.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "## Details\n",
+    "## Details\nsecret: the build is slow\n",
+    1,
+)
+open(p, "w").write(s)
+PY
+OUT="$(python3 "$GATE" "$WORK/shortvalue" --mode compaction)" || fail "short non-credential value after 'secret:' rejected: $OUT"
+echo "$OUT" | grep -q "GATE: PASS" || fail "no PASS line for 'secret: the build is slow'"
+echo "PASS short non-credential-shaped value after 'secret:' still passes"
+
 echo "ALL PASS"

@@ -53,8 +53,21 @@ SECRET_PATTERNS = (
 # own instructions tell a handoff's author to write
 # `BUNNY_API_KEY=REDACTED_DO_NOT_COMMIT`, keeping the credential's *name* and
 # never its value, and that must not itself fail the gate.
+#
+# Fix-round-3 pin: the keyword used to require `\b` immediately before it, so
+# `BUNNY_API_KEY=...` was invisible to this pattern — `_` is a word character,
+# so there is no boundary between it and `API`, and every credential name in
+# this project's own toolbox is `<VENDOR>_<THING>_KEY` or `<VENDOR>_TOKEN`.
+# The keyword may now be preceded by any run of label characters
+# (letters/digits/underscore/hyphen); nothing else about the pattern changed.
+# This does not widen it into prose: the assignment character (`=` or `:`)
+# must still follow the keyword directly (only whitespace between), so
+# "the API key is stored in 1Password" and "secret: the build is slow" still
+# don't match — there is no `[=:]` right after the keyword in the first, and
+# the value after `:` in the second is only 3 characters, short of the
+# pattern's 4-character minimum.
 GENERIC_CRED_RX = re.compile(
-    r"(?i)\b(?:password|secret|token|api[_-]?key)\s*[=:]\s*"
+    r"(?i)[A-Za-z0-9_-]*(?:password|secret|token|api[_-]?key)\s*[=:]\s*"
     r"(['\"]?)([A-Za-z0-9/+_<>{}$\[\].-]{4,})\1"
 )
 
