@@ -4,45 +4,10 @@ Placeholders: `<owner>/<repo>` (e.g. `acme/app`), `<PR>` (number). All commands
 use the `gh` CLI. `cwd` can reset between tool calls — `cd` into the repo
 explicitly in every git/gh command if you rely on the working directory.
 
-Codex's bot login matches `codex|chatgpt` — the filters below select its
-comments regardless of the exact bot handle.
-
-**Codex is not the only bot on the PR.** Once per loop (and again before
-merge), enumerate every reviewer login and sweep the other bots' live
-findings too — a `codex|chatgpt`-only poll has silently missed dozens of live
-Copilot comments:
-
-```bash
-# Who has commented at all — across ALL THREE surfaces? A bot that posts only
-# a review body or a top-level issue comment is invisible to pulls/N/comments.
-{ gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments  --jq '.[].user.login';
-  gh api --paginate repos/<owner>/<repo>/pulls/<PR>/reviews   --jq '.[].user.login';
-  gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments --jq '.[].user.login'; } | sort -u
-
-# Live INLINE + FILE-LEVEL findings from every OTHER bot (triage before merge;
-# they never gate convergence — Copilot has no clean-verdict signal, silence
-# proves nothing). line:null only marks a LINE comment as outdated; a
-# file-level comment (subject_type == "file") has no line by design and is
-# live. Bodies printed in full — a truncated finding reads as "nothing here".
-gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
-  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) | select(((.line//null)!=null) or (.subject_type=="file")) |
-    "==== id="+(.id|tostring)+" by="+.user.login+" raised_at="+(.original_commit_id[0:8])+" ["+.path+":"+((.line // "file")|tostring)+"] ====\n"+(.body // "")'
-
-# ...and their ISSUE-COMMENT findings (some bots put whole reviews here) — full
-# bodies with an id line and a separator, so multi-line bodies stay attributable
-# and reactable (react via: gh api -X POST .../issues/comments/<id>/reactions):
-gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments \
-  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) |
-    "==== id="+(.id|tostring)+" by="+.user.login+" at="+.created_at+" ====\n"+(.body // "")'
-
-# Review BODIES from other bots (usually wrappers, occasionally substantive) —
-# same bot filter as above, so human reviews keep their separate semantics;
-# body can be null on approvals/wrappers, hence the // "" and the emptiness
-# test on the coerced value:
-gh api --paginate repos/<owner>/<repo>/pulls/<PR>/reviews \
-  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")|not) | select(.user.type=="Bot" or (.user.login|test("copilot";"i"))) | select((.body // "") != "") |
-    "==== review by="+.user.login+" commit="+(.commit_id[0:8])+" ====\n"+(.body // "")'
-```
+Requires Bash, `gh` and `jq`. Capture all reviewers' evidence before selecting
+records to read. Identify the actual Codex bot from the repository's review
+integration; a username merely containing `codex` or `chatgpt` is not proof of
+who wrote a verdict. Other bots are finding sources too, never clean gates.
 
 ---
 
@@ -58,106 +23,102 @@ Codex auto-reviews on PR-open reliably; on later pushes, re-trigger explicitly.
 
 ## 2. Pull findings — all THREE surfaces
 
-Query all three every round. A PR that looks clean on one can carry an
-un-triaged finding on another.
+Take a complete, read-only snapshot each round. It includes full bodies from
+inline/file-level comments, review submissions, and issue comments, with no
+commit, line, author, or severity filter. `--paginate --slurp` collects every
+page; `jq` flattens the pages only after validating their shape. Failures must
+stay failures, never turn into an empty finding list.
+
+Run this Bash block after substituting the repository and PR. It prints the
+snapshot path only on success. Keep that path as `SNAPSHOT` for the read
+commands below; do not reuse a previous snapshot after a failed poll.
+
+<!-- review-snapshot:start -->
+```bash
+(
+  set -euo pipefail
+  REPO='<owner>/<repo>'
+  PR='<PR>'
+  POLL_DIR=$(mktemp -d)
+  trap 'rm -rf "$POLL_DIR"' EXIT
+  HEAD_BEFORE=$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')
+  if [[ ! "$HEAD_BEFORE" =~ ^[0-9a-f]{40}$ ]]; then
+    echo 'Missing or invalid PR HEAD; discard this poll.' >&2
+    exit 1
+  fi
+  for SURFACE in inline reviews issues; do
+    case "$SURFACE" in
+      inline) ENDPOINT="repos/$REPO/pulls/$PR/comments" ;;
+      reviews) ENDPOINT="repos/$REPO/pulls/$PR/reviews" ;;
+      issues) ENDPOINT="repos/$REPO/issues/$PR/comments" ;;
+    esac
+    if ! gh api --paginate --slurp "$ENDPOINT" |
+      jq -e 'if type == "array" and length > 0 and all(.[]; type == "array")
+             then add else error("Expected paginated arrays") end' > "$POLL_DIR/$SURFACE.json"; then
+      echo "Could not collect $SURFACE; discard this poll." >&2
+      exit 1
+    fi
+  done
+  HEAD_AFTER=$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')
+  if [[ "$HEAD_BEFORE" != "$HEAD_AFTER" ]]; then
+    echo 'HEAD changed during collection; discard this poll and re-fetch.' >&2
+    exit 1
+  fi
+  jq -n --arg head "$HEAD_AFTER" \
+    --slurpfile inline "$POLL_DIR/inline.json" \
+    --slurpfile reviews "$POLL_DIR/reviews.json" \
+    --slurpfile issues "$POLL_DIR/issues.json" \
+    '{head: $head, inline: $inline[0], reviews: $reviews[0], issues: $issues[0]}' \
+    > "$POLL_DIR/snapshot.json"
+  trap - EXIT
+  printf '%s\n' "$POLL_DIR/snapshot.json"
+)
+```
+<!-- review-snapshot:end -->
+
+The snapshot is **evidence, not a convergence verdict**. Read all three
+surfaces; if a tool display truncates the output, read smaller record batches
+from this file rather than shortening bodies or silently skipping records.
+For example, after setting `SNAPSHOT` to the successful command's path:
 
 ```bash
-# (a) Inline review comments — where most findings live. Emit each finding's
-#     id + original_commit_id (the IMMUTABLE "raised at" anchor) + line.
-#     NEVER emit `commit_id` here: GitHub re-anchors it to HEAD, so every finding
-#     — including one raised three pushes ago — reads as "raised at HEAD". That is
-#     the false-current case; it makes you re-fix what you already fixed.
-#     line:null = the anchored code changed → usually already handled/outdated.
-#     --paginate is REQUIRED (endpoint pages at 30; late rounds land past page 1).
-gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
-  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")) |
-    "id="+(.id|tostring)+" raised_at="+(.original_commit_id[0:8])+" ["+.path+":"+((.line//0)|tostring)+"] "+(.body[0:200])'
-
-# (b) Review bodies — the summary verdict + the commit Codex actually reviewed.
-gh api repos/<owner>/<repo>/pulls/<PR>/reviews \
-  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")) |
-    "commit="+(.commit_id[0:8])+" "+.state+"  "+(.submitted_at//"")'
-
-# (c) Issue/conversation comments — Codex often posts its clean-pass verdict
-#     ("Didn't find any major issues") HERE as an issue comment, with no formal
-#     review object. Watching only /reviews makes a converged PR look un-reviewed.
-#     Use the PAGINATED REST endpoint: `gh pr view --json comments` truncates at
-#     the first 100 and its `last` is then not the newest comment.
-#     Do the `last` selection INSIDE jq and flatten newlines — a Codex body is
-#     multi-line, so `--jq ... | tail -1` tails PHYSICAL LINES, not comments, and
-#     silently drops the "Didn't find any major issues" text (it prints the
-#     trailing `<details>` block instead), so the verdict can never match.
-#     `last // empty` on a findings-only PR (no Codex issue comment yet) empties
-#     the stream, so nothing downstream runs and the command PRINTS NOTHING.
-#     Silence then reads as "surface (c) is broken" instead of "not clean yet".
-#     Default the body to a string so the negative branch always fires.
-gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments --jq '.[]' \
-  | jq -r -s '[.[] | select(.user.login|test("codex|chatgpt";"i"))]
-              | (last.body // "(no Codex issue comment yet)")
-              | gsub("\r?\n"; " ") | .[0:200]'
+# Inventory every author, including bots that only post review or issue bodies.
+jq '[.inline[], .reviews[], .issues[]] | map(.user.login) | unique' "$SNAPSHOT"
+# Full records and full bodies, one surface at a time. Narrow by specific IDs
+# for navigation only, after accounting for every finding in the inventory.
+jq '.inline[]' "$SNAPSHOT"
+jq '.reviews[]' "$SNAPSHOT"
+jq '.issues[]' "$SNAPSHOT"
 ```
 
-> **⚠️ Race: (b) lands before (a).** The review object appears first (state `COMMENTED`, generic
-> "here are some automated review suggestions" body); its inline comments in (a) arrive
-> seconds-to-minutes later. So `(b) exists at HEAD` + `(a) empty` is **not** a clean pass — it's a
-> poll that fired too early. Re-poll ≥90 s and require (a) to be **stable across two polls**, or
-> wait for the (c) clean-verdict text. **Never add a `commit_id` filter to (a)** — a live finding
-> can carry an unexpected sha and the filter drops it silently. Partition (a) by `line` instead:
-> `line != null` = live finding, `line == null` = stale/outdated.
+**Interpretation rules:**
 
-**Live vs stale in one query** (what you actually want each round):
+- `line: null` is not a resolved finding. File-level comments have no line by
+  design; outdated line anchors also need verification at HEAD. Use the path,
+  full body, `original_commit_id`, and `original_line` to locate the claim.
+- An unchanged ID means the same record, not the same contents or a fixed
+  defect. Compare IDs **and content/update metadata** on all three surfaces
+  across polls. A new ID detects a re-post; an edited body can matter without
+  a new ID. Re-read current code before reusing an earlier terminal state.
+- A current-HEAD review with the generic suggestions wrapper and no findings
+  is pending, even across two empty polls. Wait for actual current-round
+  findings to arrive and stabilize (≥90 s apart), or for an explicit clean
+  verdict naming HEAD. Stability is a delivery heuristic, never proof of
+  resolution or protection against arbitrarily late comments.
+- A clean candidate must come from the verified Codex author and current
+  review round. Read the complete body and resolve its explicit `Reviewed
+  commit` to the full PR HEAD (a unique abbreviated SHA is acceptable; if it
+  cannot be resolved, the evidence is incomplete). A timestamp alone, or a
+  HEAD substring elsewhere in the body, does not establish the reviewed SHA.
+  Do not select an older clean comment over a newer pending/failed review.
+- No command here prints `converged`. A matching clean verdict does not excuse
+  untriaged findings on another surface. Apply the checklist below, including
+  CI, then re-fetch the snapshot and HEAD before handoff. New/edited findings
+  need triage; a new HEAD needs fresh review evidence.
 
-```bash
-# LIVE findings only — the ones that still need triage this round.
-# --paginate is REQUIRED: this endpoint pages at 30, and in a multi-round review the
-# newest blocking finding is often past the first page. Without it you will read a
-# converged PR that isn't.
-# Emit `id` (the stability key + what you need to react/audit) and
-# `original_commit_id` (the IMMUTABLE FINDING_COMMIT for the ancestor check —
-# `commit_id` is re-anchored to HEAD and proves nothing).
-gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments \
-  --jq '.[] | select(.user.login|test("codex|chatgpt";"i")) | select((.line//null)!=null) |
-    "id="+(.id|tostring)+" raised_at="+(.original_commit_id[0:8])+" ["+.path+":"+((.line)|tostring)+"] "+(.body[0:160])'
-
-# ALWAYS pair it with the clean-verdict check — a clean pass emits ONLY an issue
-# comment (surface (c)), never a review object or an inline comment. Polling (a)
-# alone can never observe convergence; you will wait forever on a green PR.
-#
-# CRITICAL: the verdict must match the CURRENT HEAD. Codex's clean comment prints
-# "Reviewed commit: <sha>". A PR that was clean on A and then received commit B
-# still shows A's verdict — pairing "no new inline findings" (Codex hasn't reviewed
-# B yet) with A's stale "Didn't find..." text declares B converged. Same
-# false-convergence bug, new disguise. Compare the SHA; don't just read the text.
-# NOTE: `gh`'s built-in `--jq` takes ONE jq expression and does NOT accept jq CLI
-# flags like `--arg`. Passing `--arg` there exits 1 and the check fails SILENTLY —
-# you then see "no verdict" forever and never converge. Pipe gh's JSON into the
-# real `jq` binary instead, which does support `--arg`.
-# ALSO: `gh pr view --json comments` fetches `comments(first: 100)` — TRUNCATED.
-# On a busy review-loop PR, `last` is the last item of that first page, not the
-# newest comment, so the verdict reads stale or absent forever. Use the PAGINATED
-# REST issue-comments endpoint.
-# AND: a findings-only PR has NO Codex issue comment at all. `last // empty` on
-# that empty array empties the jq stream, the if/else never runs, and the command
-# prints NOTHING — so a not-clean PR is indistinguishable from a broken poll. A
-# convergence check that can go silent is the same false-convergence bug again.
-# Default the body to "" (`last.body // ""`) so the negative branch ALWAYS fires.
-HEAD=$(gh api repos/<owner>/<repo>/pulls/<PR> --jq '.head.sha')
-gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments --jq '.[]' \
-  | jq -r -s --arg H "${HEAD:0:10}" '
-      [.[] | select(.user.login|test("codex|chatgpt";"i"))]
-      | (last.body // "") | gsub("\r?\n"; " ")
-      | if   (test("didn.t find any major issues";"i")) and (test($H))
-        then "CLEAN @ HEAD — converged"
-        elif (test("didn.t find any major issues";"i"))
-        then "STALE VERDICT — clean, but for an older commit. Codex has not reviewed HEAD yet."
-        else "NOT CLEAN — findings, or the review is still in flight."
-        end'
-```
-
-**Compare rounds by the set of comment `id`s, not by path/line/body.** Codex re-posts an
-identical-looking finding with a *new* id; a text-only diff makes a fresh blocking finding look
-like last round's stable set. Conversely, an **unchanged id** across rounds is *not* a new
-finding — even when its `commit_id`/`line` moved (GitHub re-anchored it).
+Keep the finding ID, verified HEAD, disposition, and evidence/reason together
+in your triage record. Only current-HEAD code evidence can establish that a
+finding is fixed/stale or refuted; out-of-scope tracking needs a durable link.
 
 ---
 
@@ -169,8 +130,8 @@ finding — even when its `commit_id`/`line` moved (GitHub re-anchored it).
 > afterwards — not that that commit touched this code, and not that it fixed the bug. An unrelated
 > push, or an attempted fix that missed, leaves the defect live while the ancestor test happily
 > prints `STALE`. **Auto-skipping there is how you ship the bug you were told about.** Ancestry is a
-> *hint about what to read*, never a verdict. Only two things settle it: `line == null` (GitHub lost
-> the anchor entirely) and **reading the code at HEAD**.
+> *hint about what to read*, never a verdict. Only **reading the code at HEAD** settles whether the defect remains.
+> `line == null` can mean an outdated anchor or a file-level finding, not a fix.
 >
 > **⚠️ And use `original_commit_id`, NOT `commit_id`, for that hint.** GitHub **re-anchors** an
 > inline comment onto current HEAD as the branch moves: `commit_id`/`line` are *mutable*;
@@ -178,25 +139,18 @@ finding — even when its `commit_id`/`line` moved (GitHub re-anchored it).
 > finding look like it was raised at HEAD. Observed live: a comment raised at `b1d3d3f` (line 85)
 > reported `commit_id=855997d` (HEAD, line 88) one push later.
 
-```bash
-HEAD=$(gh api repos/<owner>/<repo>/pulls/<PR> --jq '.head.sha')
-# IMMUTABLE anchor — the commit the finding was RAISED AGAINST (not where it now points).
-FINDING_COMMIT=$(gh api repos/<owner>/<repo>/pulls/comments/<comment_id> --jq '.original_commit_id')
+Read the finding's full record from the successful snapshot in §2. Compare
+its `original_commit_id` with the snapshot's full `head` only to choose where
+to inspect; a missing anchor is unknown, never an equality match. Then read
+the relevant file at that exact PR HEAD and verify the claimed defect:
 
-# A commit is its own ancestor, so the equality case MUST be excluded — else a
-# finding raised ON HEAD gets mis-labelled and skipped.
-if [ "$FINDING_COMMIT" = "${HEAD:0:${#FINDING_COMMIT}}" ]; then
-  echo "RAISED AT HEAD — definitely current. Triage now."
-else
-  echo "RAISED EARLIER — MAYBE fixed by a later commit, maybe not. READ THE CODE AT HEAD."
-  echo "  Does the defect still exist there?  yes -> current finding, fix it."
-  echo "                                       no -> stale, do NOT re-fix (re-fixing restarts the loop)."
-fi
-```
+- Defect still present → current; triage its validity, severity and scope.
+- Defect demonstrably fixed → stale/fixed; record the current-HEAD evidence.
+- Claimed defect disproved → refuted; record the rationale.
 
-There is no shortcut around that second branch. Never fix from the finding text alone (Codex
-re-posts findings against commits that already fixed them, and anchors to stale line numbers) —
-and never *dismiss* one from the ancestry alone either.
+Never fix from the finding text alone (Codex can re-post findings against
+commits that already fixed them, or anchor to stale line numbers), and never
+dismiss one from ancestry or anchor metadata alone.
 
 **The currency signals, in order of trust:** (1) **the code at HEAD still exhibits the problem** —
 the only authority; (2) a **new comment `id`** you have not seen before; (3) `original_commit_id`
@@ -239,13 +193,14 @@ at P0/P1/P2 is already in a terminal triage state, re-verified this round
 4. Verify: `abc123 == HEAD` → **current**. Read `src/x.ts:48` — confirmed, and `.github/workflows` runs a 7.4 job → **real** (matrix constraint).
 5. Fix with the project's older-runtime-safe idiom, add a regression test, commit `fix(x): 7.4-compat strpos (Codex P1)`. Push.
 6. 👍 comment 555. `@codex review`.
-7. Poll: surface (c) shows "Didn't find any major issues. Reviewed commit: `def456`" and `def456 == HEAD`, no open inline findings → **converged**.
+7. Poll: surface (c) shows "Didn't find any major issues. Reviewed commit: `def456`" and `def456 == HEAD`, all three surfaces fully read and triaged, CI green on that HEAD, and final re-fetch unchanged → **converged**.
 8. Hand to the human review queue; don't self-merge a substantial PR.
 
 ## Convergence checklist
 
-- [ ] Codex's **latest** review commit == PR **HEAD**.
-- [ ] Every blocking (P0/P1/P2) finding live at HEAD is in a terminal state — fixed, stale (`line:null`/re-anchored), refuted, or tracked (SKILL.md → Convergence).
+- [ ] Codex's **latest round** reviewed PR **HEAD**, proven by the explicit reviewed SHA or review commit; a wrapper with no findings is still pending.
+- [ ] All three surfaces fully paginated, full bodies read, API/parse errors absent, and HEAD unchanged through collection and the final re-fetch.
+- [ ] Every blocking (P0/P1/P2) finding live at HEAD is in a terminal state — fixed/stale (verified in the code at HEAD), refuted with evidence, or tracked with a durable reference (SKILL.md → Convergence).
 - [ ] **Every OTHER reviewer bot's live findings triaged** — they don't gate convergence, but merging over an untriaged one ships it unexamined.
 - [ ] CI green on HEAD.
 - [ ] Any owner-decision findings escalated to the human, not guessed.
