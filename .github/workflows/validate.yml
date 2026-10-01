@@ -46,3 +46,5 @@ jobs:
         run: python3 -m unittest discover -s tools/portability -p 'test_*.py'
       - name: Run plugin cache GC unit tests
         run: python3 tools/plugin-cache-gc/test_plugin_cache_gc.py
+      - name: Test documented review polling commands
+        run: python3 -m unittest discover -s skills/codex-review-loop/tests -p 'test_*.py'

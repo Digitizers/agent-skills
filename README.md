@@ -148,6 +148,7 @@ python3 tools/portability/validate.py \
 python3 tools/trigger-eval/test_tools.py
 python3 -m unittest discover -s tools/portability -p 'test_*.py'
 python3 tools/plugin-cache-gc/test_plugin_cache_gc.py
+python3 -m unittest discover -s skills/codex-review-loop/tests -p 'test_*.py'
 ```
 
 Do not substitute bare `python3 -m unittest` or discovery from `tools/`: this
