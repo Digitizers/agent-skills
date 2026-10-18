@@ -697,4 +697,90 @@ echo "$OUT" | grep -q "of 200000 tokens" || fail "the post-boundary crossing was
 echo "$OUT" | grep -q "assumed default" || fail "the fallback does not tell the reader the window is assumed: $OUT"
 echo "PASS the pre-boundary model mapping is discarded at a compact boundary"
 
+# A post-compaction transcript the way Claude Code writes it (#47): a
+# boundary, the summary, then hundreds of KB of attachment lines (tool,
+# skill and MCP listings) and the new prompt — and no usage block yet. When
+# Claude Code also writes a `model` attachment, it names the model the
+# resumed context runs on. $1=transcript $2=payload $3=session
+# $4=model-attachment id ("" for none) $5=pre-boundary model.
+mk_post_compaction() {
+  python3 - "$@" <<'PY'
+import json, sys
+transcript, payload, session, attached, before = sys.argv[1:6]
+with open(transcript, "w") as f:
+    f.write(json.dumps({"message": {"model": before, "usage": {
+        "input_tokens": 600000, "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0}}}) + "\n")
+    f.write(json.dumps({"type": "system", "subtype": "compact_boundary",
+                        "compactMetadata": {"trigger": "auto",
+                                            "preTokens": 600000,
+                                            "postTokens": 65000}}) + "\n")
+    f.write(json.dumps({"type": "user", "isCompactSummary": True,
+                        "message": {"content": "s" * 12000}}) + "\n")
+    # ~700 KB of listings: ~350k tokens by the byte floor.
+    for _ in range(7):
+        f.write(json.dumps({"type": "attachment", "attachment": {
+            "type": "deferred_tools_delta", "text": "t" * 100000}}) + "\n")
+    if attached:
+        f.write(json.dumps({"type": "attachment", "attachment": {
+            "type": "model", "identity": {"modelId": attached}}}) + "\n")
+with open(payload, "w") as f:
+    json.dump({"transcript_path": transcript, "session_id": session,
+               "hook_event_name": "UserPromptSubmit", "prompt": "continue"}, f)
+PY
+}
+
+# 56. #47, cause 1 — the declared window survives a compaction when Claude
+#     Code names the model. A mapped 1M session read the first prompt after
+#     every compaction against the assumed 200k, because the model was
+#     cleared at the boundary and no assistant line had restored it yet. The
+#     post-boundary `model` attachment is written for the resumed context,
+#     so it is the latest model, not the stale one r6 warned about: ~350k
+#     estimated is ~35% of 1M — silent.
+mk_post_compaction "$WORK/pc1.jsonl" "$WORK/in-pc1.json" cg-test-pc1 claude-opus-5-5 claude-opus-5-5
+OUT="$(CONTEXT_WINDOW_BY_MODEL="claude-opus-5-5=1000000" CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-pc1.json")"
+[ -z "$OUT" ] || fail "REGRESSION (#47): a mapped 1M session alarmed on the first prompt after compaction: $OUT"
+echo "PASS the post-boundary model attachment restores the declared window"
+
+# 57. ...and it is the RESUMED model that counts (r6 still holds): a 1M
+#     model before the boundary and a 200k model named after it is measured
+#     against 200k — declared, not assumed.
+mk_post_compaction "$WORK/pc2.jsonl" "$WORK/in-pc2.json" cg-test-pc2 new-model big-model
+OUT="$(CONTEXT_WINDOW_BY_MODEL="big-model=1000000,new-model=200000" run_guard "$WORK/in-pc2.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "the resumed 200k model's crossing did not fire: $OUT"
+echo "$OUT" | grep -q "of 200000 tokens" || fail "the resumed model was not measured against its own window: $OUT"
+echo "$OUT" | grep -q "assumed default" && fail "a declared post-boundary window was reported as assumed: $OUT"
+echo "PASS the post-boundary model attachment names the resumed model"
+
+# 58. #47, cause 2 — no STOP from an estimate alone. Without a model
+#     attachment the window falls back to the assumed 200k (test 55), and the
+#     byte floor over-counts the listings 2-3x; together they told an agent
+#     on a 1M session to stop working. Until a post-boundary call prices the
+#     context, the figure is pure estimate: warn at most.
+mk_post_compaction "$WORK/pc3.jsonl" "$WORK/in-pc3.json" cg-test-pc3 "" claude-opus-5-5
+OUT="$(CONTEXT_WINDOW_BY_MODEL="claude-opus-5-5=1000000" CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-pc3.json")"
+echo "$OUT" | grep -q "additionalContext" || fail "the estimate-only crossing did not warn at all: $OUT"
+echo "$OUT" | grep -q "STOP" && fail "REGRESSION (#47): an estimate with no post-boundary usage raised a STOP: $OUT"
+echo "$OUT" | grep -q "past the 70% handoff threshold" || fail "the capped alarm does not cite the warn threshold: $OUT"
+echo "$OUT" | grep -q "assumed default" || fail "the fallback does not tell the reader the window is assumed: $OUT"
+echo "PASS an estimate with no post-boundary usage warns but never stops"
+
+# 59. ...and the cap ends at the first post-boundary call: 170k priced by a
+#     real usage block after the boundary is 85% of 200k and still STOPs.
+python3 - "$WORK/pc4.jsonl" "$WORK/in-pc4.json" <<'PY'
+import json, sys
+transcript, payload = sys.argv[1], sys.argv[2]
+with open(transcript, "w") as f:
+    f.write(json.dumps({"subtype": "compact_boundary"}) + "\n")
+    f.write(json.dumps({"message": {"model": "small-model", "usage": {
+        "input_tokens": 170000, "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0}}}) + "\n")
+with open(payload, "w") as f:
+    json.dump({"transcript_path": transcript, "session_id": "cg-test-pc4",
+               "hook_event_name": "UserPromptSubmit"}, f)
+PY
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-pc4.json")"
+echo "$OUT" | grep -q "STOP" || fail "a priced post-boundary crossing lost its STOP: $OUT"
+echo "PASS a post-boundary usage block lifts the estimate-only cap"
+
 echo "all context-guard tests passed"
