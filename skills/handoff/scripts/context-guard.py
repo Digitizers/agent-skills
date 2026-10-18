@@ -199,6 +199,9 @@ def main() -> None:
     latest_context = 0
     # Same rule for the model: the latest assistant line's, never any line's.
     latest_model = ""
+    # Whether a usage block has priced the context since the last boundary.
+    # Until one has, every token below is the byte floor's estimate (#47).
+    priced = False
     # os.path.exists() is true for a directory, and open() then raises
     # IsADirectoryError; an unreadable file raises PermissionError. Both are
     # OSError, and both must leave the session alone — this hook runs on
@@ -239,17 +242,31 @@ def main() -> None:
                     # assistant line restores the mapping by the ordinary
                     # latest-wins rule.
                     latest_model = ""
+                    priced = False
                     continue
                 message = rec.get("message") or {}
                 model = message.get("model")
                 # "<synthetic>" marks a locally generated message, not a model.
                 if isinstance(model, str) and model and not model.startswith("<"):
                     latest_model = model
+                # #47: after a boundary Claude Code writes a `model`
+                # attachment naming the model the resumed context runs on,
+                # before that model has emitted anything. It is written for
+                # the NEW context, so it restores the mapping without the
+                # stale-model risk of carrying the old one across (r6). It is
+                # not always written; without it the assumed default stands.
+                attachment = rec.get("attachment")
+                if isinstance(attachment, dict) and attachment.get("type") == "model":
+                    identity = attachment.get("identity")
+                    model_id = identity.get("modelId") if isinstance(identity, dict) else None
+                    if isinstance(model_id, str) and model_id and not model_id.startswith("<"):
+                        latest_model = model_id
                 usage = message.get("usage")
                 if usage:
                     latest_context = context_sent(usage)
                     tokens = latest_context + usage.get("output_tokens", 0)
                     tail_tokens = 0
+                    priced = True
                 else:
                     tail_tokens += estimate_tokens(line)
     except OSError:
@@ -297,7 +314,14 @@ def main() -> None:
     # to compact instead of writing a handoff and continuing. `level` is part
     # of every marker name below, so a warn firing earlier in the session
     # cannot disarm the later, louder stop — each level fires once on its own.
-    level = "stop" if pct >= stop_pct else "warn"
+    #
+    # #47: never STOP on an estimate alone. Right after a compaction nothing
+    # has priced the context yet, and the byte floor over-counts the
+    # post-boundary tool, skill and MCP listings 2-3x — enough on its own to
+    # cross the stop level and tell an agent on a 1M session to stop working.
+    # The warn still fires (the floor never fires late), and the next hook
+    # event after the first call reads a real usage block and can stop.
+    level = "stop" if pct >= stop_pct and priced else "warn"
     # PreCompact is the backstop for the case where the stop at
     # HANDOFF_STOP_PCT was ignored — and in exactly that case a stop marker
     # for this session already exists, so an ordinary once-per-session check

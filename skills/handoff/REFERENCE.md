@@ -31,6 +31,12 @@ on:
    auto-compact leaves the pre-compact conversation in the transcript file
    but not in the window, and pricing it after a restart is what made the
    hook report ">100%" on the first prompt of a resumed session (#35).
+   The model goes with it, so a stale mapping cannot silence a session
+   resumed on another model; the `model` attachment Claude Code writes after
+   the boundary (`attachment.identity.modelId`) names the resumed model and
+   restores its `CONTEXT_WINDOW_BY_MODEL` mapping before that model has
+   spoken (#47). Without that attachment the window is the assumed default
+   until the first post-boundary assistant line.
 4. The window size is evidence-led. `CONTEXT_WINDOW_TOKENS` is treated as a
    floor: the largest context any single call in the transcript actually
    carried proves the window is at least that big, so a 1M-context session
@@ -137,6 +143,12 @@ more than one window mode, so only you know which one your sessions use.
 `HANDOFF_STOP_PCT` (default 80) is the point where the agent stops instead of
 writing and continuing. Both thresholds are served by the same hook; each
 keeps its own marker, so the 70% nudge never disarms the 80% stop.
+
+The stop needs a measurement, not only an estimate: until a usage block has
+priced the context since the last compaction, the figure is all byte floor,
+which over-counts the post-compaction tool, skill and MCP listings 2-3x, so
+the guard warns at most (#47). The first call after the compaction writes a
+usage block, and from then on the stop can fire as usual.
 
 ```json
 { "env": { "HANDOFF_THRESHOLD_PCT": "70", "HANDOFF_STOP_PCT": "80" } }
