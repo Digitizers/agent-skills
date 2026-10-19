@@ -783,4 +783,57 @@ OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-pc4.json")"
 echo "$OUT" | grep -q "STOP" || fail "a priced post-boundary crossing lost its STOP: $OUT"
 echo "PASS a post-boundary usage block lifts the estimate-only cap"
 
+# A 50k-token transcript whose last assistant line is $3 minutes old, and a
+# PreCompact payload with trigger $4 ("" for none). $1=transcript $2=payload
+# $5=session.
+mk_precompact() {
+  python3 - "$@" <<'PY'
+import json, sys
+from datetime import datetime, timedelta, timezone
+transcript, payload, minutes, trigger, session = sys.argv[1:6]
+stamp = (datetime.now(timezone.utc) - timedelta(minutes=int(minutes)))
+with open(transcript, "w") as f:
+    f.write(json.dumps({"type": "assistant",
+                        "timestamp": stamp.isoformat().replace("+00:00", "Z"),
+                        "message": {"model": "m", "usage": {
+                            "input_tokens": 50000, "cache_read_input_tokens": 0,
+                            "cache_creation_input_tokens": 0}}}) + "\n")
+body = {"transcript_path": transcript, "session_id": session,
+        "hook_event_name": "PreCompact"}
+if trigger:
+    body["trigger"] = trigger
+with open(payload, "w") as f:
+    json.dump(body, f)
+PY
+}
+
+# 60. #49 — a MANUAL compaction says nothing about the window. The
+#     below-threshold backstop told a user who had just run /compact (after
+#     writing a handoff) that the window in use was smaller than configured
+#     or the estimate undercounts. Neither follows from a compaction the user
+#     chose.
+mk_precompact "$WORK/pcm.jsonl" "$WORK/in-pcm.json" 1 manual cg-test-pcm
+OUT="$(run_guard "$WORK/in-pcm.json")"
+echo "$OUT" | grep -q "systemMessage" || fail "a manual PreCompact emitted nothing: $OUT"
+echo "$OUT" | grep -q "smaller than" && fail "REGRESSION (#49): a manual compaction was read as a smaller window: $OUT"
+echo "$OUT" | grep -q "manual compaction" || fail "the manual backstop does not say the compaction is manual: $OUT"
+echo "PASS a manual compaction makes no window claim"
+
+# 61. #49 — an AUTO compaction after a long idle gap is most likely
+#     idle-driven: three opus-5-5 auto compactions at 200k-331k on a window
+#     proven >= 331k each came ~55 min after the last assistant line. Saying
+#     "the window is smaller" sends the reader after the wrong cause.
+mk_precompact "$WORK/pci.jsonl" "$WORK/in-pci.json" 55 auto cg-test-pci
+OUT="$(run_guard "$WORK/in-pci.json")"
+echo "$OUT" | grep -q "smaller than" && fail "REGRESSION (#49): an idle auto compaction was read as a smaller window: $OUT"
+echo "$OUT" | grep -q "idle" || fail "the idle backstop does not name the idle gap: $OUT"
+echo "PASS an auto compaction after a long idle gap is reported as idle-driven"
+
+# 62. ...and an auto compaction with NO idle gap keeps today's message: that
+#     is the case where the window or the estimate really is off.
+mk_precompact "$WORK/pca.jsonl" "$WORK/in-pca.json" 1 auto cg-test-pca
+OUT="$(run_guard "$WORK/in-pca.json")"
+echo "$OUT" | grep -q "smaller than" || fail "a size-driven auto compaction lost its window warning: $OUT"
+echo "PASS a busy auto compaction still reports a smaller window"
+
 echo "all context-guard tests passed"
