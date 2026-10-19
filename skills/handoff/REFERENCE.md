@@ -245,6 +245,15 @@ The text is written for a session that is already compacting: it reports that
 compaction started with no handoff and tells the resumed session to invoke the
 handoff skill first, rather than asking for a stop that can no longer happen.
 
+Below the threshold the net reads the hook input's `trigger` before blaming
+the window (#49). A `manual` compaction (the user ran `/compact`) is evidence
+of nothing about the window, so the message says only that it is manual. An
+`auto` compaction ~50 minutes or more after the last assistant line is most
+likely idle-driven: Claude Code compacts a large idle context before its
+prompt cache expires, at any size. Only a busy auto compaction, or a host that
+sends no `trigger`, keeps "the window in use is smaller, or the estimate
+undercounts".
+
 ```json
 {
   "hooks": {

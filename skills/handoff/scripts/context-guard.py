@@ -72,6 +72,7 @@ import hashlib
 import json
 import os
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from handoff_common import (  # noqa: E402
@@ -93,6 +94,13 @@ from handoff_common import (  # noqa: E402
 # the once-per-session marker is written only when the nudge fires, and the
 # next hook event reads a usage block that prices this content exactly.
 
+
+# #49: Claude Code also compacts a large context that has sat idle, shortly
+# before its one-hour prompt cache expires — three opus-5-5 auto compactions
+# at 200k-331k on a window proven >= 331k each came ~55 minutes after the
+# last assistant line. Past this gap an auto compaction says nothing about
+# the window.
+IDLE_COMPACTION_MINUTES = 50
 
 # Known context-window tiers, ascending. A transcript proves the window is at
 # least as large as the biggest context a single call carried; the real window
@@ -122,6 +130,20 @@ def fit_window(configured: int, observed: int) -> int:
         if tier >= observed and tier > configured:
             return tier
     return observed
+
+
+def idle_minutes(stamp):
+    """Minutes since an ISO-8601 transcript timestamp, or None when it is
+    missing or unparseable — a guess is worse than the old wording."""
+    if not isinstance(stamp, str) or not stamp:
+        return None
+    try:
+        then = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if then.tzinfo is None:
+        return None
+    return (datetime.now(timezone.utc) - then).total_seconds() / 60.0
 
 
 def parse_model_windows(raw: str) -> dict:
@@ -202,6 +224,9 @@ def main() -> None:
     # Whether a usage block has priced the context since the last boundary.
     # Until one has, every token below is the byte floor's estimate (#47).
     priced = False
+    # Wall-clock time of the latest assistant line, kept across boundaries:
+    # idleness is about the clock, not about the window (#49).
+    last_assistant_at = None
     # os.path.exists() is true for a directory, and open() then raises
     # IsADirectoryError; an unreadable file raises PermissionError. Both are
     # OSError, and both must leave the session alone — this hook runs on
@@ -244,6 +269,8 @@ def main() -> None:
                     latest_model = ""
                     priced = False
                     continue
+                if rec.get("type") == "assistant" and rec.get("timestamp"):
+                    last_assistant_at = rec.get("timestamp")
                 message = rec.get("message") or {}
                 model = message.get("model")
                 # "<synthetic>" marks a locally generated message, not a model.
@@ -365,7 +392,29 @@ def main() -> None:
     # two different numbers for one crossing.
     fired = stop_pct if level == "stop" else threshold
     fired_name = "stop" if level == "stop" else "handoff"
-    if below_threshold:
+    # PreCompact input names its trigger: "manual" (the user ran /compact)
+    # or "auto". Older hosts may omit it; that keeps the auto wording.
+    trigger = inp.get("trigger")
+    idle = idle_minutes(last_assistant_at)
+    if below_threshold and trigger == "manual":
+        # #49: the user chose this compaction, often right after writing a
+        # handoff. It is evidence of nothing about the window.
+        msg = (
+            f"A manual compaction is starting at ~{pct:.0f}% of {window} "
+            f"tokens (~{tokens} used, estimated). "
+        )
+    elif below_threshold and idle is not None and idle >= IDLE_COMPACTION_MINUTES:
+        # #49: a large context left idle is compacted before its prompt
+        # cache expires, at any size. Blaming the window here sent the
+        # reader after the wrong cause.
+        msg = (
+            f"Context window is at ~{pct:.0f}% of {window} tokens (~{tokens} "
+            f"used, estimated) — below the {threshold:.0f}% {fired_name} "
+            f"threshold, after ~{idle:.0f} minutes idle since the last model "
+            "call, so this compaction is most likely idle-driven, not a sign "
+            "that the window is smaller. "
+        )
+    elif below_threshold:
         # Only reachable on PreCompact. Saying "past the 70% threshold" here
         # would be false, and the figure is the thing not to be trusted: the
         # host decided to compact, so the real window is smaller than the one
@@ -410,12 +459,20 @@ def main() -> None:
         # the only thing that reaches anyone here is systemMessage — and by
         # the time it fires, compaction is already under way, which makes
         # "stop and write a handoff first" advice that cannot be taken.
-        msg += (
-            "Compaction is starting now and no handoff was written at the "
-            f"{stop_pct:.0f}% stop. Once the compacted session resumes, "
-            "invoke the handoff skill immediately and rebuild the document "
-            "from what survived, before continuing the task."
-        )
+        if below_threshold and trigger == "manual":
+            msg += (
+                "Once the compacted session resumes, invoke the handoff "
+                "skill, keeping a handoff written just before the compaction "
+                "or rebuilding one from what survived, before continuing the "
+                "task."
+            )
+        else:
+            msg += (
+                "Compaction is starting now and no handoff was written at the "
+                f"{stop_pct:.0f}% stop. Once the compacted session resumes, "
+                "invoke the handoff skill immediately and rebuild the document "
+                "from what survived, before continuing the task."
+            )
         print(json.dumps({"systemMessage": msg}))
         return
     if level == "stop" and attended():
