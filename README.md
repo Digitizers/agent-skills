@@ -159,3 +159,15 @@ them.
 ## License
 
 MIT.
+
+## Codex native install
+
+The additive `.codex-plugin/plugin.json` points at the same canonical skills.
+Use the existing `digitizer-skills` marketplace in Codex; inspect native plugin
+details to verify all ten skills. A clone or a directory link alone is not
+proof that a particular Codex host discovers the payload.
+
+```bash
+codex plugin marketplace add /path/to/agent-skills
+codex plugin add agent-skills@digitizer-skills
+```

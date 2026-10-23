@@ -1,20 +1,6 @@
 ---
 name: fable-mode
-description: >
-  Use this skill IMMEDIATELY whenever the message contains "fable-mode", "fable
-  mode", "פייבל", or "מצב פייבל" — including as a prefix before a task (e.g.
-  "fable-mode: review this...") — no matter what the task itself is. Also use it
-  proactively, unprompted, in two situations: (1) the user wants a fact
-  double-checked or verified against a live source instead of answered from
-  memory — "double-check", "can you verify", "is this still true", "I don't
-  trust my memory", current versions/limits/pricing/capabilities of tools, APIs,
-  or services; (2) the task is costly if wrong — production changes, migrations,
-  deletions, security, money, architecture commitments, debugging, or research
-  synthesis. Enforces strict planning, verification, and calibrated claims;
-  stays active for the rest of the conversation until "fable-mode off" / "כבה
-  מצב פייבל". Do NOT use for casual questions, trivial edits, creative writing,
-  or when "fable" appears only as an ordinary word (writing a fable, defining
-  it).
+description: Apply careful judgment, planning and verification to consequential decisions or uncertain diagnoses. Use when explicitly asked for "fable-mode" / "מצב פייבל", or when the task needs premise checks, competing explanations and evidence labels. Scale effort to stakes; keep simple factual answers short.
 ---
 
 # Fable Mode — Judgment, Planning, Verification, Inference

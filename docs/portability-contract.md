@@ -95,3 +95,23 @@ gate.
 Markdown link enumeration is parser-backed (markdown-it-py, CommonMark
 preset) — see the canonical-layout section for exactly what that covers and
 what is deliberately not flagged.
+
+## Codex
+
+Use the canonical skill folders through one Codex discovery path per skill.
+Existing plugin installs are valid; a second synced or manually renamed copy
+is not an upgrade. Compare content hashes before disabling a stale duplicate
+in Codex's `skills.config`; leave other agents' discovery roots intact.
+Use an explicit user-level target only when a plugin does not already expose
+the skill. Never edit plugin caches or rewrite Claude names into Codex names.
+
+Host-specific instructions stay in linked references inside the canonical
+skill. They select capabilities without changing the shared method, approval
+boundaries or other runtime adapters. Codex hooks/transcripts must not be
+assumed compatible with Claude's context guard.
+
+`tools/codex-eval/run.py` runs independent bounded, no-tools Codex shadow
+probes. Its fixture format and limits are in
+[the eval guide](codex-evals.md). These test decisions under supplied policy;
+they do not prove native skill activation, browser operation or hook support.
+Claude's existing trigger/eval runners and their defaults remain unchanged.

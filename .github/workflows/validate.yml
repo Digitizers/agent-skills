@@ -48,3 +48,5 @@ jobs:
         run: python3 tools/plugin-cache-gc/test_plugin_cache_gc.py
       - name: Test documented review polling commands
         run: python3 -m unittest discover -s skills/codex-review-loop/tests -p 'test_*.py'
+      - name: Test Codex shadow eval harness without model calls
+        run: python3 -m unittest discover -s tools/codex-eval -p 'test_*.py'
