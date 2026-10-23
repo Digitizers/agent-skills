@@ -162,6 +162,9 @@ MIT.
 
 ## Codex native install
 
+Follow [Codex onboarding](docs/codex-onboarding.md) for installation, tool
+connections, verification and migration without changing other agents.
+
 The additive `.codex-plugin/plugin.json` points at the same canonical skills.
 Use the existing `digitizer-skills` marketplace in Codex; inspect native plugin
 details to verify all ten skills. A clone or a directory link alone is not
