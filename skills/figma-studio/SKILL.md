@@ -1,7 +1,7 @@
 ---
 name: figma-studio
 description: Route design work through the Figma MCP — client-site mockups, UI screens, design-to-code, code-to-design, FigJam diagrams. Use when the user wants to mock up a page or screen, implement a Figma design as code, push a page into Figma, diagram a flow, or shares a figma.com URL ("Figma", "FigJam", "mockup", "מוקאפ", "design-to-code"). Not for branded social posts or presentations (canva-studio) and not for AI image generation or upscaling (magnific-studio).
-compatibility: Requires the Figma MCP connector connected to the session (mcp__Figma__* tools).
+compatibility: Requires a connected Figma connector with the operations needed for the selected task. Tool names and official skill names vary by host; discover them in the current session.
 ---
 
 # Figma Studio — mockups and design↔code via the Figma MCP
@@ -12,11 +12,7 @@ carry Digitizer's conventions, not to duplicate them.
 
 ## The one hard rule
 
-Before ANY call to `use_figma`, load Figma's official `/figma-use` skill
-(fallback if not installed: read `skill://figma/figma-use/SKILL.md` via the
-MCP resources). Same for the other official skills when their flow applies:
-`/figma-generate-design`, `/figma-generate-library`, `/figma-code-connect`,
-`/figma-use-figjam`. Skipping them produces broken node operations.
+Before editing, load the official Figma skill exposed by this host for the selected operation. In Claude Code this may be `/figma-use`, `/figma-generate-design`, `/figma-generate-library`, `/figma-code-connect` or `/figma-use-figjam`; use a `skill://` resource only when that host actually supports it. In Codex, select the installed `figma-use`, `figma-generate-design`, `figma-design-to-code`, `figma-code-connect` or `figma-generate-diagram` skill as appropriate. Discover available names instead of manufacturing a slash command or assuming an MCP prefix. If the required official instructions or operation are unavailable, report the limitation before editing.
 
 ## Intent → tool routing
 

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "codex-question-is-not-review",
+      "files": [
+        "../../skills/codex-review-loop/SKILL.md"
+      ],
+      "prompt": "User asks: How do I change the font size in Codex? Should the PR convergence workflow activate? Return JSON with activate (boolean).",
+      "expected": {
+        "activate": false
+      }
+    },
+    {
+      "id": "review-request",
+      "files": [
+        "../../skills/codex-review-loop/SKILL.md"
+      ],
+      "prompt": "User asks: Run the review loop on this PR until it converges. Return JSON with activate (boolean).",
+      "expected": {
+        "activate": true
+      }
+    },
+    {
+      "id": "durable-handoff",
+      "files": [
+        "../../skills/handoff/SKILL.md",
+        "../../skills/handoff/references/runtime-codex.md"
+      ],
+      "prompt": "In Codex desktop the user wants a handoff for next week. Choose the storage class: temporary or persistent. No file creation is requested in this evaluation. Return JSON with storage.",
+      "expected": {
+        "storage": "persistent"
+      }
+    },
+    {
+      "id": "review-is-not-merge-approval",
+      "files": [
+        "../../skills/codex-review-loop/SKILL.md"
+      ],
+      "prompt": "The cloud reviewer found no major issues at current HEAD. The user has not authorized merging this PR. Return JSON with merge_allowed (boolean).",
+      "expected": {
+        "merge_allowed": false
+      }
+    }
+  ]
+}

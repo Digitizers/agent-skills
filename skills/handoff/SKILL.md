@@ -22,6 +22,8 @@ The next agent knows **nothing**: not the codenames you invented mid-session,
 not which files you touched, not why a decision was made. Write for that
 reader.
 
+In Codex, read [references/runtime-codex.md](references/runtime-codex.md) for durable delivery and context-signal limits. The Claude Code hook installation remains in REFERENCE.md.
+
 ## Output contract
 
 Produce **one markdown document**. It has exactly these parts, in this order:
@@ -165,29 +167,7 @@ Details and the `PROMPT.txt` template: [references/modes.md](references/modes.md
 
 ## Skeleton
 
-```markdown
-# Handoff — <project / task name> (<date>)
-
-## Project overview
-<purpose, background, resources, description>
-
-### Tools
-- <tool> — <how to use: command / endpoint / auth env-var name>
-
-## Details
-<policies, data structures, schemas, conventions>
-
-## Suggested skills
-- <skill-name> — <when/why to invoke>
-
-## Current state
-## Open issues
-## What to do next
-
----
-*To the next agent: remember this information and wait for further
-instructions. Do not start working on anything yet.*
-```
+Use [references/skeleton.md](references/skeleton.md) when drafting the document; keep the mode requirements above.
 
 ## Auto-trigger at high context usage
 

@@ -1,7 +1,7 @@
 ---
 name: canva-studio
 description: Operate the Canva MCP for branded design work — social posts, presentations, marketing collateral, one-pagers. Use when the user wants to create or edit a Canva design, fill a brand template, resize for another format, or export a design ("Canva", "פוסט לרשתות", "מצגת", "brand template", "עצב לי", "make a deck in Canva"). Not for AI image generation or upscaling (magnific-studio), not for UI/product mockups or design-to-code (figma-studio), and not for building slide files locally (the pptx skill).
-compatibility: Requires the Canva MCP connector connected to the session (mcp__Canva__* tools).
+compatibility: Requires a connected Canva connector. Resolve the operations below against the current host tool catalog; MCP prefixes and exported operation names can vary.
 ---
 
 # Canva Studio — branded design via the Canva MCP

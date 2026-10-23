@@ -1,0 +1,5 @@
+{
+  "name": "agent-skills",
+  "description": "Portable developer workflow skills with host-specific adapters.",
+  "skills": "./skills/"
+}
