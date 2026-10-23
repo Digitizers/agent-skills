@@ -1,6 +1,9 @@
 # Digitizers Toolbox — Device Onboarding
 
-One-time setup per machine. Prereqs: git, GitHub CLI (`gh`), Claude Code v2.1.142+.
+One-time setup per machine. Shared prerequisites: git and GitHub CLI (`gh`).
+For **Claude Code**, use v2.1.142+ and follow §§1-7 below.
+For **Codex desktop / CLI**, follow [Codex onboarding](docs/codex-onboarding.md).
+Its plugin installation and MCP configuration are separate from Claude's.
 
 ## 1. GitHub auth (HTTPS)
 
