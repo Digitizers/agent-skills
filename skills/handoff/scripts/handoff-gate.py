@@ -116,7 +116,7 @@ GENERIC_CRED_LABEL_LIST = "/".join(
     k.replace("[_-]?", "_") for k in GENERIC_CRED_KEYWORDS
 )
 # An HTTP auth value carries a scheme word before the credential
-# (`Authorization: Basic ZHVtbXk6c2VjcmV0`). Without this the value group
+# (`Authorization: Basic <base64 of user:pass>`). Without this the value group
 # stopped at the space and captured "Basic", five characters, which fell
 # under the length floor and let the real credential through. The scheme is
 # its own group so the PLACEHOLDER check still sees only the value:
