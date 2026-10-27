@@ -175,3 +175,6 @@ A skill cannot watch the context window by itself — triggering above a
 usage threshold is done with a hook that measures the transcript and injects
 a reminder to invoke this skill. See [REFERENCE.md](REFERENCE.md) for the
 ready-made hook script and installation.
+A session that goes idle below the threshold is covered by the idle handoff
+(also in REFERENCE.md): a job scheduled inside the session writes the handoff
+before the prompt cache expires.

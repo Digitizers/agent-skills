@@ -265,6 +265,63 @@ undercounts".
 }
 ```
 
+### The idle handoff
+
+Neither threshold fires on idle: a session at 25% that goes quiet for the
+night gets no handoff, and Claude Code then compacts it on its own (#54). Its
+built-in "idle compaction" (`Compacted while idle, before the prompt cache
+expired`) runs at about 54 minutes idle once the context is over ~200k tokens.
+It is skipped when `"autoCompactEnabled": false` or `"idleCompaction": false`
+is set in `settings.json`.
+
+`idle-handoff.sh` writes a handoff in that gap instead. No hook runs while a
+session is idle, so it uses a job scheduled inside the session with
+`CronCreate`, which fires only while the REPL is idle and reads the
+conversation from the prompt cache. Measured on 2026-10-27: a cron-fired turn
+read 168,319 tokens from cache and wrote 39. A forked child
+(`claude --resume <id> --fork-session -p`) of the same session rewrote
+147,154, because the fork misses the cache, so a fork is not used.
+
+- On the user's first prompt, the `UserPromptSubmit` hook tells the agent to
+  create a recurring job (`13,43 * * * *`) and to record its id with
+  `idle-handoff.sh armed <session> <job>`.
+- Each check runs `idle-handoff.sh check <session>` and gets back one verdict:
+  - `WAIT`: the user prompted less than `IDLE_HANDOFF_MINUTES` (45) ago.
+  - `WRITE`: write a compaction-mode handoff, run the gate, record it with
+    `done`, and delete the job.
+  - `STOP`: a handoff was already written for this idle period, or the context
+    is under `IDLE_HANDOFF_MIN_TOKENS` (100,000). Delete the job.
+- The next user prompt re-arms the job. Prompts that the job itself enqueues
+  start with `[idle-handoff-check]` and do not count as user activity.
+- `SessionStart` with source `startup`, `resume` or `clear` forgets the job,
+  because jobs live in the process.
+
+Each check is a turn, and that turn keeps the cache warm. So the handoff, at
+45 to 75 minutes idle, is always a cache read. While the job is armed, the
+cost is two cache reads of the context per hour. After the handoff the job is
+deleted and the checks stop.
+
+Limits:
+- It needs the session open. Jobs are not written to disk.
+- It relies on the agent following injected text. Nothing enforces it.
+- `claude -p` runs are skipped, as in the other guards.
+- `IDLE_HANDOFF=0` switches it off.
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command",
+        "command": "bash /path/to/agent-skills/skills/handoff/scripts/idle-handoff.sh" } ] }
+    ],
+    "SessionStart": [
+      { "hooks": [ { "type": "command",
+        "command": "bash /path/to/agent-skills/skills/handoff/scripts/idle-handoff.sh" } ] }
+    ]
+  }
+}
+```
+
 ### A note on the gate's credential check
 
 `handoff-gate.py`'s generic credential check is a **heuristic**, not a secret
