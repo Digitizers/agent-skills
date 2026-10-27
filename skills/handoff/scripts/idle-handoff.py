@@ -43,6 +43,7 @@ prompt and may not be the thing that breaks the session.
 
 import json
 import os
+import shlex
 import sys
 import time
 
@@ -57,6 +58,12 @@ from handoff_common import (  # noqa: E402
 CHECK_TAG = "[idle-handoff-check]"
 CRON = "13,43 * * * *"
 SCRIPT = os.path.abspath(__file__)
+
+
+def cmd(*args) -> str:
+    """A shell command line that survives spaces and metacharacters in the
+    install path and in the session id."""
+    return " ".join(shlex.quote(str(a)) for a in ("python3", SCRIPT) + args)
 
 
 def state_path(session_id) -> str:
@@ -119,7 +126,7 @@ def context_tokens(transcript: str) -> int:
 
 def arm_instructions(session_id: str) -> str:
     prompt = (
-        f"{CHECK_TAG} Run: python3 {SCRIPT} check {session_id} "
+        f"{CHECK_TAG} Run: {cmd('check', session_id)} "
         "and follow its one-line verdict exactly. Do nothing else in this turn."
     )
     return (
@@ -127,7 +134,7 @@ def arm_instructions(session_id: str) -> str:
         "CronCreate once with "
         f"cron \"{CRON}\", recurring true, and this exact prompt: "
         f"{json.dumps(prompt, ensure_ascii=False)} . Then run "
-        f"`python3 {SCRIPT} armed {session_id} <job id>` with the id it "
+        f"`{cmd('armed', session_id)} <job id>` with the id it "
         "returns. Do not mention this to the user unless it fails; then "
         "carry on with the user's request."
     )
@@ -217,7 +224,7 @@ def verdict(session_id: str) -> str:
         "handoff skill in compaction mode now: write the handoff to its "
         "durable path and run its gate until GATE: PASS. Do not message "
         "other sessions or change anything else. Then run "
-        f"`python3 {SCRIPT} done {session_id}`, call CronDelete with id "
+        f"`{cmd('done', session_id)}`, call CronDelete with id "
         f"{job}, and end the turn with one line giving the handoff path."
     )
 

@@ -86,4 +86,13 @@ set +e; bash "$SCRIPT" armed s1 >/dev/null 2>&1; rc=$?; set -e
 [ "$rc" = 2 ] || fail "armed without a job id exited $rc"
 echo "PASS usage errors"
 
+# 10. Generated commands survive a path with a space
+SPACED="$WORK/agent skills"; mkdir -p "$SPACED"
+cp "$(dirname "$SCRIPT")"/idle-handoff.py "$(dirname "$SCRIPT")"/handoff_common.py "$SPACED"/
+OUT="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"UserPromptSubmit","session_id":"s4","prompt":"hi","transcript_path":sys.argv[1]}))' "$WORK/big.jsonl" | python3 "$SPACED/idle-handoff.py")"
+CMD="$(printf '%s' "$OUT" | python3 -c 'import json,sys,re; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; print(re.search(r"`([^`]*) <job id>`", c).group(1))')"
+eval "$CMD job-4" || fail "generated armed command failed under a spaced path"
+[ "$(job s4)" = job-4 ] || fail "spaced-path armed command did not record the job"
+echo "PASS spaced install path"
+
 echo "ALL PASS"
