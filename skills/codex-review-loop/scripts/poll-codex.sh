@@ -10,7 +10,10 @@
 set -u -o pipefail
 repo=$1; pr=$2; sha=$3; limit=${4:-1800}
 start=$(date +%s)
-codex_comments='[.[]|select(.user.login|test("codex"))'
+# Only this account's word counts: anyone can put "codex" in a username, and a
+# planted marker or receipt must not end the poll as clean.
+is_codex='select(.user.login=="chatgpt-codex-connector[bot]")'
+codex_comments="[.[]|$is_codex"
 # The code_review states of the summary comments for this commit, finished only.
 state="$codex_comments|.body|(try capture(\"codex-review-state:v1 (?<j>\\\\{.*\\\\}) -->\") catch null)|select(.)|(try (.j|fromjson|.code_review) catch null)|select(.)|select((.commit_sha // \"\")|startswith(\"$sha\"))|select(.status==\"completed\")]"
 receipts="$codex_comments|select(.body|test(\"Reviewed commit:\\\\*\\\\* \`$sha\"))"
@@ -41,7 +44,7 @@ while :; do
   receipt=$(count "repos/$repo/issues/$pr/comments" "$receipts]|length")
   summary=$(count "repos/$repo/issues/$pr/comments" "$state|length")
   reviews=$(count "repos/$repo/pulls/$pr/reviews" \
-    "[.[]|select(.user.login|test(\"codex\"))|select(.commit_id|startswith(\"$sha\"))]|length")
+    "[.[]|$is_codex|select(.commit_id|startswith(\"$sha\"))]|length")
   read_checks
   if { [ "$receipt" -gt 0 ] || [ "$reviews" -gt 0 ] || [ "$summary" -gt 0 ]; } && [ "$checks_state" = settled ]; then break; fi
   if [ $(( $(date +%s) - start )) -gt "$limit" ]; then echo "TIMEOUT receipt=$receipt summary=$summary reviews=$reviews checks=$checks_state"; break; fi
@@ -52,9 +55,9 @@ evidence=complete
 clean_receipts=$(count "repos/$repo/issues/$pr/comments" "$receipts|select(.body|test(\"Didn't find any major issues\"))]|length") || evidence=incomplete
 clean_summaries=$(count "repos/$repo/issues/$pr/comments" "$state|map(select(.has_any_findings==false))|length") || evidence=incomplete
 reviews=$(count "repos/$repo/pulls/$pr/reviews" \
-  "[.[]|select(.user.login|test(\"codex\"))|select(.commit_id|startswith(\"$sha\"))]|length") || evidence=incomplete
+  "[.[]|$is_codex|select(.commit_id|startswith(\"$sha\"))]|length") || evidence=incomplete
 findings=$(gh api "repos/$repo/pulls/$pr/comments" --paginate \
-  --jq ".[]|select(.user.login|test(\"codex\"))|select(.original_commit_id|startswith(\"$sha\"))|\"\(.path):\(.line // .original_line) \(.body)\"") || evidence=incomplete
+  --jq ".[]|$is_codex|select(.original_commit_id|startswith(\"$sha\"))|\"\(.path):\(.line // .original_line) \(.body)\"") || evidence=incomplete
 clean=0
 if [ "$evidence" = complete ] && { [ "$clean_receipts" -gt 0 ] || [ "$clean_summaries" -gt 0 ]; }; then clean=1; fi
 echo "head=$sha codex_reviews=$reviews clean_receipt=$clean"
