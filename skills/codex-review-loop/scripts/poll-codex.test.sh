@@ -8,8 +8,12 @@ mkdir -p "$tmp/bin"
 cat > "$tmp/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 # `gh api <path> --paginate --jq <expr>` answers from a fixture through real jq.
-# `gh pr checks` answers nothing, so no check is ever pending.
-[ "$1" = "api" ] || exit 0
+# `gh pr checks` answers from CHECKS_OUT, CHECKS_ERR and CHECKS_RC.
+if [ "$1" = "pr" ]; then
+  [ -n "${CHECKS_OUT:-}" ] && printf '%b\n' "$CHECKS_OUT"
+  [ -n "${CHECKS_ERR:-}" ] && printf '%s\n' "$CHECKS_ERR" >&2
+  exit "${CHECKS_RC:-0}"
+fi
 case "$2" in
   */issues/*/comments) f=$FIX/comments.json ;;
   */pulls/*/reviews) f=$FIX/reviews.json ;;
@@ -109,5 +113,34 @@ fixtures "$(cat "$FIX/c.json")" ""
 out=$(run 2>&1)
 check "broken marker: keeps waiting" "TIMEOUT" "$out"
 refute "broken marker: no jq error" "jq: error" "$out"
+
+# `gh --paginate --jq` answers once per page. The file holds two JSON documents,
+# so the stub's jq answers twice, as gh does: the verdict is on the second page.
+fixtures "" ""
+{ echo '[]'; printf '%s\n' "$(summary "$FULL" false completed)" | jq -s '.'; } > "$FIX/comments.json"
+out=$(run 2>&1)
+refute "second page: no timeout" "TIMEOUT" "$out"
+check "second page: clean" "clean_receipt=1" "$out"
+refute "second page: no shell error" "integer expression" "$out"
+
+# Checks: a repository with none has settled, a pending one has not, and a
+# failure to read them is neither.
+fixtures "$(summary "$FULL" false completed)" ""
+out=$(CHECKS_RC=1 CHECKS_ERR="no checks reported on the 'x' branch" run 2>&1); rc=$?
+refute "no checks: settled" "TIMEOUT" "$out"
+check "no checks: exit 0" "rc=0" "rc=$rc"
+
+out=$(CHECKS_RC=8 CHECKS_OUT='build\tpending\t0' run 2>&1)
+check "pending by exit code: keeps waiting" "TIMEOUT" "$out"
+
+out=$(CHECKS_RC=1 CHECKS_OUT='build\tfail\t1m' run 2>&1); rc=$?
+refute "failed check: settled" "TIMEOUT" "$out"
+check "failed check: listed" "build" "$out"
+check "failed check: exit 0, the list says it" "rc=0" "rc=$rc"
+
+out=$(CHECKS_RC=1 CHECKS_ERR="HTTP 502: Bad Gateway" run 2>&1); rc=$?
+check "unreadable checks: not settled" "TIMEOUT" "$out"
+check "unreadable checks: says so" "checks unreadable" "$out"
+check "unreadable checks: exit 3" "rc=3" "rc=$rc"
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
