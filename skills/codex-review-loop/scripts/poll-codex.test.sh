@@ -15,6 +15,7 @@ if [ "$1" = "pr" ]; then
   exit "${CHECKS_RC:-0}"
 fi
 case "$2" in
+  *${FAIL_PATH:-no-such-path}*) echo "HTTP 502: Bad Gateway" >&2; exit 1 ;;
   */issues/*/comments) f=$FIX/comments.json ;;
   */pulls/*/reviews) f=$FIX/reviews.json ;;
   */pulls/*/comments) f=$FIX/inline.json ;;
@@ -142,5 +143,19 @@ out=$(CHECKS_RC=1 CHECKS_ERR="HTTP 502: Bad Gateway" run 2>&1); rc=$?
 check "unreadable checks: not settled" "TIMEOUT" "$out"
 check "unreadable checks: says so" "checks unreadable" "$out"
 check "unreadable checks: exit 3" "rc=3" "rc=$rc"
+
+# A failed request for the evidence is never a clean result.
+fixtures "$(summary "$FULL" false completed)" ""
+out=$(FAIL_PATH=pulls/1/comments run 2>&1); rc=$?
+check "inline findings unreadable: says so" "evidence incomplete" "$out"
+check "inline findings unreadable: not clean" "clean_receipt=0" "$out"
+check "inline findings unreadable: exit 4" "rc=4" "rc=$rc"
+out=$(FAIL_PATH=issues/1/comments run 2>&1); rc=$?
+check "comments unreadable: exit 4" "rc=4" "rc=$rc"
+check "comments unreadable: not clean" "clean_receipt=0" "$out"
+fixtures "$(summary "$FULL" false completed)" ""
+out=$(run 2>&1); rc=$?
+check "all readable: exit 0" "rc=0" "rc=$rc"
+refute "all readable: nothing about evidence" "evidence incomplete" "$out"
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

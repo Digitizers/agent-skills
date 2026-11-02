@@ -5,8 +5,9 @@
 # review posts nothing else) the summary's completed codex-review-state marker.
 # Usage: poll-codex.sh <owner/repo> <pr> <sha7> [timeout_seconds]
 # Exit 3 when the checks could not be read, so CI's state is unknown.
+# Exit 4 when a request for the review evidence failed, so it is incomplete.
 # Tests: poll-codex.test.sh
-set -u
+set -u -o pipefail
 repo=$1; pr=$2; sha=$3; limit=${4:-1800}
 start=$(date +%s)
 codex_comments='[.[]|select(.user.login|test("codex"))'
@@ -14,7 +15,7 @@ codex_comments='[.[]|select(.user.login|test("codex"))'
 state="$codex_comments|.body|(try capture(\"codex-review-state:v1 (?<j>\\\\{.*\\\\}) -->\") catch null)|select(.)|(try (.j|fromjson|.code_review) catch null)|select(.)|select((.commit_sha // \"\")|startswith(\"$sha\"))|select(.status==\"completed\")]"
 receipts="$codex_comments|select(.body|test(\"Reviewed commit:\\\\*\\\\* \`$sha\"))"
 
-# `--paginate --jq` answers once per page, so add the pages up.
+# `--paginate --jq` answers once per page, so add the pages up. Fails when gh does.
 count() { # <api path> <jq expression>
   gh api "$1" --paginate --jq "$2" | awk '{s+=$1} END{print s+0}'
 }
@@ -46,15 +47,25 @@ while :; do
   if [ $(( $(date +%s) - start )) -gt "$limit" ]; then echo "TIMEOUT receipt=$receipt summary=$summary reviews=$reviews checks=$checks_state"; break; fi
   sleep 30
 done
-clean_receipts=$(count "repos/$repo/issues/$pr/comments" "$receipts|select(.body|test(\"Didn't find any major issues\"))]|length")
-clean_summaries=$(count "repos/$repo/issues/$pr/comments" "$state|map(select(.has_any_findings==false))|length")
+# A failed request here means the evidence is incomplete, so it cannot be clean.
+evidence=complete
+clean_receipts=$(count "repos/$repo/issues/$pr/comments" "$receipts|select(.body|test(\"Didn't find any major issues\"))]|length") || evidence=incomplete
+clean_summaries=$(count "repos/$repo/issues/$pr/comments" "$state|map(select(.has_any_findings==false))|length") || evidence=incomplete
+reviews=$(count "repos/$repo/pulls/$pr/reviews" \
+  "[.[]|select(.user.login|test(\"codex\"))|select(.commit_id|startswith(\"$sha\"))]|length") || evidence=incomplete
+findings=$(gh api "repos/$repo/pulls/$pr/comments" --paginate \
+  --jq ".[]|select(.user.login|test(\"codex\"))|select(.original_commit_id|startswith(\"$sha\"))|\"\(.path):\(.line // .original_line) \(.body)\"") || evidence=incomplete
 clean=0
-if [ "$clean_receipts" -gt 0 ] || [ "$clean_summaries" -gt 0 ]; then clean=1; fi
+if [ "$evidence" = complete ] && { [ "$clean_receipts" -gt 0 ] || [ "$clean_summaries" -gt 0 ]; }; then clean=1; fi
 echo "head=$sha codex_reviews=$reviews clean_receipt=$clean"
 [ -n "$checks_out" ] && printf '%s\n' "$checks_out" | cut -f1,2
-gh api "repos/$repo/pulls/$pr/comments" --paginate \
-  --jq ".[]|select(.user.login|test(\"codex\"))|select(.original_commit_id|startswith(\"$sha\"))|\"\(.path):\(.line // .original_line) \(.body)\""
+[ -n "$findings" ] && printf '%s\n' "$findings"
+if [ "$evidence" = incomplete ]; then
+  echo "evidence incomplete: a request for the review evidence failed"
+  exit 4
+fi
 if [ "$checks_state" = unreadable ]; then
   echo "checks unreadable: CI state unknown"
   exit 3
 fi
+exit 0
