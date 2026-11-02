@@ -6,10 +6,12 @@
 # Usage: poll-codex.sh <owner/repo> <pr> <sha7> [timeout_seconds]
 # Exit 3 when the checks could not be read, so CI's state is unknown.
 # Exit 4 when a request for the review evidence failed, so it is incomplete.
+# Exit 5 when the wait expired, with or without a verdict.
 # Tests: poll-codex.test.sh
 set -u -o pipefail
 repo=$1; pr=$2; sha=$3; limit=${4:-1800}
 start=$(date +%s)
+timed_out=0
 # Only this account's word counts: anyone can put "codex" in a username, and a
 # planted marker or receipt must not end the poll as clean.
 is_codex='select(.user.login=="chatgpt-codex-connector[bot]")'
@@ -47,7 +49,7 @@ while :; do
     "[.[]|$is_codex|select(.commit_id|startswith(\"$sha\"))]|length")
   read_checks
   if { [ "$receipt" -gt 0 ] || [ "$reviews" -gt 0 ] || [ "$summary" -gt 0 ]; } && [ "$checks_state" = settled ]; then break; fi
-  if [ $(( $(date +%s) - start )) -gt "$limit" ]; then echo "TIMEOUT receipt=$receipt summary=$summary reviews=$reviews checks=$checks_state"; break; fi
+  if [ $(( $(date +%s) - start )) -gt "$limit" ]; then echo "TIMEOUT receipt=$receipt summary=$summary reviews=$reviews checks=$checks_state"; timed_out=1; break; fi
   sleep 30
 done
 # A failed request here means the evidence is incomplete, so it cannot be clean.
@@ -71,4 +73,5 @@ if [ "$checks_state" = unreadable ]; then
   echo "checks unreadable: CI state unknown"
   exit 3
 fi
+[ "$timed_out" = 1 ] && exit 5
 exit 0

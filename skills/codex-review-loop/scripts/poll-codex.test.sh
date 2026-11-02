@@ -178,4 +178,12 @@ jq -n --argjson u "$IMPOSTOR" --arg c "$FULL" '[{user:$u, original_commit_id:$c,
 out=$(run 2>&1)
 refute "impostor inline comment: not shown" "planted finding" "$out"
 
+# An expired wait is not a finished one, even with a clean verdict in hand.
+fixtures "" ""
+out=$(run 2>&1); rc=$?
+check "no verdict by the timeout: exit 5" "rc=5" "rc=$rc"
+fixtures "$(summary "$FULL" false completed)" ""
+out=$(CHECKS_RC=8 CHECKS_OUT='build\tpending\t0' run 2>&1); rc=$?
+check "CI pending at the timeout: exit 5" "rc=5" "rc=$rc"
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
