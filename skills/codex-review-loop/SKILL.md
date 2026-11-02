@@ -87,6 +87,7 @@ Two consequences worth stating, because both have burned rounds:
 |---|---|---|
 | **Has findings** | a PR **review** + inline **review-comments** | `pulls/N/reviews` + `pulls/N/comments` |
 | **Clean** ("Didn't find any major issues") | a top-level **issue comment** — *no* review object, *no* `commit_id`, *no* inline comment | `issues/N/comments` |
+| **Clean, summary only** | a `codex-pull-request-review-summary` issue comment whose `codex-review-state:v1` marker has the commit's `commit_sha`, `status: completed`, `has_any_findings: false` — no receipt comment at all | `issues/N/comments` |
 
 A clean pass emits **only** an issue comment. If your poll watches `pulls/N/reviews` for a HEAD-matching `commit_id`, a clean PR reads as **"never reviewed" forever** — you'll re-trigger endlessly and wrongly conclude Codex is down/rate-capped. **Convergence requires EITHER** (a) an `issues/N/comments` Codex comment from the current review round matching `/didn.t find any major issues/i` whose explicit `Reviewed commit` resolves to current HEAD — *the clean signal* — **or** (b) a `reviews` entry at HEAD whose inline findings you have actually **enumerated and triaged**. Never gate convergence on the `/reviews` surface alone.
 
@@ -270,5 +271,7 @@ Measure, don't assume — but measure the moment the round becomes **readable**,
 If a push isn't auto-re-reviewed (Codex reviews reliably on PR-open, less so on later pushes), re-trigger with a `@codex review` comment.
 
 **A single poll never decides the round.** Because of the review-object/inline-comment race above, one poll showing "review at HEAD, no inline findings" is indistinguishable from "the findings haven't posted yet." Treat a round as read **only** after a current-round clean verdict naming current HEAD, or after actual findings from the current HEAD review have arrived and two complete polls (≥90 s apart) are stable. Repeated empty results never complete a suggestions-wrapper review; errors, missing pages, or changed HEAD invalidate the poll. See [Convergence](#convergence) for the required triage and final re-fetch.
+
+[`scripts/poll-codex.sh`](scripts/poll-codex.sh) `<owner/repo> <pr> <sha7> [timeout_seconds]` waits for a verdict in any of these forms and for CI to settle, then prints the verdict, the checks and the inline findings on that commit. Run it in the background. It answers "has a verdict arrived", not "is the round stable": the rule above still applies to a findings run.
 
 See [REFERENCE.md](REFERENCE.md) for the exact gh commands — verify-vs-HEAD, the three finding surfaces, triggering, reacting — and a worked round.
