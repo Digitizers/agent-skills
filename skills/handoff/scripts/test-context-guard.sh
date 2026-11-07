@@ -836,4 +836,14 @@ OUT="$(run_guard "$WORK/in-pca.json")"
 echo "$OUT" | grep -q "smaller than" || fail "a size-driven auto compaction lost its window warning: $OUT"
 echo "PASS a busy auto compaction still reports a smaller window"
 
+# #57. The stop message splits the figure into measured and estimated, and
+#      when the estimated share is large it says to trust the status line.
+mk_transcript "$WORK/split.jsonl" 160000
+printf '{"type":"user","message":{"content":"%s"}}\n' "$(head -c 40000 /dev/zero | tr '\0' a)" >> "$WORK/split.jsonl"
+printf '{"transcript_path":"%s","session_id":"cg-test-split","hook_event_name":"UserPromptSubmit"}' "$WORK/split.jsonl" > "$WORK/in-split.json"
+OUT="$(CLAUDE_CODE_SESSION_ATTENDED=1 run_guard "$WORK/in-split.json")"
+echo "$OUT" | grep -q "160000 measured at the last model call" || fail "the stop message lacks the measured share: $OUT"
+echo "$OUT" | grep -q "trust the status line" || fail "a large estimated share does not point to the status line: $OUT"
+echo "PASS the stop message splits measured and estimated tokens"
+
 echo "all context-guard tests passed"
