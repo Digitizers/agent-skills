@@ -306,7 +306,12 @@ def main() -> None:
             json.dumps(tool_response, ensure_ascii=False)
         )
 
-    tokens += tail_tokens + payload_tokens
+    # #57: say how much of the figure was measured and how much estimated, so
+    # a reader can check a surprising alarm against the status line instead
+    # of stopping work on a number nobody can verify.
+    measured_tokens = tokens
+    estimated_tokens = tail_tokens + payload_tokens
+    tokens += estimated_tokens
 
     declared = model_windows.get(latest_model)
     if declared:
@@ -428,8 +433,18 @@ def main() -> None:
     else:
         msg = (
             f"Context window is at ~{pct:.0f}% of {window} tokens (~{tokens} "
-            f"used, estimated), past the {fired:.0f}% {fired_name} threshold. "
+            f"used, estimated), past the {fired:.0f}% {fired_name} threshold "
+            f"(~{measured_tokens} measured at the last model call + "
+            f"~{estimated_tokens} estimated since). "
         )
+        if estimated_tokens > window * 0.05:
+            # #57: a large estimated share is the byte floor at work and can
+            # overcount by far; the status line shows the real figure.
+            msg += (
+                "Most of the jump since the last model call is estimated, and "
+                "the estimate is a deliberate overcount: if the status line "
+                "shows a lower figure, trust the status line. "
+            )
     if not below_threshold and inferred:
         msg += (
             f"{window} is the smallest window this transcript proves (a lower "
